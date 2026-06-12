@@ -518,6 +518,7 @@ namespace NQOrderFlowV1.Zones
             };
         }
 
+
         private static decimal GetOverlapRatioByMinRange(decimal low1, decimal high1, decimal low2, decimal high2)
         {
             if (low1 > high1) (low1, high1) = (high1, low1);
