@@ -1,0 +1,4 @@
+﻿[*.cs]
+
+# IDE0160: 转换为块范围限定的 namespace
+dotnet_diagnostic.IDE0160.severity = warning
