@@ -518,7 +518,16 @@ namespace NQOrderFlowV1.Strategy
         }
         else
         {
-            // MarketClose: always enter at bar close (consistent backtest/live)
+            // MarketClose: live mode - submit real market order
+            // Replay/backtest: market orders will not fill, use virtual entry
+            bool isBacktest = Portfolio == null || string.Equals(Portfolio.ToString(), "Replay", StringComparison.OrdinalIgnoreCase);
+            if (!isBacktest && EnableLiveOrders)
+            {
+                HandleLiveMarketExecution(bar, cur, zone, usedShadow, isLong, side, qLock, halfTick);
+                return;
+            }
+
+            // Backtest/virtual: enter at bar close immediately
             var entry = cur.Close;
 
             if (EnableAntiChaseFilter)
