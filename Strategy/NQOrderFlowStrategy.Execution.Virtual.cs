@@ -66,7 +66,28 @@ namespace NQOrderFlowV1.Strategy
             else
             {
                 if (_planState == PlanState.InPosition && _activePlan is not null && _activePlan.ExitBar is null)
+                {
+                    // MarketClose: check SL/TP virtually (no ATAS bracket orders)
+                    if (EntryMode != EntryExecutionMode.LimitAtZoneAnchor)
+                    {
+                        var plan = _activePlan;
+                        if (plan.Side == "LONG")
+                        {
+                            if (cur.Low <= plan.Stop)
+                                ExitPlan(bar, "SL Hit", exitPrice: plan.Stop);
+                            else if (cur.High >= plan.Target)
+                                ExitPlan(bar, "TP Hit", exitPrice: plan.Target);
+                        }
+                        else
+                        {
+                            if (cur.High >= plan.Stop)
+                                ExitPlan(bar, "SL Hit", exitPrice: plan.Stop);
+                            else if (cur.Low <= plan.Target)
+                                ExitPlan(bar, "TP Hit", exitPrice: plan.Target);
+                        }
+                    }
                     MaybeMoveBreakEven(bar, cur, _activePlan);
+                }
             }
 
             if (_planState != PlanState.Flat)
