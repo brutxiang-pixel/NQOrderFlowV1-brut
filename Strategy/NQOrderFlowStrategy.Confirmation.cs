@@ -553,7 +553,7 @@ namespace NQOrderFlowV1.Strategy
             _ofDirMismatchLogged = false;
             _ofArmedText = "-";
             _pendingEntry = null;
-            _retraceEntryBar = -1;
+            //_retraceEntryBar = -1;
 
             _lockedZoneQualityScore = -1;
             _lockedZoneQualityDetail = "-";

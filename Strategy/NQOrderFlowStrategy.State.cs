@@ -236,6 +236,8 @@ namespace NQOrderFlowV1.Strategy
     private int _ofArmedBullWeight = 0;
     private int _ofArmedBearWeight = 0;
     private bool _ofDirMismatchLogged = false;
+    private int _mismatchCount = 0;
+    private string _mismatchDir = "";  // "BULL"/"BEAR" - OF方向 during consecutive mismatch
         private string _ofArmedText = "-";
 
         // =========================
@@ -343,7 +345,7 @@ namespace NQOrderFlowV1.Strategy
         private int _cooldownUntilBar = -1;
         private int _lastTriggeredConfirmStartBar = -1;
         private ZoneKey? _lastTriggeredZoneKey;
-        private int _retraceEntryBar = -1;
+        //private int _retraceEntryBar = -1;
         private int _htfBosHtfIndex = -1;
 
         private sealed class TradePlan

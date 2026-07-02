@@ -220,38 +220,67 @@ namespace NQOrderFlowV1.Strategy
             // ===== Armed -> 执行 =====
  
             // ===== OF方向与交易方向一致性检查 =====
+
             if (_lastOrderFlow is not null)
             if (_ofArmed)
             {
                 var ofBull = _ofArmedBullWeight;
                 var ofBear = _ofArmedBearWeight;
+
+                // OF方向与HTF一致 -> 重置连续MISMATCH计数
+                if ((isLong && ofBull >= ofBear) || (!isLong && ofBear >= ofBull))
+                {
+                    if (_mismatchCount > 0)
+                    {
+                        AppendLog($"OF_MISMATCH_RESET bar={bar} count={_mismatchCount} dir={_mismatchDir} -> bias aligned");
+                        _mismatchCount = 0;
+                        _mismatchDir = "";
+                    }
+                }
+
                 if (isLong && ofBear > ofBull)
                 {
-                    // 去重：同一次 armed 周期内仅首次记录
-                    var mismatchSide = "LONG";
-                    if (!_ofDirMismatchLogged)
+                    if (_mismatchDir != "BEAR") { _mismatchCount = 1; _mismatchDir = "BEAR"; }
+                    else { _mismatchCount++; }
+
+                    if (_mismatchCount >= 3)
                     {
-                        _ofDirMismatchLogged = true;
-                        AppendLog($"OF_DIR_MISMATCH bar={bar} side={mismatchSide} bullWeight={ofBull} bearWeight={ofBear} -> skip (suppressed further)");
+                        AppendLog($"OF_BEAR_SOFTEN bar={bar} n={_mismatchCount} -> skip mismatch, allow entry");
                     }
-                    SetBlock(bar, TriggerBlockReason.EntryTooFarFromZone,
-                        $"OF方向与交易方向相反: LONG但OF偏空(Bull={ofBull} Bear={ofBear}) -> 跳过本K线");
-                    return;
+                    else
+                    {
+                        if (!_ofDirMismatchLogged)
+                        {
+                            _ofDirMismatchLogged = true;
+                            AppendLog($"OF_DIR_MISMATCH bar={bar} side=LONG bull={ofBull} bear={ofBear} n={_mismatchCount} -> skipped");
+                        }
+                        SetBlock(bar, TriggerBlockReason.EntryTooFarFromZone,
+                            $"OF方向相反: LONG但OF偏空(Bull={ofBull} Bear={ofBear}) n={_mismatchCount}");
+                        return;
+                    }
                 }
                 if (!isLong && ofBull > ofBear)
                 {
-                    // 去重：同一次 armed 周期内仅首次记录
-                    if (!_ofDirMismatchLogged)
+                    if (_mismatchDir != "BULL") { _mismatchCount = 1; _mismatchDir = "BULL"; }
+                    else { _mismatchCount++; }
+
+                    if (_mismatchCount >= 3)
                     {
-                        _ofDirMismatchLogged = true;
-                        AppendLog($"OF_DIR_MISMATCH bar={bar} side=SHORT bullWeight={ofBull} bearWeight={ofBear} -> skip (suppressed further)");
+                        AppendLog($"OF_BULL_SOFTEN bar={bar} n={_mismatchCount} -> skip mismatch, allow entry");
                     }
-                    SetBlock(bar, TriggerBlockReason.EntryTooFarFromZone,
-                        $"OF方向与交易方向相反: SHORT但OF偏多(Bull={ofBull} Bear={ofBear}) -> 跳过本K线");
-                    return;
+                    else
+                    {
+                        if (!_ofDirMismatchLogged)
+                        {
+                            _ofDirMismatchLogged = true;
+                            AppendLog($"OF_DIR_MISMATCH bar={bar} side=SHORT bull={ofBull} bear={ofBear} n={_mismatchCount} -> skipped");
+                        }
+                        SetBlock(bar, TriggerBlockReason.EntryTooFarFromZone,
+                            $"OF方向相反: SHORT但OF偏多(Bull={ofBull} Bear={ofBear}) n={_mismatchCount}");
+                        return;
+                    }
                 }
             }
- 
             if (EntryMode == EntryExecutionMode.LimitAtZoneAnchor)
             {
                 // Stage B LIVE branch
