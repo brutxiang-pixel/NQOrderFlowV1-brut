@@ -13,7 +13,9 @@ namespace NQOrderFlowV1.Engines
         DeltaDivergence = 1 << 0,
         Absorption = 1 << 1,
         ExtremeDelta = 1 << 2,
-        Imbalance = 1 << 3
+        Imbalance = 1 << 3,
+        DeltaMomentum = 1 << 4,
+        VolumeSpike = 1 << 5
     }
 
     public sealed class OrderFlowResult
@@ -27,22 +29,37 @@ namespace NQOrderFlowV1.Engines
             get
             {
                 var c = Conditions;
-                var score = 0;
-                if (c.HasFlag(OrderFlowCondition.DeltaDivergence)) score++;
-                if (c.HasFlag(OrderFlowCondition.Absorption)) score++;
-                if (c.HasFlag(OrderFlowCondition.ExtremeDelta)) score++;
-                if (c.HasFlag(OrderFlowCondition.Imbalance)) score++;
-                return score;
+                var raw = 0;
+                // ÖØÁ¿¼Æ·Ö£ºÃ¿¸öÌõ¼þ°´ÖØÒªÐÔ¸³È¨
+                if (c.HasFlag(OrderFlowCondition.DeltaDivergence)) raw += 3;  // 最强：价格+delta分歧 = 反转信号
+                if (c.HasFlag(OrderFlowCondition.Imbalance)) raw += 2;        // 强：价位级失衡
+                if (c.HasFlag(OrderFlowCondition.DeltaMomentum)) raw += 2;    // 强：持续方向delta
+                if (c.HasFlag(OrderFlowCondition.ExtremeDelta)) raw += 1;     // 中：单K大delta
+                if (c.HasFlag(OrderFlowCondition.Absorption)) raw += 1;       // 中：吸收，但易噪声
+                if (c.HasFlag(OrderFlowCondition.VolumeSpike)) raw += 1;      // 弱：单独量的意义有限
+
+                var totalDir = BullWeight + BearWeight;
+                if (totalDir > 0)
+                {
+                    var majority = Math.Max(BullWeight, BearWeight);
+                    var minority = Math.Min(BullWeight, BearWeight);
+                    if (minority > 0 && majority / (decimal)minority < 2m)
+                        raw = raw / 2;
+                }
+
+                return Math.Max(0, raw);
             }
         }
 
         public string Text { get; init; } = "-";
+        public int BullWeight { get; init; }
+        public int BearWeight { get; init; }
     }
 
     /// <summary>
     /// 订单流触发层（V1：只做四选二的条件识别与评分，不下单）
     ///
-    /// 四个条件（简化版，可跑通后再逐步增强）：
+    /// 六个条件（V2：新增DeltaMomentum + VolumeSpike）
     /// 1) Delta Divergence（简化：与前一根对比）
     /// 2) Absorption（简化：最大单边Bid/Ask占比 + 价格未延续）
     /// 3) Extreme Delta（简化：|Delta| 占比足够大，且K线反向/不延续）
@@ -91,6 +108,7 @@ namespace NQOrderFlowV1.Engines
 
             var conditions = OrderFlowCondition.None;
             var notes = new List<string>(4);
+            int bullWeight = 0, bearWeight = 0;
 
             // 1) Delta Divergence（简化：与前一根对比）
             if (prev is not null)
@@ -99,11 +117,13 @@ namespace NQOrderFlowV1.Engines
                 {
                     conditions |= OrderFlowCondition.DeltaDivergence;
                     notes.Add("ΔDiv(Bull)");
+                    bullWeight += 3;
                 }
                 else if (IsBearishDeltaDivergence(cur, prev))
                 {
                     conditions |= OrderFlowCondition.DeltaDivergence;
                     notes.Add("ΔDiv(Bear)");
+                    bearWeight += 3;
                 }
             }
 
@@ -112,6 +132,7 @@ namespace NQOrderFlowV1.Engines
             {
                 conditions |= OrderFlowCondition.Absorption;
                 notes.Add(absorptionNote);
+                if (absorptionNote.StartsWith("Absorb(Bid")) bullWeight += 1; else bearWeight += 1;
             }
 
             // 3) Extreme Delta（简化）
@@ -119,6 +140,7 @@ namespace NQOrderFlowV1.Engines
             {
                 conditions |= OrderFlowCondition.ExtremeDelta;
                 notes.Add(extremeNote);
+                if (extremeNote.Contains("BuyAbs")) bullWeight += 1; else if (extremeNote.Contains("SellAbs")) bearWeight += 1;
             }
 
             // 4) Volume Imbalance（价位级）
@@ -126,6 +148,22 @@ namespace NQOrderFlowV1.Engines
             {
                 conditions |= OrderFlowCondition.Imbalance;
                 notes.Add(imbalanceNote);
+                if (imbalanceNote.StartsWith("Imb(Buy")) bullWeight += 2; else bearWeight += 2;
+            }
+
+            // 5) Delta Momentum（连续3根同向Delta）
+            if (TryDetectDeltaMomentum(cur, prev, bar, out var deltaMomNote))
+            {
+                conditions |= OrderFlowCondition.DeltaMomentum;
+                notes.Add(deltaMomNote);
+                if (deltaMomNote.StartsWith("DeltaMom(Bull")) bullWeight += 2; else bearWeight += 2;
+            }
+
+            // 6) Volume Spike（相对前10根放量 >= 1.5x）
+            if (TryDetectVolumeSpike(cur, bar, out var volSpikeNote))
+            {
+                conditions |= OrderFlowCondition.VolumeSpike;
+                notes.Add(volSpikeNote);
             }
 
             var text = notes.Count == 0 ? "-" : string.Join(" | ", notes);
@@ -134,7 +172,9 @@ namespace NQOrderFlowV1.Engines
             {
                 Bar = bar,
                 Conditions = conditions,
-                Text = text
+                Text = text,
+                BullWeight = bullWeight,
+                BearWeight = bearWeight
             };
         }
 
@@ -287,6 +327,50 @@ namespace NQOrderFlowV1.Engines
             if (x < 0m) return 0m;
             if (x > 1m) return 1m;
             return x;
+        }
+
+        private bool TryDetectDeltaMomentum(IndicatorCandle cur, IndicatorCandle? prev, int bar, out string note)
+        {
+            note = string.Empty;
+            if (prev is null || bar < 2) return false;
+            var prevPrev = _getCandle(bar - 2);
+            if (prevPrev is null) return false;
+            if (cur.Delta > 0 && prev.Delta > 0 && prevPrev.Delta > 0)
+            {
+                note = $"DeltaMom(Bull {cur.Delta:0}/{prev.Delta:0}/{prevPrev.Delta:0})";
+                return true;
+            }
+            if (cur.Delta < 0 && prev.Delta < 0 && prevPrev.Delta < 0)
+            {
+                note = $"DeltaMom(Bear {cur.Delta:0}/{prev.Delta:0}/{prevPrev.Delta:0})";
+                return true;
+            }
+            return false;
+        }
+
+        private bool TryDetectVolumeSpike(IndicatorCandle cur, int bar, out string note)
+        {
+            note = string.Empty;
+            if (cur.Volume <= 0 || bar < 10) return false;
+            decimal sum = 0;
+            int count = 0;
+            for (int i = Math.Max(0, bar - 10); i < bar; i++)
+            {
+                var c = _getCandle(i);
+                if (c is null) continue;
+                sum += c.Volume;
+                count++;
+            }
+            if (count < 5) return false;
+            var avg = sum / count;
+            if (avg <= 0) return false;
+            var ratio = cur.Volume / avg;
+            if (ratio >= 1.5m)
+            {
+                note = $"VolSpike(x{ratio:0.0})";
+                return true;
+            }
+            return false;
         }
     }
 }

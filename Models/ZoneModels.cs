@@ -33,6 +33,7 @@
             /// 价格是否触碰过该区块（与区间发生重叠即触碰）
             /// </summary>
             public bool IsTouched { get; set; }
+            public int TouchCount { get; set; }
 
             /// <summary>
             /// 缓解/回补状态（用于 FVG：触及 50% 记为已缓解，但不一定失效移除）

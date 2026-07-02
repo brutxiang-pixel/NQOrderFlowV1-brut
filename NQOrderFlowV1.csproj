@@ -35,6 +35,9 @@
 			<HintPath>$(ATASPlatformDir)\OFT.Rendering.dll</HintPath>
 			<Private>false</Private>
 		</Reference>
+		<Reference Include="Utils.Common">
+			<HintPath>$(ATASPlatformDir)\Utils.Common.dll</HintPath>
+		</Reference>
 	</ItemGroup>
 
 	<Target Name="CopyToATAS" AfterTargets="Build">

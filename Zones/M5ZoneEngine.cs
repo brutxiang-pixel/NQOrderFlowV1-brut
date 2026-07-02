@@ -27,6 +27,7 @@ namespace NQOrderFlowV1.Zones
 
         private readonly List<TradingZone> _zones = new();
         private int _lastProcessedBar = -1;
+        private readonly Dictionary<(ZoneType Type, int StartBar, decimal Low, decimal High), int> _zoneInvalidBars = new();
 
         // Mitigation: 50%
         private const decimal FvgMitigationPercent = 0.50m;
