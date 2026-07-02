@@ -43,6 +43,24 @@ namespace NQOrderFlowV1.Strategy
             }
             _lastCandleTime = cur.Time;
 
+            // 数据断层检测：超过30分钟的K线间隔视为数据断层
+            if (_lastCandleTime != default)
+            {
+                var gap = (cur.Time - _lastCandleTime).TotalMinutes;
+                if (gap > 30)
+                {
+                    _lastCandleTime = cur.Time;
+                    AppendLog($"GAP_DETECTED bar={bar} gapMinutes={gap:F0} close={cur.Close:0.########} -> skip");
+                    return;
+                }
+            }
+            // 价格断层检测：超过500点的K线范围视为数据异常
+            if (cur.High - cur.Low > 500m)
+            {
+                _lastCandleTime = cur.Time;
+                AppendLog($"PRICE_GAP_DETECTED bar={bar} range={cur.High - cur.Low:F0}pts close={cur.Close:0.########} -> skip");
+                return;
+            }
             EnsureLogInitialized();
             EnsureInstrumentRulesInitialized(bar, "OnCalculate");
 
@@ -224,6 +242,7 @@ namespace NQOrderFlowV1.Strategy
             _lastM5StructureSnapshot = null;
 
             _planState = PlanState.Flat;
+            _lastCandleTime = default;
             _activePlan = null;
 
             _cooldownUntilBar = -1;

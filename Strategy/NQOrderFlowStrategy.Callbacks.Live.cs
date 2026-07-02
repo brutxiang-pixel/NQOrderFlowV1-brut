@@ -172,6 +172,7 @@ namespace NQOrderFlowV1.Strategy
         protected override void OnStarted()
         {
             base.OnStarted();
+            _lastCandleTime = default;
 
             // 确保日志已初始化（否则启动时AppendLog可能没路径）
             EnsureLogInitialized();
