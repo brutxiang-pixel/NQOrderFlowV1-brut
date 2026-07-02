@@ -518,14 +518,7 @@ namespace NQOrderFlowV1.Strategy
         }
         else
         {
-            // Stage B LIVE branch
-            if (EnableLiveOrders)
-            {
-                HandleLiveMarketExecution(bar, cur, zone, usedShadow, isLong, side, qLock, halfTick);
-                return;
-            }
-
-            // Virtual: MarketClose - enter at current bar close
+            // MarketClose: always enter at bar close (consistent backtest/live)
             var entry = cur.Close;
 
             if (EnableAntiChaseFilter)
