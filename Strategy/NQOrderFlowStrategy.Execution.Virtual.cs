@@ -516,6 +516,108 @@ namespace NQOrderFlowV1.Strategy
                 _lastTriggeredZoneKey = _confirmZoneKey;
 
         }
+        else
+        {
+            // Stage B LIVE branch
+            if (EnableLiveOrders)
+            {
+                HandleLiveMarketExecution(bar, cur, zone, usedShadow, isLong, side, qLock, halfTick);
+                return;
+            }
+
+            // Virtual: MarketClose - enter at current bar close
+            var entry = cur.Close;
+
+            if (EnableAntiChaseFilter)
+            {
+                var thTicks = GetMaxEntryDistanceTicksIfSet();
+                if (thTicks > 0)
+                {
+                    var distTicks = GetDistanceToRangeTicks(bar, entry, zone.Low, zone.High);
+                    if (distTicks > thTicks + 0.5m)
+                    {
+                        SetBlock(bar, TriggerBlockReason.EntryTooFarFromZone,
+                            $"防追价(mkt,ticks)：entryDist={distTicks:0.##}t > {thTicks}t | entry={entry:0.########} zone={zone.Low:0.########}-{zone.High:0.########} -> cancel+reset");
+                        AppendLog($"ENTRY_ORDER_CANCEL bar={bar} reason=AntiChase entryDistTicks={distTicks:0.##} thTicks={thTicks} entry={entry:0.########} zone={zone.ToShortText()} -> reset confirm");
+                        ResetConfirm(bar, "防追价(mkt-ticks)");
+                        _phase = ConfirmPhase.WaitZoneTouch;
+                        return;
+                    }
+                }
+                else
+                {
+                    var maxDistPts = Math.Max(0m, MaxEntryDistanceFromZonePoints);
+                    if (maxDistPts > 0m)
+                    {
+                        var distPts = GetDistanceToRangePoints(entry, zone.Low, zone.High);
+                        if (distPts > maxDistPts + halfTick)
+                        {
+                            SetBlock(bar, TriggerBlockReason.EntryTooFarFromZone,
+                                $"防追价(mkt,legacy)：entryDist={distPts:0.00}pt > {maxDistPts:0.##}pt | entry={entry:0.########} zone={zone.Low:0.########}-{zone.High:0.########} -> cancel+reset");
+                            AppendLog($"ENTRY_ORDER_CANCEL bar={bar} reason=AntiChase entryDist={distPts:0.00}pt max={maxDistPts:0.##}pt entry={entry:0.########} zone={zone.ToShortText()} -> reset confirm");
+                            ResetConfirm(bar, "防追价(mkt)");
+                            _phase = ConfirmPhase.WaitZoneTouch;
+                            return;
+                        }
+                    }
+                }
+            }
+
+            if (!TrySelectStop(
+                    bar,
+                    isLong,
+                    entry,
+                    zone,
+                    usedShadow,
+                    out var stop,
+                    out var stopSource,
+                    out var riskTicks,
+                    out var riskPoints,
+                    out var failReason,
+                    out var failDetail))
+            {
+                switch (failReason)
+                {
+                    case StopSelectFailReason.TooSmall:
+                        SetBlock(bar, TriggerBlockReason.RiskTicksTooSmall, failDetail);
+                        break;
+                    case StopSelectFailReason.TooLarge:
+                    case StopSelectFailReason.MixedOutOfRange:
+                        SetBlock(bar, TriggerBlockReason.RiskTicksTooLarge, failDetail);
+                        break;
+                    default:
+                        SetBlock(bar, TriggerBlockReason.RiskInvalid, failDetail);
+                        break;
+                }
+                return;
+            }
+
+            stop = AlignStopToTick(stop, isLong, bar);
+            var target = ComputeTargetFromRiskTicks(entry, isLong, riskTicks, RiskRewardR, bar);
+            target = AlignTargetToTick(target, isLong, bar);
+
+            _activePlan = new TradePlan
+            {
+                CreatedBar = bar,
+                Side = side,
+                Entry = entry,
+                Stop = stop,
+                Target = target,
+                InitialStop = stop,
+                InitialRiskPoints = riskPoints,
+                Zone = _confirmZoneKey,
+                OfScore = _ofArmedScore,
+                OfText = _ofArmedText
+            };
+
+            _planState = PlanState.InPosition;
+
+            AppendLog($"ENTRY_ORDER_FILLED bar={bar} side={side} entry={entry:0.########} mode=VIRTUAL_MARKET -> PLAN_CREATE");
+            AppendLog($"PLAN_CREATE bar={bar} side={side} entry={entry:0.########} stop={stop:0.########} tp={target:0.########} riskTicks={riskTicks} of={_activePlan.OfScore}/4 zone={FormatZoneKeyCN(_activePlan.Zone)} src={stopSource} qLock={(qLock < 0 ? "-" : qLock.ToString())}/10 mode=VIRTUAL_MARKET");
+
+            _lastTriggeredConfirmStartBar = _confirmStartBar;
+            _lastTriggeredZoneKey = _confirmZoneKey;
+        }
         }
 
         // =========================
