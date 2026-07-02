@@ -1,4 +1,4 @@
-﻿using ATAS.DataFeedsCore;
+using ATAS.DataFeedsCore;
 using ATAS.Indicators;
 using ATAS.Strategies;
 using ATAS.Strategies.Chart;
@@ -185,6 +185,10 @@ namespace NQOrderFlowV1.Strategy
             _tradeLosses = 0;
             _netR = 0m;
             _netPnLDollar = 0m;
+            // 新轮次重置持仓状态（ATAS跨日期时不自动重置）
+            _planState = PlanState.Flat;
+            _activePlan = null;
+            _live = null;
 
             AppendLog($"ON_STARTED state={State} " +
                       $"portfolio={(Portfolio is null ? "null" : Portfolio.ToString())} " +
