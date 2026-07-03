@@ -1,4 +1,4 @@
-﻿// Strategy/NQOrderFlowStrategy.Execution.Live.cs
+// Strategy/NQOrderFlowStrategy.Execution.Live.cs
 using ATAS.DataFeedsCore;
 using ATAS.Indicators;
 using ATAS.Strategies;

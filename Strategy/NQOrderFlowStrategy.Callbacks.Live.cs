@@ -496,7 +496,7 @@ namespace NQOrderFlowV1.Strategy
                 }
                 else
                 {
-                    ExitPlan(exitBar, reason, exitPrice);
+                    ExitPlan(exitBar, reason, exitPrice, exitTime: t.Time);
                 }
 
                 AppendLog($"LIVE_TRADE_DONE tradeId={_live.TradeId} reason={reason} exit={exitPrice:0.########} exitFilled={_live.ExitFilledQty:0.########}/{_live.BracketQty:0.########}");

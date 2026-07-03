@@ -980,7 +980,7 @@ namespace NQOrderFlowV1.Strategy
             }
         }
 
-        private void ExitPlan(int bar, string reason, decimal exitPrice, DateTime? exitTime = null)
+        private void ExitPlan(int bar, string reason, decimal exitPrice, DateTime exitTime)
         {
             if (_activePlan is null)
                 return;
@@ -1016,7 +1016,7 @@ skipHudSummary:
         }
 
 
-        private void TryWriteTradeCsv(int bar, decimal exitPrice, DateTime? exitTime = null)
+        private void TryWriteTradeCsv(int bar, decimal exitPrice, DateTime exitTime)
         {
             try
             {
@@ -1032,7 +1032,7 @@ skipHudSummary:
                 var tSz = GetTickSize(bar, "csv.pnl");
                 var pnlDollar = tSz > 0m ? Math.Round(r * (risk / tSz) * (TickValuePerContract <= 0m ? 0.5m : TickValuePerContract) * Math.Max(1, Contracts), (int)2) : 0m;
                 var csvLine = string.Join(",",
-                    (exitTime ?? DateTime.Now).ToString("yyyy-MM-dd HH:mm:ss"),
+                    exitTime.ToString("yyyy-MM-dd HH:mm:ss"),
                     bar.ToString(),
                     plan.Side,
                     plan.Entry.ToString("F2"),
