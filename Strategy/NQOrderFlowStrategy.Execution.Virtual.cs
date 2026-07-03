@@ -1053,7 +1053,7 @@ skipHudSummary:
                 if (!exists) System.IO.File.AppendAllText(csvPath, "Time,Bar,Side,Entry,Stop,TP,ExitPrice,ExitReason,RiskPts,R,PnL$,Mode,OFScore,OFText,ZoneType,ZoneLow,ZoneHigh" + System.Environment.NewLine);
                 System.IO.File.AppendAllText(csvPath, csvLine + System.Environment.NewLine);
             }
-            catch { }
+            catch (Exception ex) { AppendLog($"CSV_WRITE_ERR bar={bar} err={ex.ToString()}"); }
         }
         private void AddTradeRecord(TradePlan plan, int exitBar, decimal exitPrice, string exitReason)
         {
