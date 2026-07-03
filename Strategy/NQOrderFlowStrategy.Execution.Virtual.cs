@@ -1029,6 +1029,8 @@ skipHudSummary:
                 var risk = Math.Abs(plan.Entry - plan.InitialStop);
                 if (risk <= 0m) risk = plan.InitialRiskPoints;
                 var r = risk > 0m ? (plan.Side == "LONG" ? (exitPrice - plan.Entry) / risk : (plan.Entry - exitPrice) / risk) : 0m;
+                var tSz = GetTickSize(bar, "csv.pnl");
+                var pnlDollar = tSz > 0m ? Math.Round(r * (risk / tSz) * (TickValuePerContract <= 0m ? 0.5m : TickValuePerContract) * Math.Max(1, Contracts), (int)2) : 0m;
                 var csvLine = string.Join(",",
                     (exitTime ?? DateTime.Now).ToString("yyyy-MM-dd HH:mm:ss"),
                     bar.ToString(),
@@ -1040,6 +1042,7 @@ skipHudSummary:
                     plan.ExitReason ?? "-",
                     risk.ToString("F2"),
                     r.ToString("F2"),
+                    pnlDollar.ToString("F2"),
                     mode,
                     plan.OfScore.ToString(),
                     "\"\"" + plan.OfText + "\"\"",
@@ -1047,7 +1050,7 @@ skipHudSummary:
                     plan.Zone.Low.ToString("F2"),
                     plan.Zone.High.ToString("F2")
                 );
-                if (!exists) System.IO.File.AppendAllText(csvPath, "Time,Bar,Side,Entry,Stop,TP,ExitPrice,ExitReason,RiskPts,R,Mode,OFScore,OFText,ZoneType,ZoneLow,ZoneHigh" + System.Environment.NewLine);
+                if (!exists) System.IO.File.AppendAllText(csvPath, "Time,Bar,Side,Entry,Stop,TP,ExitPrice,ExitReason,RiskPts,R,PnL$,Mode,OFScore,OFText,ZoneType,ZoneLow,ZoneHigh" + System.Environment.NewLine);
                 System.IO.File.AppendAllText(csvPath, csvLine + System.Environment.NewLine);
             }
             catch { }
