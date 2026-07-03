@@ -1,4 +1,4 @@
-﻿using ATAS.DataFeedsCore;
+using ATAS.DataFeedsCore;
 using ATAS.Indicators;
 using ATAS.Strategies;
 using ATAS.Strategies.Chart;
@@ -232,12 +232,14 @@ namespace NQOrderFlowV1.Strategy
         // =========================
         private bool _ofArmed = false;
         private int _ofArmedAtBar = -1;
-    private int _ofArmedScore = 0;
-    private int _ofArmedBullWeight = 0;
-    private int _ofArmedBearWeight = 0;
-    private bool _ofDirMismatchLogged = false;
-    private int _mismatchCount = 0;
-    private string _mismatchDir = "";  // "BULL"/"BEAR" - OF方向 during consecutive mismatch
+        private bool _mktEntryScheduled = false;
+        private int _mktEntryBar = -1;
+        private int _ofArmedScore = 0;
+        private int _ofArmedBullWeight = 0;
+        private int _ofArmedBearWeight = 0;
+        private bool _ofDirMismatchLogged = false;
+        private int _mismatchCount = 0;
+        private string _mismatchDir = "";  // "BULL"/"BEAR" - OF方向 during consecutive mismatch
         private string _ofArmedText = "-";
 
         // =========================

@@ -1,4 +1,4 @@
-﻿using ATAS.DataFeedsCore;
+using ATAS.DataFeedsCore;
 using ATAS.Indicators;
 using ATAS.Strategies;
 using ATAS.Strategies.Chart;
@@ -171,6 +171,8 @@ namespace NQOrderFlowV1.Strategy
 
                         _ofArmed = false;
                         _ofArmedAtBar = -1;
+                        _mktEntryScheduled = false;
+                        _mktEntryBar = -1;
                         _ofArmedScore = 0;
                         _ofArmedBullWeight = 0;
                         _ofArmedBearWeight = 0;
@@ -547,6 +549,8 @@ namespace NQOrderFlowV1.Strategy
 
             _ofArmed = false;
             _ofArmedAtBar = -1;
+            _mktEntryScheduled = false;
+            _mktEntryBar = -1;
             _ofArmedScore = 0;
             _ofArmedBullWeight = 0;
             _ofArmedBearWeight = 0;

@@ -81,10 +81,14 @@ namespace NQOrderFlowV1.Strategy
 
             var entryLine = EnableLiveOrders
                 ? (_live is null
-                    ? "入场(LIVE)：-"
+                    ? (_mktEntryScheduled
+                        ? $"入场(LIVE)：Market等待回撤 waited={Math.Max(0, bar - _mktEntryBar)}/{Math.Max(0, MaxRetraceWaitBars)}"
+                        : "入场(LIVE)：-")
                     : $"入场(LIVE)：{_live.Side} Limit @{_live.EntryLimit:0.00}({_live.AnchorText}) filled={_live.EntryFilledQty:0.##} bracketQty={_live.BracketQty:0.##} tradeId={_live.TradeId}")
                 : (_pendingEntry is null
-                    ? "入场：-"
+                    ? (_mktEntryScheduled
+                        ? $"入场：Market等待回撤 waited={Math.Max(0, bar - _mktEntryBar)}/{Math.Max(0, MaxRetraceWaitBars)}"
+                        : "入场：-")
                     : $"入场：Limit {_pendingEntry.Side} @{_pendingEntry.LimitPrice:0.00}({_pendingEntry.AnchorText}) waited={Math.Max(0, bar - _pendingEntry.CreatedBar)}/{_pendingEntry.EffectiveMaxWaitBars}");
 
             var planLine = _activePlan is null

@@ -568,6 +568,46 @@ namespace NQOrderFlowV1.Strategy
         }
         else
         {
+            if (EnableRetraceEntry)
+            {
+                if (!_mktEntryScheduled)
+                {
+                    _mktEntryScheduled = true;
+                    _mktEntryBar = bar;
+                    AppendLog($"MKT_DELAY_SCHEDULED bar={bar} side={side} of={_ofArmedScore}/4 zone={FormatZoneKeyCN(_confirmZoneKey)} -> waiting for retrace to zone");
+                    SetBlock(bar, TriggerBlockReason.EntryOrderPending, "延迟入场: 等待价格回撤至zone");
+                    return;
+                }
+
+                var maxWait = Math.Max(0, MaxRetraceWaitBars);
+                if (maxWait > 0 && bar > _mktEntryBar + maxWait)
+                {
+                    AppendLog($"MKT_DELAY_EXPIRED bar={bar} scheduledBar={_mktEntryBar} maxWait={maxWait} of={_ofArmedScore}/4 zone={FormatZoneKeyCN(_confirmZoneKey)} -> cancel+reset");
+                    SetBlock(bar, TriggerBlockReason.EntryOrderExpired, $"延迟入场超时: waited={bar - _mktEntryBar} > {maxWait}");
+                    ResetConfirm(bar, "MktDelayExpired");
+                    _phase = ConfirmPhase.WaitZoneTouch;
+                    return;
+                }
+
+                var retraced = isLong
+                    ? (cur.Low <= zone.High + halfTick)
+                    : (cur.High >= zone.Low - halfTick);
+
+                var maxRetraceDistTicks = Math.Max(0, RetraceEntryMaxDistanceTicks);
+                var closeDistTicks = GetDistanceToRangeTicks(bar, cur.Close, zone.Low, zone.High);
+
+                if (!retraced || (maxRetraceDistTicks > 0 && closeDistTicks > maxRetraceDistTicks + 0.5m))
+                {
+                    AppendLog($"MKT_DELAY_WAITING bar={bar} scheduledBar={_mktEntryBar} side={side} retraced={retraced} closeDistTicks={closeDistTicks:0.##} maxDistTicks={maxRetraceDistTicks} of={_ofArmedScore}/4 zone={FormatZoneKeyCN(_confirmZoneKey)} -> waiting for retrace");
+                    SetBlock(bar, TriggerBlockReason.EntryOrderPending, $"等待回撤至zone, 已等待{bar - _mktEntryBar}bars | closeDist={closeDistTicks:0.##}t/{maxRetraceDistTicks}t | of={_ofArmedScore}/4 qLock={(qLock < 0 ? "-" : qLock.ToString())}/10");
+                    return;
+                }
+
+                AppendLog($"MKT_DELAY_FIRED bar={bar} scheduledBar={_mktEntryBar} side={side} closeDistTicks={closeDistTicks:0.##} of={_ofArmedScore}/4 zone={FormatZoneKeyCN(_confirmZoneKey)} -> retrace detected, entering at market");
+                _mktEntryScheduled = false;
+                _mktEntryBar = -1;
+            }
+
             // MarketClose: submit real market order when live orders enabled
             if (EnableLiveOrders)
             {

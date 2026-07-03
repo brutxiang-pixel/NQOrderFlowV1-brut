@@ -277,6 +277,8 @@ namespace NQOrderFlowV1.Strategy
 
             _ofArmed = false;
             _ofArmedAtBar = -1;
+            _mktEntryScheduled = false;
+            _mktEntryBar = -1;
             _ofArmedScore = 0;
             _ofArmedText = "-";
             _pendingEntry = null;
