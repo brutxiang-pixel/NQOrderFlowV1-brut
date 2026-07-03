@@ -1,4 +1,4 @@
-﻿using ATAS.DataFeedsCore;
+using ATAS.DataFeedsCore;
 using ATAS.Indicators;
 using ATAS.Strategies;
 using ATAS.Strategies.Chart;
@@ -45,7 +45,7 @@ namespace NQOrderFlowV1.Strategy
         public decimal RiskRewardR { get; set; } = 3m;
         [Category("Plan")]
         [DisplayName("SL Buffer Ticks (止损到摆动点缓冲ticks)")]
-        public int SlBufferTicks { get; set; } = 16;
+        public int SlBufferTicks { get; set; } = 32;
 
         [Category("Plan")]
         [DisplayName("Config Version (当前配置方案版本号)")]
@@ -450,7 +450,7 @@ namespace NQOrderFlowV1.Strategy
 
         [Category("Plan")]
         [DisplayName("Dynamic TP Target R (BE触发后TP收紧到此R值)")]
-        public decimal DynamicTPTargetR { get; set; } = 2m;
+        public decimal DynamicTPTargetR { get; set; } = 3m;
 
         [Category("Plan")]
         [DisplayName("Dynamic TP Trail Buffer R (Trailing激活后TP与止损之间保持的R倍数)")]
