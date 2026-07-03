@@ -297,6 +297,7 @@ namespace NQOrderFlowV1.Strategy
 
             public Order? EntryOrder { get; set; }
             public decimal EntryFilledQty { get; set; } = 0m;
+            public decimal EntryAvgPrice { get; set; } = 0m;
 
             public string? OcoGroup { get; set; }
             public Order? StopOrder { get; set; }
@@ -331,6 +332,7 @@ namespace NQOrderFlowV1.Strategy
         private int _lastCalcBar = -1;
         private DateTime _lastCandleTime;
         private int _lastHudTradeCount = -1;
+        private readonly List<string> _pendingTradeCsvLines = new();
 
         // =========================
         // TradePlan

@@ -54,6 +54,14 @@ namespace NQOrderFlowV1.Strategy
         [Category("Plan")]
         [DisplayName("OrderFlow Min Score Threshold (OF最低评分，0-10)")]
         public int OrderFlowMinScoreThreshold { get; set; } = 4;
+
+        [Category("Plan")]
+        [DisplayName("Enable OF Direction Mismatch Softening")]
+        public bool EnableOrderFlowMismatchSoftening { get; set; } = true;
+
+        [Category("Plan")]
+        [DisplayName("OF Mismatch Softening Bars")]
+        public int OrderFlowMismatchSofteningBars { get; set; } = 3;
         // =====================================================================
         // Instrument Rules (P0)
         // =====================================================================

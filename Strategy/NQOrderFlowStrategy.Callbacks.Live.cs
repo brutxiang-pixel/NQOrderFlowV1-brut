@@ -300,14 +300,21 @@ namespace NQOrderFlowV1.Strategy
 
             EnsureInstrumentRulesInitialized(_lastCalcBar, "HandleLiveEntryFillAsync");
 
-            // accumulate filled
-            _live.EntryFilledQty += Math.Max(0m, t.Volume);
+            // accumulate filled and use actual fill price for market entries/brackets.
+            var fillQty = Math.Max(0m, t.Volume);
+            if (fillQty > 0m)
+            {
+                var oldQty = _live.EntryFilledQty;
+                var oldValue = _live.EntryAvgPrice > 0m ? _live.EntryAvgPrice * oldQty : 0m;
+                _live.EntryFilledQty = oldQty + fillQty;
+                _live.EntryAvgPrice = (oldValue + t.Price * fillQty) / _live.EntryFilledQty;
+            }
 
             // create plan & bracket on first fill
             if (!_live.BracketSubmitted)
             {
                 // compute stop/target using locked zone shadow
-                var entry = _live.EntryLimit;
+                var entry = _live.EntryAvgPrice > 0m ? _live.EntryAvgPrice : _live.EntryLimit;
                 var zone = _live.ZoneShadow;
                 var isLong = _live.IsLong;
                 var side = _live.Side;

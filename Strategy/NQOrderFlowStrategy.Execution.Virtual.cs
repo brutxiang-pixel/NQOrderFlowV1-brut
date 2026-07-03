@@ -264,7 +264,8 @@ namespace NQOrderFlowV1.Strategy
                     if (_mismatchDir != "BEAR") { _mismatchCount = 1; _mismatchDir = "BEAR"; }
                     else { _mismatchCount++; }
 
-                    if (_mismatchCount >= 3)
+                    var softenBars = Math.Max(1, OrderFlowMismatchSofteningBars);
+                    if (EnableOrderFlowMismatchSoftening && _mismatchCount >= softenBars)
                     {
                         AppendLog($"OF_BEAR_SOFTEN bar={bar} n={_mismatchCount} -> skip mismatch, allow entry");
                     }
@@ -285,7 +286,8 @@ namespace NQOrderFlowV1.Strategy
                     if (_mismatchDir != "BULL") { _mismatchCount = 1; _mismatchDir = "BULL"; }
                     else { _mismatchCount++; }
 
-                    if (_mismatchCount >= 3)
+                    var softenBars = Math.Max(1, OrderFlowMismatchSofteningBars);
+                    if (EnableOrderFlowMismatchSoftening && _mismatchCount >= softenBars)
                     {
                         AppendLog($"OF_BULL_SOFTEN bar={bar} n={_mismatchCount} -> skip mismatch, allow entry");
                     }
@@ -1064,7 +1066,6 @@ skipHudSummary:
                 var plan = _activePlan;
                 EnsureLogInitialized();
                 var csvPath = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(_logPath!)!, "NQOrderFlowV1_trades.csv");
-                var exists = System.IO.File.Exists(csvPath);
                 var mode = EnableLiveOrders ? "LIVE" : "VIRTUAL";
                 var risk = Math.Abs(plan.Entry - plan.InitialStop);
                 if (risk <= 0m) risk = plan.InitialRiskPoints;
@@ -1090,10 +1091,55 @@ skipHudSummary:
                     plan.Zone.Low.ToString("F2"),
                     plan.Zone.High.ToString("F2")
                 );
-                if (!exists) System.IO.File.AppendAllText(csvPath, "Time,Bar,Side,Entry,Stop,TP,ExitPrice,ExitReason,RiskPts,R,PnL$,Mode,OFScore,OFText,ZoneType,ZoneLow,ZoneHigh" + System.Environment.NewLine);
-                System.IO.File.AppendAllText(csvPath, csvLine + System.Environment.NewLine);
+
+                var lines = new List<string>(_pendingTradeCsvLines.Count + 1);
+                lines.AddRange(_pendingTradeCsvLines);
+                lines.Add(csvLine);
+
+                var header = "Time,Bar,Side,Entry,Stop,TP,ExitPrice,ExitReason,RiskPts,R,PnL$,Mode,OFScore,OFText,ZoneType,ZoneLow,ZoneHigh";
+                if (TryAppendTradeCsvLines(csvPath, header, lines, bar))
+                {
+                    if (_pendingTradeCsvLines.Count > 0)
+                        AppendLog($"CSV_PENDING_FLUSHED bar={bar} count={_pendingTradeCsvLines.Count}");
+                    _pendingTradeCsvLines.Clear();
+                }
+                else
+                {
+                    _pendingTradeCsvLines.Add(csvLine);
+                    AppendLog($"CSV_WRITE_PENDING bar={bar} pending={_pendingTradeCsvLines.Count}");
+                }
             }
             catch (Exception ex) { AppendLog($"CSV_WRITE_ERR bar={bar} err={ex.ToString()}"); }
+        }
+
+        private bool TryAppendTradeCsvLines(string csvPath, string header, IReadOnlyList<string> lines, int bar)
+        {
+            const int maxAttempts = 5;
+
+            for (var attempt = 1; attempt <= maxAttempts; attempt++)
+            {
+                try
+                {
+                    var exists = File.Exists(csvPath);
+                    using var stream = new FileStream(csvPath, FileMode.Append, FileAccess.Write, FileShare.Read);
+                    using var writer = new StreamWriter(stream);
+
+                    if (!exists)
+                        writer.WriteLine(header);
+
+                    foreach (var line in lines)
+                        writer.WriteLine(line);
+
+                    return true;
+                }
+                catch (IOException ex) when (attempt < maxAttempts)
+                {
+                    AppendLog($"CSV_WRITE_RETRY bar={bar} attempt={attempt}/{maxAttempts} err={ex.Message}");
+                    Thread.Sleep(100);
+                }
+            }
+
+            return false;
         }
         private void AddTradeRecord(TradePlan plan, int exitBar, decimal exitPrice, string exitReason)
         {
