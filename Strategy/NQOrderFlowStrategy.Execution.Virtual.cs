@@ -568,10 +568,8 @@ namespace NQOrderFlowV1.Strategy
         }
         else
         {
-            // MarketClose: live mode - submit real market order
-            // Replay/backtest: market orders will not fill, use virtual entry
-            bool isBacktest = Portfolio == null || Portfolio.ToString().StartsWith("Replay", StringComparison.OrdinalIgnoreCase);
-            if (!isBacktest && EnableLiveOrders)
+            // MarketClose: submit real market order when live orders enabled
+            if (EnableLiveOrders)
             {
                 HandleLiveMarketExecution(bar, cur, zone, usedShadow, isLong, side, qLock, halfTick);
                 return;
