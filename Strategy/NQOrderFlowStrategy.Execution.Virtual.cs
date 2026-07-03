@@ -44,9 +44,9 @@ namespace NQOrderFlowV1.Strategy
                     if (plan.Side == "LONG")
                     {
                         if (cur.Low <= plan.Stop)
-                            ExitPlan(bar, "SL Hit", exitPrice: plan.Stop);
+                            ExitPlan(bar, "SL Hit", exitPrice: plan.Stop, exitTime: cur.Time);
                         else if (cur.High >= plan.Target)
-                            ExitPlan(bar, "TP Hit", exitPrice: plan.Target);
+                            ExitPlan(bar, "TP Hit", exitPrice: plan.Target, exitTime: cur.Time);
                         else
                             MaybeMoveBreakEven(bar, cur, plan);
                     MaybeTrailStop(bar, cur, plan);
@@ -54,9 +54,9 @@ namespace NQOrderFlowV1.Strategy
                     else
                     {
                         if (cur.High >= plan.Stop)
-                            ExitPlan(bar, "SL Hit", exitPrice: plan.Stop);
+                            ExitPlan(bar, "SL Hit", exitPrice: plan.Stop, exitTime: cur.Time);
                         else if (cur.Low <= plan.Target)
-                            ExitPlan(bar, "TP Hit", exitPrice: plan.Target);
+                            ExitPlan(bar, "TP Hit", exitPrice: plan.Target, exitTime: cur.Time);
                         else
                             MaybeMoveBreakEven(bar, cur, plan);
                     MaybeTrailStop(bar, cur, plan);
@@ -74,16 +74,16 @@ namespace NQOrderFlowV1.Strategy
                         if (plan.Side == "LONG")
                         {
                             if (cur.Low <= plan.Stop)
-                                ExitPlan(bar, "SL Hit", exitPrice: plan.Stop);
+                                ExitPlan(bar, "SL Hit", exitPrice: plan.Stop, exitTime: cur.Time);
                             else if (cur.High >= plan.Target)
-                                ExitPlan(bar, "TP Hit", exitPrice: plan.Target);
+                                ExitPlan(bar, "TP Hit", exitPrice: plan.Target, exitTime: cur.Time);
                         }
                         else
                         {
                             if (cur.High >= plan.Stop)
-                                ExitPlan(bar, "SL Hit", exitPrice: plan.Stop);
+                                ExitPlan(bar, "SL Hit", exitPrice: plan.Stop, exitTime: cur.Time);
                             else if (cur.Low <= plan.Target)
-                                ExitPlan(bar, "TP Hit", exitPrice: plan.Target);
+                                ExitPlan(bar, "TP Hit", exitPrice: plan.Target, exitTime: cur.Time);
                         }
                     }
                     MaybeMoveBreakEven(bar, cur, _activePlan);
@@ -980,7 +980,7 @@ namespace NQOrderFlowV1.Strategy
             }
         }
 
-        private void ExitPlan(int bar, string reason, decimal exitPrice)
+        private void ExitPlan(int bar, string reason, decimal exitPrice, DateTime? exitTime = null)
         {
             if (_activePlan is null)
                 return;
@@ -1009,14 +1009,14 @@ namespace NQOrderFlowV1.Strategy
 skipHudSummary:
 
             _planState = PlanState.Flat;
-            TryWriteTradeCsv(bar, exitPrice);
+            TryWriteTradeCsv(bar, exitPrice, exitTime);
 
             if (EnableCooldown)
                 _cooldownUntilBar = Math.Max(_cooldownUntilBar, bar + Math.Max(0, CooldownBars));
         }
 
 
-        private void TryWriteTradeCsv(int bar, decimal exitPrice)
+        private void TryWriteTradeCsv(int bar, decimal exitPrice, DateTime? exitTime = null)
         {
             try
             {
@@ -1030,7 +1030,7 @@ skipHudSummary:
                 if (risk <= 0m) risk = plan.InitialRiskPoints;
                 var r = risk > 0m ? (plan.Side == "LONG" ? (exitPrice - plan.Entry) / risk : (plan.Entry - exitPrice) / risk) : 0m;
                 var csvLine = string.Join(",",
-                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    (exitTime ?? DateTime.Now).ToString("yyyy-MM-dd HH:mm:ss"),
                     bar.ToString(),
                     plan.Side,
                     plan.Entry.ToString("F2"),
