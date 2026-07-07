@@ -731,6 +731,15 @@ From `OPF_RESEARCH_1.05`, Actual execution redirects low-volume expansion from w
 - The v1.04 `DailyVolumeFloor` wide-stop paths remain labeled separately, but the main validation question is whether `DailyVolumeBaseRisk18` gets 2026-03-23 and 2026-03-24 to at least 5 Actual trades without becoming worse than the existing Observation filler.
 - `OPF_RESEARCH_1.05` / `ACTUAL_EXEC_1.45` is the volume baseline. It is the rollback target after the first 12-trading-day batch produced 85 Actual trades, +20.29R, and +$579.5 with acceptable average daily trade count. Later versions should compare against this baseline before keeping quality or risk-control changes.
 
+From `OPF_RESEARCH_1.10`, Actual execution starts the quality-optimization phase while preserving the v1.05 volume baseline as the rollback target:
+
+- Actual defaults now use `ACTUAL_EXEC_1.46`.
+- Broad `BreakawayFvg` Actual execution is disabled after the May/June evidence batch showed the executed broad subgroup was negative. Research rows still continue, and `BreakawayFvg_Qualified` is not disabled.
+- Low-volume-day Long `ObservationConfirm` executions in the 11-18 point expanded risk band now require `SetupQualityScore >= 70`. Skipped rows are marked `LongObservationRiskExpansionQualityCutV110`.
+- Short `ObservationConfirm` and all base-risk `ObservationConfirm` rows keep the v1.05 rules. The 15-18 point risk band is not removed globally because it remained the strongest positive risk bucket across reviewed batches.
+- Actual-verified research outcome de-duplication now uses `SignalID + ResearchPath + EntryBar + ActualTradeID`, preventing a completed Actual trade from also being written again at a later research-window exit bar.
+- The expected validation question is whether v1.10 reduces `SL_no_MFE`, especially on Long expanded-risk ObservationConfirm entries, while keeping full-day average Actual trades near or above 5.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

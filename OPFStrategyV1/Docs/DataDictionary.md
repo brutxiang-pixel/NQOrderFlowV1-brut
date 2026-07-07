@@ -591,6 +591,8 @@ From `OPF_RESEARCH_1.05`, Actual execution defaults use `ACTUAL_EXEC_1.45`. Low-
 
 `OPF_RESEARCH_1.05` / `ACTUAL_EXEC_1.45` is the volume baseline and rollback target for the next optimization phase. Baseline comparisons should report daily trades, long/short counts, TP/SL/Other, NetR, NetDollars, abnormal executions, and `DailyVolumeBaseRisk18` subgroup performance.
 
+From `OPF_RESEARCH_1.10`, Actual execution defaults use `ACTUAL_EXEC_1.46`. Broad `BreakawayFvg` Actual orders are skipped with `BreakawayBroadDisabledV110`, while `BreakawayFvg_Qualified` remains independently testable. Long `ObservationConfirm` rows in the expanded 11-18 point risk band are skipped with `LongObservationRiskExpansionQualityCutV110` when `SetupQualityScore < 70`. Research rows continue to be written for skipped signals. Actual-verified research outcome duplicate protection uses the Actual trade id so the lifecycle audit should report zero duplicate Actual-verified rows.
+
 ## edge_attribution.csv
 
 File pattern:
