@@ -1,7 +1,7 @@
 {
-  "Version": "ACTUAL_EXEC_1.55",
+  "Version": "ACTUAL_EXEC_1.56",
   "EnableActualOrders": true,
-  "ActualExecutionPaths": "ObservationConfirm|ObservationConfirm_WideStop1_5R|StructureConfirmShadow_ConfirmBarStop|StructureConfirmShadow_ConfirmBarStop_Min10|StructureConfirmShadow_ConfirmBarStop_Wait1|StructureConfirmShadow_SwingStop|TrendPullbackConfirmed|BreakawayFvg|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated|FailureReverse_ObservationInvalidated_WideStop1_5R|FailureReverse_LongQualified|FailureReverse_RetestFailed|FailureReverse_RetestFailed_WideStop1_5R",
+  "ActualExecutionPaths": "ObservationConfirm|ObservationConfirm_WideStop1_5R|AlmostConfirmed|ShadowCandidate|StructureConfirmShadow_ConfirmBarStop|StructureConfirmShadow_ConfirmBarStop_Min10|StructureConfirmShadow_ConfirmBarStop_Wait1|StructureConfirmShadow_SwingStop|TrendPullbackConfirmed|BreakawayFvg|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated|FailureReverse_LongQualified|FailureReverse_RetestFailed|FailureReverse_RetestFailed_WideStop1_5R",
   "ActualAllowResearchPaths": false,
   "ActualOrderQuantity": 1,
   "ActualTargetR": 1.5,

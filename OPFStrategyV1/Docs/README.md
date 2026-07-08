@@ -816,6 +816,16 @@ From `OPF_RESEARCH_1.19`, Actual execution keeps the v1.18 mainline volume/profi
 - TP behavior, SL behavior, instrument hard risk cap, and broad `BreakawayFvg` disablement are unchanged.
 - The expected validation question is whether June-like low-trade days move closer to 5 Actual trades/day without giving back the v1.18 rescue profit contribution or increasing abnormal flatten events.
 
+From `OPF_RESEARCH_1.20`, Actual execution resets the volume experiment around the v1.15 stable skeleton and removes the ineffective v1.19 Failure wide filler:
+
+- Actual defaults now use `ACTUAL_EXEC_1.56`.
+- `FailureReverse_ObservationInvalidated_WideStop1_5R` is removed from Actual execution again after v1.19 produced zero executed trades from that path.
+- `DailyVolumeQualityRescue` returns to the v1.18 planned-risk cap of `22` points and is retagged as `DailyVolumeQualityRescueV120`.
+- Entry-fill risk handling separates planned risk from filled risk: if planned risk was within the path cap and the filled risk exceeds the cap by no more than `1` point, the strategy submits normal bracket protection and logs `ENTRY_FILLED_RISK_DRIFT_ACCEPTED` / `RiskDriftAcceptedV120` instead of emergency flattening.
+- `AlmostConfirmed` and `ShadowCandidate` are added as Actual low-volume fillers only before the day reaches 5 Actual trades, with `SetupQualityScore >= 60`, risk `<= 18`, and `EstimatedRR >= 0.8`.
+- Executed filler rows are tagged as `AlmostConfirmedFillerV120` or `ShadowCandidateFillerV120` in `execution_decisions.csv`.
+- The expected validation question is whether the June replay can reach roughly `90+` trades, improve low-trade days toward the 5-trade target, and keep NetR near or above the v1.18 result while reducing emergency flatten events.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
