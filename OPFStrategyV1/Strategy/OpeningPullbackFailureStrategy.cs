@@ -2911,12 +2911,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 tracker.Hit1R,
                 tracker.Hit1_5R,
                 tracker.Hit2R,
+                tracker.Hit2_5R,
+                tracker.Hit3R,
                 Math.Max(0, exitBar - tracker.EntryBar),
                 tracker.ResearchPath,
                 tracker.FirstStopBar,
                 tracker.First1RBar,
                 tracker.First1_5RBar,
                 tracker.First2RBar,
+                tracker.First2_5RBar,
+                tracker.First3RBar,
                 tracker.StopHitBefore1R,
                 tracker.AmbiguousStopAndTargetSameBar,
                 tracker.TimeTo1RMinutes,
@@ -3360,12 +3364,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 tracker.Hit1R,
                 tracker.Hit1_5R,
                 tracker.Hit2R,
+                tracker.Hit2_5R,
+                tracker.Hit3R,
                 candle.Bar - tracker.EntryBar,
                 tracker.ResearchPath,
                 tracker.FirstStopBar,
                 tracker.First1RBar,
                 tracker.First1_5RBar,
                 tracker.First2RBar,
+                tracker.First2_5RBar,
+                tracker.First3RBar,
                 tracker.StopHitBefore1R,
                 tracker.AmbiguousStopAndTargetSameBar,
                 tracker.TimeTo1RMinutes,
@@ -3416,12 +3424,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 tracker.Hit1R,
                 tracker.Hit1_5R,
                 tracker.Hit2R,
+                tracker.Hit2_5R,
+                tracker.Hit3R,
                 Math.Max(0, exitCandle.Bar - tracker.EntryBar),
                 tracker.ResearchPath,
                 tracker.FirstStopBar,
                 tracker.First1RBar,
                 tracker.First1_5RBar,
                 tracker.First2RBar,
+                tracker.First2_5RBar,
+                tracker.First3RBar,
                 tracker.StopHitBefore1R,
                 tracker.AmbiguousStopAndTargetSameBar,
                 tracker.TimeTo1RMinutes,
@@ -3482,6 +3494,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed1_5R", 1.5m, tracker.First1_5RBar);
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed2R", 2m, tracker.First2RBar);
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed2_5R", 2.5m, tracker.First2_5RBar);
+        AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed3R", 3m, tracker.First3RBar);
     }
 
     private void AppendExitPolicyEvaluation(ResearchTracker tracker, OpfCandle exitCandle, string exitPolicy, decimal targetR, int? firstTargetBar)
@@ -4313,6 +4326,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public int? First1_5RBar { get; private set; }
         public int? First2RBar { get; private set; }
         public int? First2_5RBar { get; private set; }
+        public int? First3RBar { get; private set; }
         public int? TimeTo1RMinutes { get; private set; }
         public int? TimeToMfeMinutes { get; private set; }
         public decimal MaxHeatBefore1R { get; private set; }
@@ -4324,6 +4338,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public bool Hit1_5R => MfeR >= 1.5m;
         public bool Hit2R => MfeR >= 2m;
         public bool Hit2_5R => MfeR >= 2.5m;
+        public bool Hit3R => MfeR >= 3m;
         public string StopBasis => ResearchPath switch
         {
             "StructureConfirmShadow_ConfirmBarStop" => "ConfirmBar",
@@ -4390,6 +4405,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
             if (currentMfe >= 2.5m * InitialRiskPoints)
                 First2_5RBar ??= candle.Bar;
+
+            if (currentMfe >= 3m * InitialRiskPoints)
+                First3RBar ??= candle.Bar;
 
             if (MfePoints > priorMfe)
                 TimeToMfeMinutes = MinutesFromEntry(candle.Time);

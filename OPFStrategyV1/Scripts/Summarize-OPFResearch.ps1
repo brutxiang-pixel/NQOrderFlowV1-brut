@@ -307,6 +307,8 @@ $replayIndexRows = @(foreach ($item in $enrichedRows) {
         OutcomeClass = $row.OutcomeClass
         Hit1R = $row.Hit1R
         Hit2R = $row.Hit2R
+        Hit2_5R = Field $row 'Hit2_5R'
+        Hit3R = Field $row 'Hit3R'
         MFE_R = $row.MFE_R
         MAE_R = $row.MAE_R
         PointValue = Field $row 'PointValue'
@@ -423,6 +425,8 @@ $rows |
             N = $g.Count
             Hit1R = Count-True $g 'Hit1R'
             Hit2R = Count-True $g 'Hit2R'
+            Hit2_5R = Count-True $g 'Hit2_5R'
+            Hit3R = Count-True $g 'Hit3R'
             StopBefore1R = Count-True $g 'StopHitBefore1R'
             Ambiguous = Count-True $g 'AmbiguousStopAndTargetSameBar'
             AvgRiskPts = [math]::Round(($risk | Measure-Object -Average).Average, 2)
@@ -497,6 +501,8 @@ $rows |
             N = $g.Count
             Hit1R = Count-True $g 'Hit1R'
             Hit2R = Count-True $g 'Hit2R'
+            Hit2_5R = Count-True $g 'Hit2_5R'
+            Hit3R = Count-True $g 'Hit3R'
             StopBefore1R = Count-True $g 'StopHitBefore1R'
             AvgRiskPts = [math]::Round(($risk | Measure-Object -Average).Average, 2)
             AvgMFE_R = [math]::Round(($mfe | Measure-Object -Average).Average, 2)
@@ -517,6 +523,8 @@ $rows |
             N = $g.Count
             Hit1R = Count-True $g 'Hit1R'
             Hit2R = Count-True $g 'Hit2R'
+            Hit2_5R = Count-True $g 'Hit2_5R'
+            Hit3R = Count-True $g 'Hit3R'
             StopBefore1R = Count-True $g 'StopHitBefore1R'
         }
     } |
@@ -540,6 +548,8 @@ $enrichedRows |
             N = $g.Count
             Hit1R = Count-True $outcomes 'Hit1R'
             Hit2R = Count-True $outcomes 'Hit2R'
+            Hit2_5R = Count-True $outcomes 'Hit2_5R'
+            Hit3R = Count-True $outcomes 'Hit3R'
             StopBefore1R = Count-True $outcomes 'StopHitBefore1R'
             UnknownPct = $first.UnknownPct
             RegimeChanges = $first.RegimeChangeCount
@@ -567,6 +577,8 @@ $enrichedRows |
             N = $g.Count
             Hit1R = Count-True $outcomes 'Hit1R'
             Hit2R = Count-True $outcomes 'Hit2R'
+            Hit2_5R = Count-True $outcomes 'Hit2_5R'
+            Hit3R = Count-True $outcomes 'Hit3R'
             StopBefore1R = Count-True $outcomes 'StopHitBefore1R'
             Catastrophic = Count-Equals $outcomes 'OutcomeClass' 'Catastrophic'
             AvgMFE_R = [math]::Round(($mfe | Measure-Object -Average).Average, 2)

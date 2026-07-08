@@ -757,6 +757,13 @@ From `OPF_RESEARCH_1.12`, Actual execution keeps the v1.11 setup set and tests o
 - Long rules remain unchanged from v1.11.
 - The expected validation question is whether v1.12 reduces Short `SL_no_MFE` and improves Short NetR/NetDollars without dropping full-day average Actual trades below the 5/day baseline.
 
+From `OPF_RESEARCH_1.13`, Actual execution keeps the v1.12 quality candidate baseline and expands profit-extension research only:
+
+- Actual defaults now use `ACTUAL_EXEC_1.49`; entry rules, risk filters, path whitelist, SL, and live/replay TP remain unchanged.
+- `research_outcomes.csv` adds `Hit2_5R`, `Hit3R`, `First2_5RBar`, and `First3RBar`.
+- `exit_policy_evaluations.csv` adds a `Fixed3R` policy row alongside `Fixed1_5R`, `Fixed2R`, and `Fixed2_5R`.
+- The expected validation question is whether v1.12-quality entries have enough post-1.5R extension to justify later TP tiering, especially by side, path, and risk bucket.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
@@ -766,7 +773,7 @@ Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke
 3. `ExecutedDecisions = ExecutionTrades = ActualVerifiedUniqueTrades`, with no duplicate Actual-verified rows.
 4. Every Actual exit has `PROTECTION_CLEANUP_DONE`, with no `STALE`, `REJECT`, `CANCEL_FAIL`, or `FAILED` events.
 5. The tested configuration is frozen: MNQ, one contract, `ActualTargetR=1.5`, daily target/loss stops disabled for evidence accumulation, max-trades safety ceiling, and Actual path whitelist.
-6. Every active trading day reaches at least 5 Actual trades, or the version is considered insufficient for the current stable-profitability goal even if the average trade count looks good.
+6. Full-day average Actual trades should stay near 5/day; individual low-trade days are acceptable only when profitability improves and the missed volume is explainable by research/skipped-signal evidence.
 7. Results are explainable through `MFE_R`, `MAE_R`, `ExitEfficiency`, `RunupCapturePct`, and no-trade reasons, even if the batch is not yet strongly profitable.
 
 ## Research workflow

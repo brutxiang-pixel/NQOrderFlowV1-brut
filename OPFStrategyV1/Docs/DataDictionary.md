@@ -95,6 +95,8 @@ Important fields:
 - `Hit1R`
 - `Hit1_5R`
 - `Hit2R`
+- `Hit2_5R`
+- `Hit3R`
 - `ResearchPath`
 - `StopBasis`
 - `EntryDelayBars`
@@ -597,6 +599,8 @@ From `OPF_RESEARCH_1.11`, Actual execution defaults use `ACTUAL_EXEC_1.47`. Long
 
 From `OPF_RESEARCH_1.12`, Actual execution defaults use `ACTUAL_EXEC_1.48`. Short `ObservationConfirm` rows with `8 < risk <= 15` and `SetupQualityScore < 60` are skipped with `ShortObservationMidRiskQualityCutV112`. The 15-18 point Short expanded-risk band remains allowed. This version is intended to test whether the negative Short mid-risk subgroup can be reduced without changing setup families or adding time filters.
 
+From `OPF_RESEARCH_1.13`, Actual execution defaults use `ACTUAL_EXEC_1.49` with unchanged executable rules from v1.12. `research_outcomes.csv` adds `Hit2_5R`, `Hit3R`, `First2_5RBar`, and `First3RBar`. `exit_policy_evaluations.csv` adds `Fixed3R`. This version is a profit-extension research pass for deciding whether later versions should tier TP beyond the current fixed 1.5R actual target.
+
 ## edge_attribution.csv
 
 File pattern:
@@ -706,6 +710,8 @@ Important fields:
 - `OutcomeClass`
 - `Hit1R`
 - `Hit2R`
+- `Hit2_5R`
+- `Hit3R`
 - `MFE_R`
 - `MAE_R`
 - `PointValue`

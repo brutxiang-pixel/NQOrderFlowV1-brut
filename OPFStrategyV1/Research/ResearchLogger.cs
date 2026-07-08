@@ -210,12 +210,16 @@ public sealed class ResearchLogger
         bool hit1R,
         bool hit1_5R,
         bool hit2R,
+        bool hit2_5R,
+        bool hit3R,
         int barsTracked,
         string researchPath,
         int? firstStopBar,
         int? first1RBar,
         int? first1_5RBar,
         int? first2RBar,
+        int? first2_5RBar,
+        int? first3RBar,
         bool stopHitBefore1R,
         bool ambiguousStopAndTargetSameBar,
         int? timeTo1RMinutes,
@@ -267,12 +271,16 @@ public sealed class ResearchLogger
                 hit1R,
                 hit1_5R,
                 hit2R,
+                hit2_5R,
+                hit3R,
                 barsTracked,
                 Csv(researchPath),
                 firstStopBar?.ToString() ?? string.Empty,
                 first1RBar?.ToString() ?? string.Empty,
                 first1_5RBar?.ToString() ?? string.Empty,
                 first2RBar?.ToString() ?? string.Empty,
+                first2_5RBar?.ToString() ?? string.Empty,
+                first3RBar?.ToString() ?? string.Empty,
                 stopHitBefore1R,
                 ambiguousStopAndTargetSameBar,
                 ambiguousStopAndTargetSameBar,
@@ -373,7 +381,7 @@ public sealed class ResearchLogger
 
     private void EnsureResearchOutcomeHeader(string path)
     {
-        EnsureHeader(path, ContextHeader("SignalID,EntryTime,EntryBar,ExitTime,ExitBar,Side,Entry,Stop,InitialRiskPoints,PointValue,TickSize,TickValue,PlannedContracts,ActualContracts,RiskPerContractDollars,TotalInitialRiskDollars,MFEPoints,MAEPoints,MFE_Dollars,MAE_Dollars,MFE_R,MAE_R,Hit1R,Hit1_5R,Hit2R,BarsTracked,ResearchPath,FirstStopBar,First1RBar,First1_5RBar,First2RBar,StopHitBefore1R,AmbiguousStopAndTargetSameBar,IntraBarAmbiguous,TimeTo1RMinutes,TimeToMFEMinutes,MaxHeatBefore1R,StopBasis,EntryDelayBars,OutcomeClass,ExitReason,ExitEfficiency,RunupCapturePct,AdverseBeforeProfit_R,ActualVerified,ActualTradeID,ActualExitTime,ActualExitBar,ActualExitPrice,ActualExitRole,ActualPnLPoints,ActualPnLDollars,ActualPnL_R,ActualMFEPoints,ActualMAEPoints,ActualMFE_R,ActualMAE_R,ResolvedOutcomeClass,OutcomeSource,WouldTradeLive,ResearchOnlySignal,SkippedByDailyGuard,ExecutionSkipReasons,DailyTargetDollars,DailyLossLimitDollars,MaxContracts"));
+        EnsureHeader(path, ContextHeader("SignalID,EntryTime,EntryBar,ExitTime,ExitBar,Side,Entry,Stop,InitialRiskPoints,PointValue,TickSize,TickValue,PlannedContracts,ActualContracts,RiskPerContractDollars,TotalInitialRiskDollars,MFEPoints,MAEPoints,MFE_Dollars,MAE_Dollars,MFE_R,MAE_R,Hit1R,Hit1_5R,Hit2R,Hit2_5R,Hit3R,BarsTracked,ResearchPath,FirstStopBar,First1RBar,First1_5RBar,First2RBar,First2_5RBar,First3RBar,StopHitBefore1R,AmbiguousStopAndTargetSameBar,IntraBarAmbiguous,TimeTo1RMinutes,TimeToMFEMinutes,MaxHeatBefore1R,StopBasis,EntryDelayBars,OutcomeClass,ExitReason,ExitEfficiency,RunupCapturePct,AdverseBeforeProfit_R,ActualVerified,ActualTradeID,ActualExitTime,ActualExitBar,ActualExitPrice,ActualExitRole,ActualPnLPoints,ActualPnLDollars,ActualPnL_R,ActualMFEPoints,ActualMAEPoints,ActualMFE_R,ActualMAE_R,ResolvedOutcomeClass,OutcomeSource,WouldTradeLive,ResearchOnlySignal,SkippedByDailyGuard,ExecutionSkipReasons,DailyTargetDollars,DailyLossLimitDollars,MaxContracts"));
     }
 
     private static string ActualOutcomeClass(string exitRole, decimal pnlR)
