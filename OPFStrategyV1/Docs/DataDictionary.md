@@ -615,6 +615,8 @@ From `OPF_RESEARCH_1.17`, Actual execution defaults use `ACTUAL_EXEC_1.53`. Actu
 
 From `OPF_RESEARCH_1.18`, Actual execution defaults use `ACTUAL_EXEC_1.54`. Low-volume-day `ObservationConfirm` rows can execute as `DailyVolumeQualityRescueV118` when the day has fewer than 5 Actual trades, `SetupQualityScore >= 70`, risk is between 18 and 22 points, and `EstimatedRR >= 0.8`. This is a tagged volume experiment, not a new setup family.
 
+From `OPF_RESEARCH_1.19`, Actual execution defaults use `ACTUAL_EXEC_1.55`. Low-volume-day `ObservationConfirm` quality rescue is retagged as `DailyVolumeQualityRescueV119` and uses a tighter `21.5` point planned-risk cap. `FailureReverse_ObservationInvalidated_WideStop1_5R` is added to Actual execution as a low-volume-day `DailyVolumeFloor` filler path and is tagged with `FailureInvalidatedWideFillerV119` when executed. Long immediate-failure invalidated entries remain disabled.
+
 ## edge_attribution.csv
 
 File pattern:

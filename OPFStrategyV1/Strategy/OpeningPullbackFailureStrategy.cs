@@ -34,7 +34,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal DailyVolumeFloorMaxRiskPoints = 18m;
     private const decimal DailyVolumeFloorMinEstimatedRr = 0.5m;
     private const decimal DailyVolumeQualityRescueMinSetupQualityScore = 70m;
-    private const decimal DailyVolumeQualityRescueMaxRiskPoints = 22m;
+    private const decimal DailyVolumeQualityRescueMaxRiskPoints = 21.5m;
     private const decimal DailyVolumeQualityRescueMinEstimatedRr = 0.8m;
     private const int DailyVolumeQualityRescueMaxTradesPerDay = 2;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
@@ -1782,13 +1782,15 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             executeReasons.Add($"DailyVolumeResearchFiller:{researchPath},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
         if (IsDailyVolumeFloorAllowed(signal, researchPath))
             executeReasons.Add($"DailyVolumeFloor:{researchPath},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
+        if (IsFailureInvalidatedWideStopVolumeFiller(researchPath))
+            executeReasons.Add($"FailureInvalidatedWideFillerV119:dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
         if (IsObservationConfirmVolumeRiskExpansion(signal, researchPath, risk))
         {
             executeReasons.Add($"ObservationRiskExpansion:risk={risk:0.##},base={_actualObservationConfirmMaxRiskPoints:0.##},max={_actualObservationConfirmVolumeMaxRiskPoints:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
             executeReasons.Add("DailyVolumeBaseRisk18");
         }
         if (IsDailyVolumeQualityRescue(signal, researchPath, risk))
-            executeReasons.Add($"DailyVolumeQualityRescueV118:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
+            executeReasons.Add($"DailyVolumeQualityRescueV119:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
             executeReasons.Add($"FailureRetestWideFiller:dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
         if (targetR != ReplayTargetR)
@@ -1876,6 +1878,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             "ShadowCandidate" or
             "ZoneBirthResearch" or
             "FailureReverse_ObservationInvalidated" or
+            "FailureReverse_ObservationInvalidated_WideStop1_5R" or
             "FailureReverse_LongQualified" or
             "FailureReverse_RetestFailed" or
             "FailureReverse_RetestFailed_WideStop1_5R";
@@ -2013,7 +2016,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (IsDailyVolumeFloorPath(researchPath) && !IsDailyVolumeFloorAllowed(signal, researchPath))
             return new[] { $"DailyVolumeFloorOnlyBeforeDailyTarget:trades={_replayTradesToday},target={_actualObservationConfirmFillerUntilDailyTrades},score={signal.SetupQualityScore.TotalScore:0.##},min={DailyVolumeFloorMinSetupQualityScore:0.##}" };
 
-        if (string.Equals(researchPath, "FailureReverse_ObservationInvalidated", StringComparison.OrdinalIgnoreCase) &&
+        if ((string.Equals(researchPath, "FailureReverse_ObservationInvalidated", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "FailureReverse_ObservationInvalidated_WideStop1_5R", StringComparison.OrdinalIgnoreCase)) &&
             signal.Side == TradeSide.Long)
             return new[] { "FailureImmediateLongDisabled" };
 
@@ -2067,6 +2071,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private static bool IsDailyVolumeFloorPath(string researchPath)
     {
         return IsObservationConfirmWideStopPath(researchPath) ||
+            string.Equals(researchPath, "FailureReverse_ObservationInvalidated_WideStop1_5R", StringComparison.OrdinalIgnoreCase) ||
             IsFailureRetestWideStopPath(researchPath);
     }
 
@@ -2087,6 +2092,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private bool IsFailureRetestWideStopVolumeFiller(string researchPath)
     {
         return IsFailureRetestWideStopPath(researchPath) &&
+            _replayTradesToday < _actualObservationConfirmFillerUntilDailyTrades;
+    }
+
+    private bool IsFailureInvalidatedWideStopVolumeFiller(string researchPath)
+    {
+        return string.Equals(researchPath, "FailureReverse_ObservationInvalidated_WideStop1_5R", StringComparison.OrdinalIgnoreCase) &&
             _replayTradesToday < _actualObservationConfirmFillerUntilDailyTrades;
     }
 

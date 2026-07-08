@@ -806,6 +806,16 @@ From `OPF_RESEARCH_1.18`, Actual execution returns to the main volume/profitabil
 - The instrument hard risk cap is not raised, no new setup type is enabled, and TP behavior remains unchanged from v1.15-v1.17.
 - The expected validation question is whether low-trade days gain enough extra high-quality Actual trades to move the June average closer to 5/day without making losing days such as 6/3, 6/17, 6/18, and 6/22 materially worse.
 
+From `OPF_RESEARCH_1.19`, Actual execution keeps the v1.18 mainline volume/profitability track and makes one controlled low-volume expansion:
+
+- Actual defaults now use `ACTUAL_EXEC_1.55`.
+- The low-volume-day `ObservationConfirm` quality rescue remains enabled, but its max planned risk is tightened from `22` to `21.5` points to reduce entry-fill risk drift and avoid `ENTRY_FILLED_RISK_EXCEEDED` emergency flatten events.
+- `FailureReverse_ObservationInvalidated_WideStop1_5R` is added as an Actual-eligible low-volume-day filler only before the day reaches 5 Actual trades, using the existing `DailyVolumeFloor` rules: `SetupQualityScore >= 48`, risk `<= 18`, and the relaxed floor RR check.
+- Long immediate-failure entries remain disabled for both the normal and wide-stop invalidated paths. The v1.19 filler is therefore primarily a controlled Short failure supplement, not a new setup family.
+- Executed wide invalidated filler rows include `FailureInvalidatedWideFillerV119` in `execution_decisions.csv`; quality rescue rows now include `DailyVolumeQualityRescueV119`.
+- TP behavior, SL behavior, instrument hard risk cap, and broad `BreakawayFvg` disablement are unchanged.
+- The expected validation question is whether June-like low-trade days move closer to 5 Actual trades/day without giving back the v1.18 rescue profit contribution or increasing abnormal flatten events.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
