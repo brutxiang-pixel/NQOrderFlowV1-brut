@@ -593,6 +593,8 @@ From `OPF_RESEARCH_1.05`, Actual execution defaults use `ACTUAL_EXEC_1.45`. Low-
 
 From `OPF_RESEARCH_1.10`, Actual execution defaults use `ACTUAL_EXEC_1.46`. Broad `BreakawayFvg` Actual orders are skipped with `BreakawayBroadDisabledV110`, while `BreakawayFvg_Qualified` remains independently testable. Long `ObservationConfirm` rows in the expanded 11-18 point risk band are skipped with `LongObservationRiskExpansionQualityCutV110` when `SetupQualityScore < 70`. Research rows continue to be written for skipped signals. Actual-verified research outcome duplicate protection uses the Actual trade id so the lifecycle audit should report zero duplicate Actual-verified rows.
 
+From `OPF_RESEARCH_1.11`, Actual execution defaults use `ACTUAL_EXEC_1.47`. Long `ObservationConfirm` rows in the expanded 11-18 point risk band are skipped with `LongObservationRiskExpansionDisabledV111` regardless of setup score. Short expanded-risk `ObservationConfirm` rows remain allowed. Actual-verified research outcome duplicate protection keys directly on `ActualTradeID`, so adjacent tracker entry bars for the same actual trade should not create duplicate Actual-verified rows.
+
 ## edge_attribution.csv
 
 File pattern:

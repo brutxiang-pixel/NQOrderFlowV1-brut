@@ -33,7 +33,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal DailyVolumeFloorMinSetupQualityScore = 48m;
     private const decimal DailyVolumeFloorMaxRiskPoints = 18m;
     private const decimal DailyVolumeFloorMinEstimatedRr = 0.5m;
-    private const decimal LongObservationRiskExpansionMinSetupQualityScore = 70m;
     private const decimal ZoneQualityThreshold = 70m;
     private const decimal SetupQualityThreshold = 80m;
     private const int MaxPullbackBars = 24;
@@ -2067,8 +2066,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (maxObservationRisk > 0m && risk > maxObservationRisk)
                 reasons.Add($"ObservationConfirmRiskCapExceeded:risk={risk:0.##},max={maxObservationRisk:0.##}");
 
-            if (IsLongObservationRiskExpansionQualityCut(signal, risk))
-                reasons.Add($"LongObservationRiskExpansionQualityCutV110:score={signal.SetupQualityScore.TotalScore:0.##},min={LongObservationRiskExpansionMinSetupQualityScore:0.##},risk={risk:0.##}");
+            if (IsLongObservationRiskExpansionDisabled(signal, risk))
+                reasons.Add($"LongObservationRiskExpansionDisabledV111:risk={risk:0.##}");
         }
         if (IsFailureRetestPath(researchPath) && !isDailyVolumeFloor && _actualFailureRetestMaxRiskPoints > 0m && risk > _actualFailureRetestMaxRiskPoints)
             reasons.Add($"FailureRetestRiskCapExceeded:risk={risk:0.##},max={_actualFailureRetestMaxRiskPoints:0.##}");
@@ -2094,12 +2093,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return reasons.ToArray();
     }
 
-    private bool IsLongObservationRiskExpansionQualityCut(CandidateSignal signal, decimal risk)
+    private bool IsLongObservationRiskExpansionDisabled(CandidateSignal signal, decimal risk)
     {
         return signal.Side == TradeSide.Long &&
             risk > _actualObservationConfirmMaxRiskPoints &&
-            risk <= _actualObservationConfirmVolumeMaxRiskPoints &&
-            signal.SetupQualityScore.TotalScore < LongObservationRiskExpansionMinSetupQualityScore;
+            risk <= _actualObservationConfirmVolumeMaxRiskPoints;
     }
 
     private decimal TargetFromRisk(TradeSide side, decimal entry, decimal risk)
@@ -3577,8 +3575,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private bool TryMarkResearchOutcomeWritten(ResearchTracker tracker, int exitBar)
     {
         var actual = ActualOutcomeFor(tracker);
-        if (actual?.ActualVerified == true)
-            return _writtenResearchOutcomeKeys.Add($"{tracker.Signal.SignalId}|{tracker.ResearchPath}|{tracker.EntryBar}|{actual.ActualTradeId}");
+        if (actual?.ActualVerified == true && !string.IsNullOrWhiteSpace(actual.ActualTradeId))
+            return _writtenResearchOutcomeKeys.Add($"ActualTrade|{actual.ActualTradeId}");
 
         return _writtenResearchOutcomeKeys.Add($"{tracker.Signal.SignalId}|{tracker.ResearchPath}|{tracker.EntryBar}|{exitBar}");
     }

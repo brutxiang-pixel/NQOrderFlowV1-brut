@@ -740,6 +740,15 @@ From `OPF_RESEARCH_1.10`, Actual execution starts the quality-optimization phase
 - Actual-verified research outcome de-duplication now uses `SignalID + ResearchPath + EntryBar + ActualTradeID`, preventing a completed Actual trade from also being written again at a later research-window exit bar.
 - The expected validation question is whether v1.10 reduces `SL_no_MFE`, especially on Long expanded-risk ObservationConfirm entries, while keeping full-day average Actual trades near or above 5.
 
+From `OPF_RESEARCH_1.11`, Actual execution tightens the v1.10 quality experiment without changing setup families:
+
+- Actual defaults now use `ACTUAL_EXEC_1.47`.
+- Long `ObservationConfirm` is no longer allowed to use the low-volume-day 11-18 point expanded risk band. Skipped rows are marked `LongObservationRiskExpansionDisabledV111`.
+- Short `ObservationConfirm` can still use the v1.05 11-18 point expanded risk band because it remained positive in the v1.10 evidence batch.
+- Base-risk Long `ObservationConfirm` rows keep the v1.05/v1.10 rules, so this does not disable Long trading globally.
+- Actual-verified research outcome duplicate protection now keys directly on `ActualTradeID`, covering cases where the same Actual trade is associated with adjacent research tracker entry bars.
+- The expected validation question is whether v1.11 keeps average Actual trades near or above 5/day while removing the negative Long `DailyVolumeBaseRisk18` subgroup and reducing duplicate Actual-verified rows to zero.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
