@@ -2124,7 +2124,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ActualTargetRFor(CandidateSignal signal, string researchPath, decimal risk)
     {
-        if (signal.Side != TradeSide.Long)
+        return ActualTargetRFor(signal.Side, researchPath, risk);
+    }
+
+    private decimal ActualTargetRFor(TradeSide side, string researchPath, decimal risk)
+    {
+        if (side != TradeSide.Long)
             return ReplayTargetR;
 
         if (risk <= 11m || risk > 15m)
@@ -2512,6 +2517,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         stop = AlignToTick(stop, _snapshot.InstrumentProfile.TickSize);
         var risk = Math.Abs(entry - stop);
+        var oldTargetR = execution.TargetR;
+        execution.TargetR = ActualTargetRFor(execution.Side, execution.ResearchPath, risk);
         var target = execution.Side == TradeSide.Long
             ? entry + risk * execution.TargetR
             : entry - risk * execution.TargetR;
@@ -2519,7 +2526,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         execution.Stop = stop;
         execution.InitialRiskPoints = risk;
         execution.Target = AlignToTick(target, _snapshot.InstrumentProfile.TickSize);
-        LogExecutionInfo($"EXEC_BRACKET_REPRICE trade={execution.TradeId} fillEntry={entry:0.########} stop={execution.Stop:0.########} target={execution.Target:0.########} risk={risk:0.########}");
+        var targetRReason = oldTargetR == execution.TargetR ? string.Empty : $" targetRChanged={oldTargetR:0.##}->{execution.TargetR:0.##}";
+        LogExecutionInfo($"EXEC_BRACKET_REPRICE trade={execution.TradeId} fillEntry={entry:0.########} stop={execution.Stop:0.########} target={execution.Target:0.########} risk={risk:0.########} targetR={execution.TargetR:0.##}{targetRReason}");
     }
 
     private void EnqueueExecutionAction(string tag, Func<Task> action)
@@ -2786,6 +2794,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             execution.Target,
             execution.InitialRiskPoints,
             execution.TargetR,
+            execution.PlannedTargetR,
+            Math.Round(execution.TargetR - execution.PlannedTargetR, 4),
             pointsR,
             exitRole,
             points,
@@ -3520,6 +3530,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed2R", 2m, tracker.First2RBar);
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed2_5R", 2.5m, tracker.First2_5RBar);
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed3R", 3m, tracker.First3RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE_Then2_5R", 2.5m, tracker.First2_5RBar, 0m, tracker.FirstBreakEvenAfter1_5RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1R_Then2_5R", 2.5m, tracker.First2_5RBar, 1m, tracker.First1RLockAfter1_5RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE_Then3R", 3m, tracker.First3RBar, 0m, tracker.FirstBreakEvenAfter1_5RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1R_Then3R", 3m, tracker.First3RBar, 1m, tracker.First1RLockAfter1_5RBar);
     }
 
     private void AppendExitPolicyEvaluation(ResearchTracker tracker, OpfCandle exitCandle, string exitPolicy, decimal targetR, int? firstTargetBar)
@@ -3531,6 +3545,50 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             ? tracker.Entry + tracker.InitialRiskPoints * targetR
             : tracker.Entry - tracker.InitialRiskPoints * targetR;
         var result = ResolveExitPolicy(tracker, exitCandle, targetR, firstTargetBar);
+
+        _researchLogger?.AppendExitPolicyEvaluation(
+            _snapshot.SnapshotId,
+            tracker.Signal.SignalId,
+            tracker.EntryTime,
+            tracker.EntryBar,
+            exitCandle.Time,
+            exitCandle.Bar,
+            tracker.Signal.Side.ToString(),
+            tracker.ResearchPath,
+            exitPolicy,
+            result.ExitReason,
+            tracker.Entry,
+            tracker.Stop,
+            target,
+            result.ExitPrice,
+            tracker.InitialRiskPoints,
+            targetR,
+            result.PnlPoints,
+            result.PnlR,
+            Math.Max(0, exitCandle.Bar - tracker.EntryBar),
+            result.Ambiguous,
+            tracker.FirstStopBar,
+            firstTargetBar,
+            tracker.MfeR,
+            tracker.MaeR);
+    }
+
+    private void AppendProtectedExtensionPolicyEvaluation(
+        ResearchTracker tracker,
+        OpfCandle exitCandle,
+        string exitPolicy,
+        decimal targetR,
+        int? firstTargetBar,
+        decimal lockR,
+        int? firstProtectStopBar)
+    {
+        if (_snapshot is null)
+            return;
+
+        var target = tracker.Signal.Side == TradeSide.Long
+            ? tracker.Entry + tracker.InitialRiskPoints * targetR
+            : tracker.Entry - tracker.InitialRiskPoints * targetR;
+        var result = ResolveProtectedExtensionPolicy(tracker, exitCandle, targetR, firstTargetBar, lockR, firstProtectStopBar);
 
         _researchLogger?.AppendExitPolicyEvaluation(
             _snapshot.SnapshotId,
@@ -3575,6 +3633,30 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return new ExitPolicyResult("TimeStop", exitCandle.Close, points, pnlR, false);
     }
 
+    private static ExitPolicyResult ResolveProtectedExtensionPolicy(
+        ResearchTracker tracker,
+        OpfCandle exitCandle,
+        decimal targetR,
+        int? firstTargetBar,
+        decimal lockR,
+        int? firstProtectStopBar)
+    {
+        var firstStopBar = tracker.FirstStopBar;
+        var first1_5RBar = tracker.First1_5RBar;
+        if (!first1_5RBar.HasValue)
+            return firstStopBar.HasValue ? StopExit(tracker, false) : TimeStopExit(tracker, exitCandle, "TimeStop");
+        if (firstStopBar.HasValue && firstStopBar.Value <= first1_5RBar.Value)
+            return StopExit(tracker, false);
+
+        var ambiguous = firstProtectStopBar.HasValue && firstTargetBar.HasValue && firstProtectStopBar.Value == firstTargetBar.Value;
+        if (firstTargetBar.HasValue && (!firstProtectStopBar.HasValue || firstTargetBar.Value < firstProtectStopBar.Value))
+            return TargetExit(tracker, targetR, ambiguous);
+        if (firstProtectStopBar.HasValue && (!firstTargetBar.HasValue || firstProtectStopBar.Value <= firstTargetBar.Value))
+            return ProtectedStopExit(tracker, lockR, ambiguous);
+
+        return TimeStopExit(tracker, exitCandle, "TimeStopAfter1_5R");
+    }
+
     private static ExitPolicyResult TargetExit(ResearchTracker tracker, decimal targetR, bool ambiguous)
     {
         var points = tracker.InitialRiskPoints * targetR;
@@ -3584,10 +3666,29 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return new ExitPolicyResult("Target", exitPrice, points, targetR, ambiguous);
     }
 
+    private static ExitPolicyResult TimeStopExit(ResearchTracker tracker, OpfCandle exitCandle, string reason)
+    {
+        var points = tracker.Signal.Side == TradeSide.Long
+            ? exitCandle.Close - tracker.Entry
+            : tracker.Entry - exitCandle.Close;
+        var pnlR = tracker.InitialRiskPoints <= 0m ? 0m : Math.Round(points / tracker.InitialRiskPoints, 4);
+        return new ExitPolicyResult(reason, exitCandle.Close, points, pnlR, false);
+    }
+
     private static ExitPolicyResult StopExit(ResearchTracker tracker, bool ambiguous)
     {
         var points = -tracker.InitialRiskPoints;
         return new ExitPolicyResult("Stop", tracker.Stop, points, -1m, ambiguous);
+    }
+
+    private static ExitPolicyResult ProtectedStopExit(ResearchTracker tracker, decimal lockR, bool ambiguous)
+    {
+        var points = tracker.InitialRiskPoints * lockR;
+        var exitPrice = tracker.Signal.Side == TradeSide.Long
+            ? tracker.Entry + points
+            : tracker.Entry - points;
+        var reason = lockR <= 0m ? "ProtectBE" : $"Protect{lockR:0.##}R";
+        return new ExitPolicyResult(reason, exitPrice, points, lockR, ambiguous);
     }
 
     private ResearchLogger.ActualOutcome? ActualOutcomeFor(ResearchTracker tracker)
@@ -4197,6 +4298,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             InitialRiskPoints = initialRiskPoints;
             PlannedRiskPoints = initialRiskPoints;
             MaxAllowedRiskPoints = maxAllowedRiskPoints;
+            PlannedTargetR = targetR;
             TargetR = targetR;
             EntryOrder = entryOrder;
         }
@@ -4214,7 +4316,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public decimal InitialRiskPoints { get; set; }
         public decimal PlannedRiskPoints { get; }
         public decimal MaxAllowedRiskPoints { get; }
-        public decimal TargetR { get; }
+        public decimal PlannedTargetR { get; }
+        public decimal TargetR { get; set; }
         public Order? EntryOrder { get; set; }
         public decimal EntryFilledQty { get; set; }
         public decimal EntryAvgPrice { get; set; }
@@ -4352,6 +4455,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public int? First2RBar { get; private set; }
         public int? First2_5RBar { get; private set; }
         public int? First3RBar { get; private set; }
+        public int? FirstBreakEvenAfter1_5RBar { get; private set; }
+        public int? First1RLockAfter1_5RBar { get; private set; }
         public int? TimeTo1RMinutes { get; private set; }
         public int? TimeToMfeMinutes { get; private set; }
         public decimal MaxHeatBefore1R { get; private set; }
@@ -4392,6 +4497,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public void Update(OpfCandle candle)
         {
             var priorMfe = MfePoints;
+            var had1_5RBeforeThisBar = First1_5RBar.HasValue && candle.Bar > First1_5RBar.Value;
             decimal currentMfe;
             decimal currentMae;
 
@@ -4401,6 +4507,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 currentMae = Entry - candle.Low;
                 if (candle.Low <= Stop)
                     FirstStopBar ??= candle.Bar;
+                if (had1_5RBeforeThisBar && candle.Low <= Entry)
+                    FirstBreakEvenAfter1_5RBar ??= candle.Bar;
+                if (had1_5RBeforeThisBar && candle.Low <= Entry + InitialRiskPoints)
+                    First1RLockAfter1_5RBar ??= candle.Bar;
             }
             else
             {
@@ -4408,6 +4518,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 currentMae = candle.High - Entry;
                 if (candle.High >= Stop)
                     FirstStopBar ??= candle.Bar;
+                if (had1_5RBeforeThisBar && candle.High >= Entry)
+                    FirstBreakEvenAfter1_5RBar ??= candle.Bar;
+                if (had1_5RBeforeThisBar && candle.High >= Entry - InitialRiskPoints)
+                    First1RLockAfter1_5RBar ??= candle.Bar;
             }
 
             MfePoints = Math.Max(MfePoints, currentMfe);

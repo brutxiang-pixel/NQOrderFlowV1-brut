@@ -359,6 +359,8 @@ Important fields:
 - `TargetPrice`
 - `InitialRiskPoints`
 - `TargetR`
+- `PlannedTargetR`
+- `TargetRDrift`
 - `PointsR`
 - `ExitRole`
 - `Points`
@@ -380,6 +382,8 @@ From `OPF_RESEARCH_0.41`, `execution_trades.csv` also includes R-based execution
 
 - `InitialRiskPoints`
 - `TargetR`
+- `PlannedTargetR`
+- `TargetRDrift`
 - `PointsR`
 - `RiskDollars`
 - `TargetDollars`
@@ -602,6 +606,8 @@ From `OPF_RESEARCH_1.12`, Actual execution defaults use `ACTUAL_EXEC_1.48`. Shor
 From `OPF_RESEARCH_1.13`, Actual execution defaults use `ACTUAL_EXEC_1.49` with unchanged executable rules from v1.12. `research_outcomes.csv` adds `Hit2_5R`, `Hit3R`, `First2_5RBar`, and `First3RBar`. `exit_policy_evaluations.csv` adds `Fixed3R`. This version is a profit-extension research pass for deciding whether later versions should tier TP beyond the current fixed 1.5R actual target.
 
 From `OPF_RESEARCH_1.14`, Actual execution defaults use `ACTUAL_EXEC_1.50`. Entry rules remain unchanged from v1.12/v1.13, but Long `ObservationConfirm` executions with `11 < InitialRiskPoints <= 15` use `TargetR=3`, and Long `ObservationConfirm_WideStop1_5R` executions with `11 < InitialRiskPoints <= 15` use `TargetR=2.5`. Other rows remain at the default `ActualTargetR=1.5`. Executed override rows include `LongProfitExtensionV114` in `execution_decisions.csv`, and `execution_trades.csv` records the per-trade `TargetR`.
+
+From `OPF_RESEARCH_1.15`, Actual execution defaults use `ACTUAL_EXEC_1.51`. The final `TargetR` is recalculated after entry fill / bracket reprice from filled risk, and `execution_trades.csv` adds `PlannedTargetR` and `TargetRDrift`. `exit_policy_evaluations.csv` adds protected-extension policies `ProtectBE_Then2_5R`, `Protect1R_Then2_5R`, `ProtectBE_Then3R`, and `Protect1R_Then3R`; these are research-only rows and do not submit live/replay stop modifications.
 
 ## edge_attribution.csv
 

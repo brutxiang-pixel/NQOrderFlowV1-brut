@@ -685,6 +685,8 @@ public sealed class ResearchLogger
         decimal targetPrice,
         decimal initialRiskPoints,
         decimal targetR,
+        decimal plannedTargetR,
+        decimal targetRDrift,
         decimal pointsR,
         string exitRole,
         decimal points,
@@ -710,7 +712,7 @@ public sealed class ResearchLogger
         decimal rawPointsR)
     {
         var path = Path.Combine(_directory, $"{snapshotId}_execution_trades.csv");
-        EnsureHeader(path, ContextHeader("SignalID,TradeID,EntryTime,EntryBar,ExitTime,ExitBar,Side,ResearchPath,Quantity,EntryPrice,ExitPrice,StopPrice,TargetPrice,InitialRiskPoints,TargetR,PointsR,ExitRole,Points,Dollars,RiskDollars,TargetDollars,ActualMFEPoints,ActualMAEPoints,ActualMFE_R,ActualMAE_R,PlannedRiskPoints,FilledRiskPoints,RiskDriftPoints,DailyPnlAfterDollars,DailyTradeCount,DailyConsecutiveLosses,IsAbnormalExecution,AbnormalReason,ExpectedExitPrice,ExitPriceDriftPoints,RawPoints,RawDollars,RawPointsR"));
+        EnsureHeader(path, ContextHeader("SignalID,TradeID,EntryTime,EntryBar,ExitTime,ExitBar,Side,ResearchPath,Quantity,EntryPrice,ExitPrice,StopPrice,TargetPrice,InitialRiskPoints,TargetR,PlannedTargetR,TargetRDrift,PointsR,ExitRole,Points,Dollars,RiskDollars,TargetDollars,ActualMFEPoints,ActualMAEPoints,ActualMFE_R,ActualMAE_R,PlannedRiskPoints,FilledRiskPoints,RiskDriftPoints,DailyPnlAfterDollars,DailyTradeCount,DailyConsecutiveLosses,IsAbnormalExecution,AbnormalReason,ExpectedExitPrice,ExitPriceDriftPoints,RawPoints,RawDollars,RawPointsR"));
         File.AppendAllText(path,
             string.Join(",",
                 ContextValues(snapshotId),
@@ -729,6 +731,8 @@ public sealed class ResearchLogger
                 targetPrice,
                 initialRiskPoints,
                 targetR,
+                plannedTargetR,
+                targetRDrift,
                 pointsR,
                 Csv(exitRole),
                 points,

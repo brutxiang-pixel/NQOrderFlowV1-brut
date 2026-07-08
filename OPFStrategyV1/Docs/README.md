@@ -774,6 +774,16 @@ From `OPF_RESEARCH_1.14`, Actual execution starts a controlled profit-capture te
 - Executed rows using this override include `LongProfitExtensionV114` in `execution_decisions.csv`; `execution_trades.csv` records the per-trade `TargetR`.
 - The expected validation question is whether Long profit extension increases NetR and NetDollars without materially increasing abnormal exits or reducing the average Actual trade count near 5/day.
 
+From `OPF_RESEARCH_1.15`, Actual execution keeps the v1.14 entry set and fixes profit-extension measurement:
+
+- Actual defaults now use `ACTUAL_EXEC_1.51`.
+- The final Actual `TargetR` is selected after entry fill / bracket reprice using filled risk, so the executed TP bucket matches `FilledRiskPoints` rather than only the pre-fill planned risk.
+- `execution_trades.csv` adds `PlannedTargetR` and `TargetRDrift` so fills that move a trade into or out of a profit-extension bucket are auditable.
+- `exit_policy_evaluations.csv` adds protected-extension research rows: `ProtectBE_Then2_5R`, `Protect1R_Then2_5R`, `ProtectBE_Then3R`, and `Protect1R_Then3R`.
+- Protected-extension research is diagnostic only: actual orders are still bracket orders, and no live/replay stop movement is submitted by this version.
+- Protection is modeled conservatively: after a signal first reaches `1.5R`, the BE or 1R protected stop can trigger only from the next bar onward.
+- The expected validation question is whether protected extension keeps most of the 1.5R profit while preserving enough upside to improve NetR / NetDollars versus fixed 1.5R and bare 2.5R/3R targets.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
