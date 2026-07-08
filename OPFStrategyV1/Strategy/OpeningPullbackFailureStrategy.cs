@@ -33,6 +33,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal DailyVolumeFloorMinSetupQualityScore = 48m;
     private const decimal DailyVolumeFloorMaxRiskPoints = 18m;
     private const decimal DailyVolumeFloorMinEstimatedRr = 0.5m;
+    private const decimal DailyVolumeQualityRescueMinSetupQualityScore = 70m;
+    private const decimal DailyVolumeQualityRescueMaxRiskPoints = 22m;
+    private const decimal DailyVolumeQualityRescueMinEstimatedRr = 0.8m;
+    private const int DailyVolumeQualityRescueMaxTradesPerDay = 2;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
     private const decimal ShortObservationMidRiskQualityCutMinScore = 60m;
@@ -98,6 +102,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private int _replaySlToday;
     private int _replayOtherExitToday;
     private int _observationConfirmFillerTradesToday;
+    private int _observationConfirmQualityRescueTradesToday;
     private int _replayFullLossTradesToday;
     private int _replayConsecutiveLossesToday;
     private decimal _replayDailyPnlDollars;
@@ -1782,6 +1787,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             executeReasons.Add($"ObservationRiskExpansion:risk={risk:0.##},base={_actualObservationConfirmMaxRiskPoints:0.##},max={_actualObservationConfirmVolumeMaxRiskPoints:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
             executeReasons.Add("DailyVolumeBaseRisk18");
         }
+        if (IsDailyVolumeQualityRescue(signal, researchPath, risk))
+            executeReasons.Add($"DailyVolumeQualityRescueV118:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
             executeReasons.Add($"FailureRetestWideFiller:dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
         if (targetR != ReplayTargetR)
@@ -1792,6 +1799,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _replayTradesToday++;
         if (isObservationFiller)
             _observationConfirmFillerTradesToday++;
+        if (IsDailyVolumeQualityRescue(signal, researchPath, risk))
+            _observationConfirmQualityRescueTradesToday++;
         EnqueueExecutionAction("OpenReplayEntry", async () => await OpenOrderAsync(entryOrder));
     }
 
@@ -1929,6 +1938,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ObservationConfirmRiskCap(CandidateSignal signal, string researchPath)
     {
+        if (IsDailyVolumeQualityRescueAllowed(signal, researchPath))
+            return Math.Max(_actualObservationConfirmMaxRiskPoints, DailyVolumeQualityRescueMaxRiskPoints);
         if (IsObservationConfirmVolumeRiskExpansionAllowed(signal, researchPath))
             return Math.Max(_actualObservationConfirmMaxRiskPoints, _actualObservationConfirmVolumeMaxRiskPoints);
 
@@ -1970,6 +1981,21 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return false;
 
         return signal.SetupQualityScore.TotalScore >= _actualObservationConfirmFillerMinSetupQualityScore;
+    }
+
+    private bool IsDailyVolumeQualityRescue(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        return IsDailyVolumeQualityRescueAllowed(signal, researchPath) &&
+            risk > _actualObservationConfirmVolumeMaxRiskPoints &&
+            risk <= DailyVolumeQualityRescueMaxRiskPoints;
+    }
+
+    private bool IsDailyVolumeQualityRescueAllowed(CandidateSignal signal, string researchPath)
+    {
+        return IsObservationConfirmPath(researchPath) &&
+            _replayTradesToday < _actualObservationConfirmFillerUntilDailyTrades &&
+            _observationConfirmQualityRescueTradesToday < DailyVolumeQualityRescueMaxTradesPerDay &&
+            signal.SetupQualityScore.TotalScore >= DailyVolumeQualityRescueMinSetupQualityScore;
     }
 
     private static bool IsImmediateFailureReversePath(CandidateSignal signal, string researchPath)
@@ -2078,6 +2104,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var instrument = _snapshot.InstrumentProfile;
         var isDailyVolumeFloor = IsDailyVolumeFloorAllowed(signal, researchPath);
         var isObservationVolumeRiskBand = IsObservationConfirmVolumeRiskExpansion(signal, researchPath, risk);
+        var isDailyVolumeQualityRescue = IsDailyVolumeQualityRescue(signal, researchPath, risk);
         if (isDailyVolumeFloor && risk > DailyVolumeFloorMaxRiskPoints)
             reasons.Add($"DailyVolumeFloorRiskCapExceeded:risk={risk:0.##},max={DailyVolumeFloorMaxRiskPoints:0.##}");
         if (IsBreakawayPath(researchPath) && _actualBreakawayMaxRiskPoints > 0m && risk > _actualBreakawayMaxRiskPoints)
@@ -2103,13 +2130,15 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         var atr14 = CalculateAtr14(entryCandle);
         var maxAllowedRisk = MaxAllowedRiskPoints(instrument, atr14);
-        if (!isDailyVolumeFloor && !isObservationVolumeRiskBand && maxAllowedRisk > 0m && risk > maxAllowedRisk)
+        if (!isDailyVolumeFloor && !isObservationVolumeRiskBand && !isDailyVolumeQualityRescue && maxAllowedRisk > 0m && risk > maxAllowedRisk)
             reasons.Add($"RiskTooWideVolAdjusted:risk={risk:0.##},max={maxAllowedRisk:0.##},atr14={atr14:0.##}");
 
         var reward = EstimateActualExecutionReward(signal, researchPath, entryCandle.Close, risk);
         var estimatedRr = reward.Points <= 0m || risk <= 0m ? 0m : Math.Round(reward.Points / risk, 4);
         var minEstimatedRr = isDailyVolumeFloor
             ? DailyVolumeFloorMinEstimatedRr
+            : isDailyVolumeQualityRescue
+                ? DailyVolumeQualityRescueMinEstimatedRr
             : ActualMinEstimatedRr > 0m ? ActualMinEstimatedRr : instrument.MinEstimatedRr;
         if (minEstimatedRr > 0m && estimatedRr < minEstimatedRr)
             reasons.Add($"EstimatedRRTooLow:rr={estimatedRr:0.####},min={minEstimatedRr:0.##},reward={reward.Points:0.##},model={reward.Model}");
@@ -2205,6 +2234,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _replaySlToday = 0;
         _replayOtherExitToday = 0;
         _observationConfirmFillerTradesToday = 0;
+        _observationConfirmQualityRescueTradesToday = 0;
         _replayFullLossTradesToday = 0;
         _replayConsecutiveLossesToday = 0;
         _replayDailyPnlDollars = 0m;

@@ -613,6 +613,8 @@ From `OPF_RESEARCH_1.16`, Actual execution defaults use `ACTUAL_EXEC_1.52`. `OnS
 
 From `OPF_RESEARCH_1.17`, Actual execution defaults use `ACTUAL_EXEC_1.53`. Actual entries during the replay stop guard window are skipped with `ReplayStopGuard` / `SKIP_REPLAY_STOP_GUARD`. Stop-time protection cleanup retries up to three times before leaving a pending/stale audit trail.
 
+From `OPF_RESEARCH_1.18`, Actual execution defaults use `ACTUAL_EXEC_1.54`. Low-volume-day `ObservationConfirm` rows can execute as `DailyVolumeQualityRescueV118` when the day has fewer than 5 Actual trades, `SetupQualityScore >= 70`, risk is between 18 and 22 points, and `EstimatedRR >= 0.8`. This is a tagged volume experiment, not a new setup family.
+
 ## edge_attribution.csv
 
 File pattern:

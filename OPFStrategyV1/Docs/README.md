@@ -798,6 +798,14 @@ From `OPF_RESEARCH_1.17`, Actual execution keeps the v1.15/v1.16 entry/TP rules 
 - `OnStopped()` now retries protection cleanup up to three times before giving up, so stop-time cleanup does not depend only on a later `OnOrderChanged` callback.
 - The expected validation question is whether June replay no longer produces `ACTIVE_ON_STOP` / `STOPPED` trades while preserving the rest of v1.15/v1.16 behavior.
 
+From `OPF_RESEARCH_1.18`, Actual execution returns to the main volume/profitability track without adding new setup families:
+
+- Actual defaults now use `ACTUAL_EXEC_1.54`.
+- A low-volume-day `ObservationConfirm` quality rescue can execute only before the day reaches 5 Actual trades, with `SetupQualityScore >= 70`, risk `> 18` and `<= 22` points, and `EstimatedRR >= 0.8`.
+- Executed rescue rows include `DailyVolumeQualityRescueV118` in `execution_decisions.csv` so the next replay can compare this subgroup against base `ObservationConfirm`, `DailyVolumeBaseRisk18`, and wide-stop fillers.
+- The instrument hard risk cap is not raised, no new setup type is enabled, and TP behavior remains unchanged from v1.15-v1.17.
+- The expected validation question is whether low-trade days gain enough extra high-quality Actual trades to move the June average closer to 5/day without making losing days such as 6/3, 6/17, 6/18, and 6/22 materially worse.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
