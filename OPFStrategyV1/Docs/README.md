@@ -791,6 +791,13 @@ From `OPF_RESEARCH_1.16`, Actual execution keeps the v1.15 entry/TP rules and fi
 - `execution_events.csv` now records `ORDER_STATE_FAILED` and `CANCEL_FAIL` when ATAS reports failed/rejected protection orders or cancel failures, so the readiness gate no longer misses failures that previously only appeared in `research.log`.
 - The expected validation question is whether a 6/18-focused replay ends with `ExecutedDecisions = ExecutionTrades = ActualVerifiedUniqueTrades`, every Actual exit has `PROTECTION_CLEANUP_DONE`, and there are no unclosed `ACTIVE_ON_STOP`, `CANCEL_FAIL`, `ORDER_STATE_FAILED`, `STALE`, `REJECT`, or `FAILED` audit events.
 
+From `OPF_RESEARCH_1.17`, Actual execution keeps the v1.15/v1.16 entry/TP rules and tightens replay stop safety:
+
+- Actual defaults now use `ACTUAL_EXEC_1.53`.
+- New Actual entries are skipped with `ReplayStopGuard` / `SKIP_REPLAY_STOP_GUARD` during the expected replay stop window: 20:40 or later, and 16:40 or later on Friday/early-close style replay days.
+- `OnStopped()` now retries protection cleanup up to three times before giving up, so stop-time cleanup does not depend only on a later `OnOrderChanged` callback.
+- The expected validation question is whether June replay no longer produces `ACTIVE_ON_STOP` / `STOPPED` trades while preserving the rest of v1.15/v1.16 behavior.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

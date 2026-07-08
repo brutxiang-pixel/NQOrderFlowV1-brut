@@ -39,6 +39,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ZoneQualityThreshold = 70m;
     private const decimal SetupQualityThreshold = 80m;
     private const int MaxPullbackBars = 24;
+    private static readonly TimeSpan ReplayStopGuardStart = new(20, 40, 0);
+    private static readonly TimeSpan FridayReplayStopGuardStart = new(16, 40, 0);
     private readonly IZoneDetector _zoneDetector = new FvgZoneDetector(
         minGapPoints: 0.50m,
         maxGapPoints: 12m,
@@ -1624,6 +1626,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_STRATEGY_STOPPING", "-", researchPath, entryCandle.Close, 0m, "StrategyStopping");
             return;
         }
+        if (IsReplayStopGuardWindow(entryCandle.Time))
+        {
+            AppendExecutionDecision(signal, entryCandle, "Skip", "ReplayStopGuard", researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_REPLAY_STOP_GUARD", "-", researchPath, entryCandle.Close, 0m, "ReplayStopGuard");
+            return;
+        }
         if (!IsReplayExecutionPathEnabled(researchPath))
         {
             AppendExecutionDecision(signal, entryCandle, "Skip", "PathDisabled", researchPath, stop, risk);
@@ -2887,7 +2895,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
             try
             {
-                CleanupProtectionOrdersAsync(execution, "StrategyStoppedNoEntryFill").GetAwaiter().GetResult();
+                CleanupProtectionOrdersOnStop(execution, "StrategyStoppedNoEntryFill");
             }
             catch (Exception ex)
             {
@@ -2924,7 +2932,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         try
         {
-            CleanupProtectionOrdersAsync(execution, "StrategyStopped").GetAwaiter().GetResult();
+            CleanupProtectionOrdersOnStop(execution, "StrategyStopped");
         }
         catch (Exception ex)
         {
@@ -3048,6 +3056,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return execution is not null && (!execution.ExitCompleted || execution.ProtectionCleanupPending);
     }
 
+    private static bool IsReplayStopGuardWindow(DateTime time)
+    {
+        var t = time.TimeOfDay;
+        return t >= ReplayStopGuardStart ||
+            (time.DayOfWeek == DayOfWeek.Friday && t >= FridayReplayStopGuardStart);
+    }
+
     private static int CountWorkingProtectionOrders(ReplayExecutionState execution)
     {
         var count = 0;
@@ -3090,6 +3105,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             state.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) ||
             state.Equals("Rejected", StringComparison.OrdinalIgnoreCase) ||
             state.Equals("Failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void CleanupProtectionOrdersOnStop(ReplayExecutionState execution, string reason)
+    {
+        for (var attempt = 0; attempt < 3 && NeedsProtectionCleanup(execution); attempt++)
+        {
+            CleanupProtectionOrdersAsync(execution, reason).GetAwaiter().GetResult();
+            if (NeedsProtectionCleanup(execution))
+                Task.Delay(250).GetAwaiter().GetResult();
+        }
     }
 
     private static bool IsFailedOrderState(string state)

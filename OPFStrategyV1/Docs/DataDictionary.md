@@ -611,6 +611,8 @@ From `OPF_RESEARCH_1.15`, Actual execution defaults use `ACTUAL_EXEC_1.51`. The 
 
 From `OPF_RESEARCH_1.16`, Actual execution defaults use `ACTUAL_EXEC_1.52`. `OnStopped()` prevents new Actual entries while the strategy is closing, logging `StrategyStopping` / `SKIP_STRATEGY_STOPPING` instead. `execution_events.csv` also records `ORDER_STATE_FAILED` and `CANCEL_FAIL` so failed/rejected protection-order states and cancel failures are included in lifecycle audits.
 
+From `OPF_RESEARCH_1.17`, Actual execution defaults use `ACTUAL_EXEC_1.53`. Actual entries during the replay stop guard window are skipped with `ReplayStopGuard` / `SKIP_REPLAY_STOP_GUARD`. Stop-time protection cleanup retries up to three times before leaving a pending/stale audit trail.
+
 ## edge_attribution.csv
 
 File pattern:
