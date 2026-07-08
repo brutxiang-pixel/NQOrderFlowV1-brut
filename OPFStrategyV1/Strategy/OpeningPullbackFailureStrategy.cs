@@ -1787,7 +1787,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (IsDailyVolumeFloorAllowed(signal, researchPath))
             executeReasons.Add($"DailyVolumeFloor:{researchPath},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
         if (IsMainlineVolumeFiller(signal, researchPath))
-            executeReasons.Add($"{MainlineVolumeFillerTag(researchPath)}:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
+            executeReasons.Add($"{MainlineVolumeFillerTag(researchPath)}:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},dailyTrades={_replayTradesToday}");
         if (IsObservationConfirmVolumeRiskExpansion(signal, researchPath, risk))
         {
             executeReasons.Add($"ObservationRiskExpansion:risk={risk:0.##},base={_actualObservationConfirmMaxRiskPoints:0.##},max={_actualObservationConfirmVolumeMaxRiskPoints:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
@@ -2022,7 +2022,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return new[] { $"DailyVolumeResearchFillerOnlyBeforeDailyTarget:trades={_replayTradesToday},target={_actualObservationConfirmFillerUntilDailyTrades}" };
 
         if (IsMainlineVolumeFillerPath(researchPath) && !IsMainlineVolumeFiller(signal, researchPath))
-            return new[] { $"MainlineVolumeFillerOnlyBeforeDailyTarget:trades={_replayTradesToday},target={_actualObservationConfirmFillerUntilDailyTrades},score={signal.SetupQualityScore.TotalScore:0.##},min={MainlineVolumeFillerMinSetupQualityScore:0.##}" };
+            return new[] { $"MainlineVolumeFillerQualityTooLow:score={signal.SetupQualityScore.TotalScore:0.##},min={MainlineVolumeFillerMinSetupQualityScore:0.##}" };
 
         if (IsDailyVolumeFloorPath(researchPath) && !IsDailyVolumeFloorAllowed(signal, researchPath))
             return new[] { $"DailyVolumeFloorOnlyBeforeDailyTarget:trades={_replayTradesToday},target={_actualObservationConfirmFillerUntilDailyTrades},score={signal.SetupQualityScore.TotalScore:0.##},min={DailyVolumeFloorMinSetupQualityScore:0.##}" };
@@ -2106,7 +2106,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private bool IsMainlineVolumeFiller(CandidateSignal signal, string researchPath)
     {
         return IsMainlineVolumeFillerPath(researchPath) &&
-            _replayTradesToday < _actualObservationConfirmFillerUntilDailyTrades &&
             signal.SetupQualityScore.TotalScore >= MainlineVolumeFillerMinSetupQualityScore;
     }
 
@@ -2119,8 +2118,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private static string MainlineVolumeFillerTag(string researchPath)
     {
         return string.Equals(researchPath, "ShadowCandidate", StringComparison.OrdinalIgnoreCase)
-            ? "ShadowCandidateFillerV120"
-            : "AlmostConfirmedFillerV120";
+            ? "ShadowCandidateFillerV121"
+            : "AlmostConfirmedFillerV121";
     }
 
     private static bool IsTrendPullbackConfirmedPath(string researchPath)

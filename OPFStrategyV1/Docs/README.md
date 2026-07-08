@@ -826,6 +826,15 @@ From `OPF_RESEARCH_1.20`, Actual execution resets the volume experiment around t
 - Executed filler rows are tagged as `AlmostConfirmedFillerV120` or `ShadowCandidateFillerV120` in `execution_decisions.csv`.
 - The expected validation question is whether the June replay can reach roughly `90+` trades, improve low-trade days toward the 5-trade target, and keep NetR near or above the v1.18 result while reducing emergency flatten events.
 
+From `OPF_RESEARCH_1.21`, Actual execution makes the v1.20 volume experiment more aggressive so the project can collect enough samples before later tightening:
+
+- Actual defaults now use `ACTUAL_EXEC_1.57`.
+- `AlmostConfirmed` and `ShadowCandidate` are no longer limited to days with fewer than 5 Actual trades. They can execute throughout the session while still respecting `ActualMaxTradesPerDay`.
+- The core guardrails remain: `SetupQualityScore >= 60`, risk `<= 18`, and `EstimatedRR >= 0.8`.
+- Executed rows are retagged as `AlmostConfirmedFillerV121` or `ShadowCandidateFillerV121`.
+- `DailyVolumeQualityRescueV120`, v1.15 entry/TP behavior, v1.16/v1.17 execution safety, and the `RiskDriftAcceptedV120` filled-risk tolerance remain unchanged.
+- The expected validation question is whether this broader release can materially lift June trade count beyond the v1.20 target while keeping NetR positive enough to identify which expansion path deserves later tightening.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

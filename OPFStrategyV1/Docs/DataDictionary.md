@@ -619,6 +619,8 @@ From `OPF_RESEARCH_1.19`, Actual execution defaults use `ACTUAL_EXEC_1.55`. Low-
 
 From `OPF_RESEARCH_1.20`, Actual execution defaults use `ACTUAL_EXEC_1.56`. `FailureReverse_ObservationInvalidated_WideStop1_5R` is removed from Actual execution. `DailyVolumeQualityRescueV120` uses the v1.18 `22` point planned-risk cap. `AlmostConfirmed` and `ShadowCandidate` can execute as low-volume fillers before 5 Actual trades/day with `SetupQualityScore >= 60`, risk `<= 18`, and `EstimatedRR >= 0.8`; executions are tagged `AlmostConfirmedFillerV120` or `ShadowCandidateFillerV120`. Filled-risk drift within `1` point of the path cap is logged as `ENTRY_FILLED_RISK_DRIFT_ACCEPTED` / `RiskDriftAcceptedV120` instead of emergency flattening.
 
+From `OPF_RESEARCH_1.21`, Actual execution defaults use `ACTUAL_EXEC_1.57`. `AlmostConfirmed` and `ShadowCandidate` expansion is no longer restricted to days below 5 Actual trades; both paths can execute throughout the session under the same `SetupQualityScore >= 60`, risk `<= 18`, and `EstimatedRR >= 0.8` guardrails. Executions are tagged `AlmostConfirmedFillerV121` or `ShadowCandidateFillerV121`.
+
 ## edge_attribution.csv
 
 File pattern:
