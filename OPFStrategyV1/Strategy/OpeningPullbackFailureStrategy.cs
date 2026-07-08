@@ -1646,7 +1646,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_RISK_RR", "-", researchPath, entryCandle.Close, 0m, string.Join("|", skipReasons));
             return;
         }
-        var sameBarSkipReasons = ActualExecutionSameBarSkipReasons(signal, entryCandle, stop, risk);
+        var sameBarSkipReasons = ActualExecutionSameBarSkipReasons(signal, researchPath, entryCandle, stop, risk);
         var allowSameBarTargetOnly = IsDailyVolumeSameBarTargetOnlyAllowed(signal, researchPath, sameBarSkipReasons);
         if (sameBarSkipReasons.Length > 0 && !allowSameBarTargetOnly)
         {
@@ -1711,9 +1711,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         var entry = entryCandle.Close;
-        var target = signal.Side == TradeSide.Long
-            ? entry + risk * ReplayTargetR
-            : entry - risk * ReplayTargetR;
+        var targetR = ActualTargetRFor(signal, researchPath, risk);
+        var target = TargetFromRisk(signal.Side, entry, risk, targetR);
         var tradeId = $"{entryCandle.Time:yyyyMMdd-HHmm}-{signal.Side}-{entryCandle.Bar}";
         var maxAllowedRiskPoints = MaxAllowedActualRiskPoints(signal, researchPath);
         var entryOrder = new Order
@@ -1741,7 +1740,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             target,
             risk,
             maxAllowedRiskPoints,
-            ReplayTargetR,
+            targetR,
             entryOrder);
         TrackRecentReplayExecution(_replayExecution);
 
@@ -1766,6 +1765,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
             executeReasons.Add($"FailureRetestWideFiller:dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
+        if (targetR != ReplayTargetR)
+            executeReasons.Add($"LongProfitExtensionV114:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
         var executeReason = string.Join("|", executeReasons);
         AppendExecutionDecision(signal, entryCandle, "Execute", executeReason, researchPath, stop, risk, tradeId);
         AppendExecutionEvent(signal, tradeId, entryCandle, "ENTRY_SEND", "ENTRY", researchPath, entry, qty, $"stop={stop:0.########}|target={target:0.########}");
@@ -1789,10 +1790,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return;
 
         var entry = entryCandle.Close;
-        var target = signal.Side == TradeSide.Long
-            ? entry + risk * ReplayTargetR
-            : entry - risk * ReplayTargetR;
-        var reward = EstimateReward(signal, researchPath, entry, risk);
+        var targetR = ActualTargetRFor(signal, researchPath, risk);
+        var target = TargetFromRisk(signal.Side, entry, risk, targetR);
+        var reward = EstimateActualExecutionReward(signal, researchPath, entry, risk);
         var estimatedRr = reward.Points <= 0m || risk <= 0m ? 0m : Math.Round(reward.Points / risk, 4);
 
         _researchLogger?.AppendExecutionDecision(
@@ -2087,7 +2087,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (!isDailyVolumeFloor && !isObservationVolumeRiskBand && maxAllowedRisk > 0m && risk > maxAllowedRisk)
             reasons.Add($"RiskTooWideVolAdjusted:risk={risk:0.##},max={maxAllowedRisk:0.##},atr14={atr14:0.##}");
 
-        var reward = EstimateReward(signal, researchPath, entryCandle.Close, risk);
+        var reward = EstimateActualExecutionReward(signal, researchPath, entryCandle.Close, risk);
         var estimatedRr = reward.Points <= 0m || risk <= 0m ? 0m : Math.Round(reward.Points / risk, 4);
         var minEstimatedRr = isDailyVolumeFloor
             ? DailyVolumeFloorMinEstimatedRr
@@ -2096,6 +2096,15 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             reasons.Add($"EstimatedRRTooLow:rr={estimatedRr:0.####},min={minEstimatedRr:0.##},reward={reward.Points:0.##},model={reward.Model}");
 
         return reasons.ToArray();
+    }
+
+    private RewardEstimate EstimateActualExecutionReward(CandidateSignal signal, string researchPath, decimal entry, decimal risk)
+    {
+        var targetR = ActualTargetRFor(signal, researchPath, risk);
+        if (targetR != ReplayTargetR)
+            return new RewardEstimate(Math.Round(risk * targetR, 2), $"LongProfitExtensionV114TargetR:{targetR:0.##}");
+
+        return EstimateReward(signal, researchPath, entry, risk);
     }
 
     private bool IsLongObservationRiskExpansionDisabled(CandidateSignal signal, decimal risk)
@@ -2113,18 +2122,34 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             signal.SetupQualityScore.TotalScore < ShortObservationMidRiskQualityCutMinScore;
     }
 
-    private decimal TargetFromRisk(TradeSide side, decimal entry, decimal risk)
+    private decimal ActualTargetRFor(CandidateSignal signal, string researchPath, decimal risk)
     {
-        return side == TradeSide.Long
-            ? entry + risk * ReplayTargetR
-            : entry - risk * ReplayTargetR;
+        if (signal.Side != TradeSide.Long)
+            return ReplayTargetR;
+
+        if (risk <= 11m || risk > 15m)
+            return ReplayTargetR;
+
+        if (IsObservationConfirmPath(researchPath))
+            return 3m;
+
+        return IsObservationConfirmWideStopPath(researchPath)
+            ? 2.5m
+            : ReplayTargetR;
     }
 
-    private string[] ActualExecutionSameBarSkipReasons(CandidateSignal signal, OpfCandle entryCandle, decimal stop, decimal risk)
+    private static decimal TargetFromRisk(TradeSide side, decimal entry, decimal risk, decimal targetR)
+    {
+        return side == TradeSide.Long
+            ? entry + risk * targetR
+            : entry - risk * targetR;
+    }
+
+    private string[] ActualExecutionSameBarSkipReasons(CandidateSignal signal, string researchPath, OpfCandle entryCandle, decimal stop, decimal risk)
     {
         var reasons = new List<string>();
         var entry = entryCandle.Close;
-        var target = TargetFromRisk(signal.Side, entry, risk);
+        var target = TargetFromRisk(signal.Side, entry, risk, ActualTargetRFor(signal, researchPath, risk));
 
         if (signal.Side == TradeSide.Long)
         {
@@ -4011,7 +4036,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         DrawActualHLine(context, entry, Color.FromArgb(alpha, Color.DeepSkyBlue), 2, $"ACT {execution.Side} ENTRY {entry:0.00} {suffix}", x1, x2, labelSlot: labelSlotOffset);
         DrawActualHLine(context, execution.Stop, Color.FromArgb(alpha, Color.OrangeRed), 2, $"SL {execution.Stop:0.00}", x1, x2, labelSlot: labelSlotOffset + 1);
-        DrawActualHLine(context, execution.Target, Color.FromArgb(alpha, Color.LimeGreen), 2, $"TP {execution.Target:0.00} ({ReplayTargetR:0.0}R)", x1, x2, labelSlot: labelSlotOffset + 2);
+        DrawActualHLine(context, execution.Target, Color.FromArgb(alpha, Color.LimeGreen), 2, $"TP {execution.Target:0.00} ({execution.TargetR:0.0}R)", x1, x2, labelSlot: labelSlotOffset + 2);
 
         if (execution.ExitCompleted && execution.ExitPrice.HasValue)
             DrawActualHLine(context, execution.ExitPrice.Value, Color.FromArgb(190, Color.Gold), 1, $"EXIT {execution.ExitRole} {execution.ExitPrice.Value:0.00}", x1, x2, labelSlot: labelSlotOffset + 3);

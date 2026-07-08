@@ -764,6 +764,16 @@ From `OPF_RESEARCH_1.13`, Actual execution keeps the v1.12 quality candidate bas
 - `exit_policy_evaluations.csv` adds a `Fixed3R` policy row alongside `Fixed1_5R`, `Fixed2R`, and `Fixed2_5R`.
 - The expected validation question is whether v1.12-quality entries have enough post-1.5R extension to justify later TP tiering, especially by side, path, and risk bucket.
 
+From `OPF_RESEARCH_1.14`, Actual execution starts a controlled profit-capture test without changing entry rules:
+
+- Actual defaults now use `ACTUAL_EXEC_1.50`.
+- Base `ActualTargetR` remains `1.5R` for all paths unless explicitly overridden by this version.
+- Long `ObservationConfirm` rows with `11 < InitialRiskPoints <= 15` use an Actual target of `3R`.
+- Long `ObservationConfirm_WideStop1_5R` rows with `11 < InitialRiskPoints <= 15` use an Actual target of `2.5R`.
+- Short rows, Long rows outside the 11-15 risk bucket, path whitelist, SL logic, risk filters, setup families, and time policy are unchanged.
+- Executed rows using this override include `LongProfitExtensionV114` in `execution_decisions.csv`; `execution_trades.csv` records the per-trade `TargetR`.
+- The expected validation question is whether Long profit extension increases NetR and NetDollars without materially increasing abnormal exits or reducing the average Actual trade count near 5/day.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
@@ -772,7 +782,7 @@ Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke
 2. Core CSV files are present: config snapshot, signals, research outcomes, risk evaluations, score breakdown, execution events, and execution trades.
 3. `ExecutedDecisions = ExecutionTrades = ActualVerifiedUniqueTrades`, with no duplicate Actual-verified rows.
 4. Every Actual exit has `PROTECTION_CLEANUP_DONE`, with no `STALE`, `REJECT`, `CANCEL_FAIL`, or `FAILED` events.
-5. The tested configuration is frozen: MNQ, one contract, `ActualTargetR=1.5`, daily target/loss stops disabled for evidence accumulation, max-trades safety ceiling, and Actual path whitelist.
+5. The tested configuration is frozen: MNQ, one contract, default `ActualTargetR=1.5` with any documented per-version TP overrides, daily target/loss stops disabled for evidence accumulation, max-trades safety ceiling, and Actual path whitelist.
 6. Full-day average Actual trades should stay near 5/day; individual low-trade days are acceptable only when profitability improves and the missed volume is explainable by research/skipped-signal evidence.
 7. Results are explainable through `MFE_R`, `MAE_R`, `ExitEfficiency`, `RunupCapturePct`, and no-trade reasons, even if the batch is not yet strongly profitable.
 
