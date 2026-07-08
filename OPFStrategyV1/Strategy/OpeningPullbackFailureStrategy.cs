@@ -115,6 +115,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private decimal _actualFailureRetestMaxRiskPoints = 11m;
     private decimal _actualFailureRetestMinSetupQualityScore = 56m;
     private bool _actualRequireFailureRetest = true;
+    private bool _isStoppingActualExecution;
     private static PropertyInfo? _vwapProperty;
 
     [Category("OPF Profile")]
@@ -285,6 +286,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     protected override void OnStopped()
     {
+        _isStoppingActualExecution = true;
         ProcessClosedBar(_lastSeenBar);
         FinalizeActiveExecutionOnStop();
         WriteRegimeDailyStats();
@@ -421,6 +423,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         base.OnOrderCancelFailed(order, message);
         LogExecutionInfo($"EXEC_CANCEL_FAILED role={ParseExecutionRole(order?.Comment)} ext={order?.ExtId} msg={message}");
+        AppendOrderFailureEvent(order, "CANCEL_FAIL", message);
     }
 
     private void AttachReplayOrder(Order? order, string source)
@@ -440,6 +443,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             _replayExecution.TargetOrder = order;
 
         LogExecutionInfo($"EXEC_ORDER_ATTACH src={source} trade={tradeId} role={role} state={order.State} ext={order.ExtId} type={order.Type} dir={order.Direction} price={order.Price:0.########} trig={order.TriggerPrice:0.########} unfilled={order.Unfilled:0.########} qty={order.QuantityToFill:0.########}");
+        if (IsFailedOrderState(order.State.ToString()))
+            AppendExecutionEvent(_replayExecution, "ORDER_STATE_FAILED", role, order.Price > 0m ? order.Price : order.TriggerPrice, order.QuantityToFill, $"src={source}|state={order.State}|ext={order.ExtId}");
     }
 
     private void LogNewZones(OpfCandle candle, IReadOnlyList<DetectedZone> zones)
@@ -1613,6 +1618,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (!EnableReplayOrders || _snapshot is null)
             return;
+        if (_isStoppingActualExecution)
+        {
+            AppendExecutionDecision(signal, entryCandle, "Skip", "StrategyStopping", researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_STRATEGY_STOPPING", "-", researchPath, entryCandle.Close, 0m, "StrategyStopping");
+            return;
+        }
         if (!IsReplayExecutionPathEnabled(researchPath))
         {
             AppendExecutionDecision(signal, entryCandle, "Skip", "PathDisabled", researchPath, stop, risk);
@@ -2689,6 +2700,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         catch (Exception ex)
         {
             LogExecutionInfo($"EXEC_CANCEL_FAIL reason={reason} ext={workingOrder.ExtId} err={ex.GetType().Name}:{ex.Message}");
+            if (_replayExecution is not null)
+                AppendExecutionEvent(_replayExecution, "CANCEL_FAIL", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, $"reason={reason}|err={ex.GetType().Name}:{ex.Message}");
         }
     }
 
@@ -2749,6 +2762,19 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             price,
             quantity,
             message);
+    }
+
+    private void AppendOrderFailureEvent(Order? order, string eventName, string message)
+    {
+        if (order is null || !TryParseExecutionComment(order.Comment, out var tradeId, out var role))
+            return;
+
+        var execution = FindReplayExecution(tradeId);
+        if (execution is null)
+            return;
+
+        var price = order.Price > 0m ? order.Price : order.TriggerPrice;
+        AppendExecutionEvent(execution, eventName, role, price, order.QuantityToFill, $"ext={order.ExtId}|msg={message}");
     }
 
     private void AppendExecutionTrade(ReplayExecutionState execution, MyTrade exitTrade, string exitRole, ExecutionFillValidation validation)
@@ -3064,6 +3090,27 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             state.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) ||
             state.Equals("Rejected", StringComparison.OrdinalIgnoreCase) ||
             state.Equals("Failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFailedOrderState(string state)
+    {
+        return state.Equals("Failed", StringComparison.OrdinalIgnoreCase) ||
+            state.Equals("Rejected", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private ReplayExecutionState? FindReplayExecution(string tradeId)
+    {
+        if (_replayExecution is not null && string.Equals(_replayExecution.TradeId, tradeId, StringComparison.OrdinalIgnoreCase))
+            return _replayExecution;
+
+        for (var i = _recentReplayExecutions.Count - 1; i >= 0; i--)
+        {
+            var execution = _recentReplayExecutions[i];
+            if (string.Equals(execution.TradeId, tradeId, StringComparison.OrdinalIgnoreCase))
+                return execution;
+        }
+
+        return null;
     }
 
     private static decimal AlignToTick(decimal value, decimal tick)

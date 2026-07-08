@@ -784,6 +784,13 @@ From `OPF_RESEARCH_1.15`, Actual execution keeps the v1.14 entry set and fixes p
 - Protection is modeled conservatively: after a signal first reaches `1.5R`, the BE or 1R protected stop can trigger only from the next bar onward.
 - The expected validation question is whether protected extension keeps most of the 1.5R profit while preserving enough upside to improve NetR / NetDollars versus fixed 1.5R and bare 2.5R/3R targets.
 
+From `OPF_RESEARCH_1.16`, Actual execution keeps the v1.15 entry/TP rules and fixes the stop/replay boundary audit:
+
+- Actual defaults now use `ACTUAL_EXEC_1.52`.
+- When the strategy is stopping, `OnStopped()` marks Actual execution as closing before processing the last bar. Research still flushes, but new Actual entries from that final bar are skipped with `StrategyStopping` / `SKIP_STRATEGY_STOPPING`.
+- `execution_events.csv` now records `ORDER_STATE_FAILED` and `CANCEL_FAIL` when ATAS reports failed/rejected protection orders or cancel failures, so the readiness gate no longer misses failures that previously only appeared in `research.log`.
+- The expected validation question is whether a 6/18-focused replay ends with `ExecutedDecisions = ExecutionTrades = ActualVerifiedUniqueTrades`, every Actual exit has `PROTECTION_CLEANUP_DONE`, and there are no unclosed `ACTIVE_ON_STOP`, `CANCEL_FAIL`, `ORDER_STATE_FAILED`, `STALE`, `REJECT`, or `FAILED` audit events.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

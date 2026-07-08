@@ -609,6 +609,8 @@ From `OPF_RESEARCH_1.14`, Actual execution defaults use `ACTUAL_EXEC_1.50`. Entr
 
 From `OPF_RESEARCH_1.15`, Actual execution defaults use `ACTUAL_EXEC_1.51`. The final `TargetR` is recalculated after entry fill / bracket reprice from filled risk, and `execution_trades.csv` adds `PlannedTargetR` and `TargetRDrift`. `exit_policy_evaluations.csv` adds protected-extension policies `ProtectBE_Then2_5R`, `Protect1R_Then2_5R`, `ProtectBE_Then3R`, and `Protect1R_Then3R`; these are research-only rows and do not submit live/replay stop modifications.
 
+From `OPF_RESEARCH_1.16`, Actual execution defaults use `ACTUAL_EXEC_1.52`. `OnStopped()` prevents new Actual entries while the strategy is closing, logging `StrategyStopping` / `SKIP_STRATEGY_STOPPING` instead. `execution_events.csv` also records `ORDER_STATE_FAILED` and `CANCEL_FAIL` so failed/rejected protection-order states and cancel failures are included in lifecycle audits.
+
 ## edge_attribution.csv
 
 File pattern:
