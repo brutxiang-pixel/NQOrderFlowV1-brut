@@ -749,6 +749,14 @@ From `OPF_RESEARCH_1.11`, Actual execution tightens the v1.10 quality experiment
 - Actual-verified research outcome duplicate protection now keys directly on `ActualTradeID`, covering cases where the same Actual trade is associated with adjacent research tracker entry bars.
 - The expected validation question is whether v1.11 keeps average Actual trades near or above 5/day while removing the negative Long `DailyVolumeBaseRisk18` subgroup and reducing duplicate Actual-verified rows to zero.
 
+From `OPF_RESEARCH_1.12`, Actual execution keeps the v1.11 setup set and tests one Short quality-control variable:
+
+- Actual defaults now use `ACTUAL_EXEC_1.48`.
+- Short `ObservationConfirm` rows with `8 < risk <= 15` require `SetupQualityScore >= 60`. Skipped rows are marked `ShortObservationMidRiskQualityCutV112`.
+- Short `15-18` expanded-risk `ObservationConfirm` remains allowed because the v1.11 evidence batch showed that bucket was positive.
+- Long rules remain unchanged from v1.11.
+- The expected validation question is whether v1.12 reduces Short `SL_no_MFE` and improves Short NetR/NetDollars without dropping full-day average Actual trades below the 5/day baseline.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

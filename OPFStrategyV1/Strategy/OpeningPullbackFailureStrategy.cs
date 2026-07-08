@@ -33,6 +33,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal DailyVolumeFloorMinSetupQualityScore = 48m;
     private const decimal DailyVolumeFloorMaxRiskPoints = 18m;
     private const decimal DailyVolumeFloorMinEstimatedRr = 0.5m;
+    private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
+    private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
+    private const decimal ShortObservationMidRiskQualityCutMinScore = 60m;
     private const decimal ZoneQualityThreshold = 70m;
     private const decimal SetupQualityThreshold = 80m;
     private const int MaxPullbackBars = 24;
@@ -2068,6 +2071,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
             if (IsLongObservationRiskExpansionDisabled(signal, risk))
                 reasons.Add($"LongObservationRiskExpansionDisabledV111:risk={risk:0.##}");
+            if (IsShortObservationMidRiskQualityCut(signal, risk))
+                reasons.Add($"ShortObservationMidRiskQualityCutV112:score={signal.SetupQualityScore.TotalScore:0.##},min={ShortObservationMidRiskQualityCutMinScore:0.##},risk={risk:0.##}");
         }
         if (IsFailureRetestPath(researchPath) && !isDailyVolumeFloor && _actualFailureRetestMaxRiskPoints > 0m && risk > _actualFailureRetestMaxRiskPoints)
             reasons.Add($"FailureRetestRiskCapExceeded:risk={risk:0.##},max={_actualFailureRetestMaxRiskPoints:0.##}");
@@ -2098,6 +2103,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return signal.Side == TradeSide.Long &&
             risk > _actualObservationConfirmMaxRiskPoints &&
             risk <= _actualObservationConfirmVolumeMaxRiskPoints;
+    }
+
+    private static bool IsShortObservationMidRiskQualityCut(CandidateSignal signal, decimal risk)
+    {
+        return signal.Side == TradeSide.Short &&
+            risk > ShortObservationMidRiskQualityCutMinRisk &&
+            risk <= ShortObservationMidRiskQualityCutMaxRisk &&
+            signal.SetupQualityScore.TotalScore < ShortObservationMidRiskQualityCutMinScore;
     }
 
     private decimal TargetFromRisk(TradeSide side, decimal entry, decimal risk)

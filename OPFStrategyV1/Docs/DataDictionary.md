@@ -595,6 +595,8 @@ From `OPF_RESEARCH_1.10`, Actual execution defaults use `ACTUAL_EXEC_1.46`. Broa
 
 From `OPF_RESEARCH_1.11`, Actual execution defaults use `ACTUAL_EXEC_1.47`. Long `ObservationConfirm` rows in the expanded 11-18 point risk band are skipped with `LongObservationRiskExpansionDisabledV111` regardless of setup score. Short expanded-risk `ObservationConfirm` rows remain allowed. Actual-verified research outcome duplicate protection keys directly on `ActualTradeID`, so adjacent tracker entry bars for the same actual trade should not create duplicate Actual-verified rows.
 
+From `OPF_RESEARCH_1.12`, Actual execution defaults use `ACTUAL_EXEC_1.48`. Short `ObservationConfirm` rows with `8 < risk <= 15` and `SetupQualityScore < 60` are skipped with `ShortObservationMidRiskQualityCutV112`. The 15-18 point Short expanded-risk band remains allowed. This version is intended to test whether the negative Short mid-risk subgroup can be reduced without changing setup families or adding time filters.
+
 ## edge_attribution.csv
 
 File pattern:
