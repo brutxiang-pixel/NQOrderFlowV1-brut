@@ -1028,6 +1028,14 @@ From `OPF_RESEARCH_1.37_2C_FIX2`, strategy rules remain unchanged and replay TP/
 - `FLATTEN` exits and trades with abnormal entry fill remain abnormal and contribute zero normal PnL/R.
 - Raw replay fill impact remains available through `RawPoints`, `RawDollars`, and `RawPointsR`.
 
+From `OPF_RESEARCH_1.43`, Actual execution keeps the restored v1.37 two-contract skeleton and tests one controlled bad-day stabilizer:
+
+- Actual defaults use `ACTUAL_EXEC_1.79`.
+- `ActualOrderQuantity=2`, `ActualTargetR=1.5`, `ActualMaxTradesPerDay=12`, guards disabled, compact logging, path whitelist, risk gates, and the v1.37 Long `ObservationConfirm` `risk > 12` cut remain unchanged.
+- After two consecutive Actual losing exits during the same session day, the next eligible Actual orders use a temporary `1.0R` target instead of `1.5R` until a profitable exit resets the consecutive-loss counter.
+- Executed rows with this target override include `DailyLossRecoveryTarget1RV143` and `ActualTargetOverride:targetR=1` in `execution_decisions.csv`.
+- This is not a stop-trading rule and should not reduce trade count. The validation question is whether worst losing days improve without damaging the restored v1.37 two-contract NetR structure.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

@@ -73,6 +73,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ObservationConfirmRisk22V132MinSetupQualityScore = 70m;
     private const decimal ObservationConfirmRisk22V132MaxRiskPoints = 22m;
     private const decimal ObservationConfirmRisk22V132MinEstimatedRr = 0.8m;
+    private const int DailyLossRecoveryTargetV143MinConsecutiveLosses = 2;
+    private const decimal DailyLossRecoveryTargetV143R = 1.0m;
     private const decimal EntryFillRiskDriftTolerancePoints = 1m;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
@@ -1878,6 +1880,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             executeReasons.Add($"OCWideStopLowRiskV132:side={signal.Side},risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
             executeReasons.Add($"FailureRetestWideFiller:dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
+        if (IsDailyLossRecoveryTargetV143(researchPath))
+            executeReasons.Add($"DailyLossRecoveryTarget1RV143:consecLosses={_replayConsecutiveLossesToday},dailyR={_replayDailyR:0.##}");
         if (targetR != ReplayTargetR)
             executeReasons.Add($"ActualTargetOverride:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
         var executeReason = string.Join("|", executeReasons);
@@ -2613,7 +2617,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ActualTargetRFor(TradeSide side, string researchPath, decimal risk)
     {
+        if (IsDailyLossRecoveryTargetV143(researchPath))
+            return DailyLossRecoveryTargetV143R;
+
         return ReplayTargetR;
+    }
+
+    private bool IsDailyLossRecoveryTargetV143(string researchPath)
+    {
+        return _replayConsecutiveLossesToday >= DailyLossRecoveryTargetV143MinConsecutiveLosses &&
+            IsExecutionEligiblePath(researchPath);
     }
 
     private static decimal TargetFromRisk(TradeSide side, decimal entry, decimal risk, decimal targetR)
