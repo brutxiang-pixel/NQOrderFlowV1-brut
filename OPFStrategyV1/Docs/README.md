@@ -1036,6 +1036,17 @@ From `OPF_RESEARCH_1.43`, Actual execution keeps the restored v1.37 two-contract
 - Executed rows with this target override include `DailyLossRecoveryTarget1RV143` and `ActualTargetOverride:targetR=1` in `execution_decisions.csv`.
 - This is not a stop-trading rule and should not reduce trade count. The validation question is whether worst losing days improve without damaging the restored v1.37 two-contract NetR structure.
 
+From `OPF_RESEARCH_1.44`, the v1.43 bad-day stabilizer is superseded before broad replay because it is too small for a three-month validation cycle. Actual execution keeps the restored v1.37 two-contract skeleton and tests selective profit expansion:
+
+- Actual defaults use `ACTUAL_EXEC_1.80`.
+- `ActualOrderQuantity=2`, `ActualMaxTradesPerDay=12`, guards disabled, compact logging, path whitelist, risk gates, and the v1.37 Long `ObservationConfirm` `risk > 12` cut remain unchanged.
+- Base `ActualTargetR` remains `1.5R`, but selected stronger Short pools use `2.0R`:
+  - `ObservationConfirm` Short with `risk <= 11`, tagged `OCShortBaseTarget2RV144`.
+  - `BreakawayFvg` / `BreakawayFvg_Qualified` Short, tagged `BreakawayShortTarget2RV144`.
+- All other paths stay at `1.5R`; the v1.43 `DailyLossRecoveryTarget1RV143` rule is not active in this version.
+- Executed rows with the override include the path-specific v1.44 tag plus `ActualTargetOverride:targetR=2` in `execution_decisions.csv`.
+- The validation question for the next three-month replay is whether selective 2R improves NetR/NetDollars versus `OPF_RESEARCH_1.37_2C_FIX2` without reducing trade count or turning many former 1.5R winners into SL.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
