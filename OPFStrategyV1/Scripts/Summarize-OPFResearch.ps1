@@ -812,6 +812,34 @@ if ($executionTradeRows.Count -gt 0) {
         } |
         Sort-Object Date |
         Format-Table -AutoSize
+
+    $abnormalTrades = @($executionTradeRows | Where-Object { Is-True (Field $_ 'IsAbnormalExecution') })
+    if ($abnormalTrades.Count -gt 0) {
+        Write-Host ""
+        Write-Host "=== Replay Abnormal Executions By Date ==="
+        $abnormalTrades |
+            Group-Object { ([datetime]$_.EntryTime).ToString('yyyy-MM-dd') } |
+            ForEach-Object {
+                [pscustomobject]@{
+                    Date = $_.Name
+                    Count = $_.Count
+                    Paths = (@($_.Group) |
+                        Group-Object ResearchPath |
+                        Sort-Object Count -Descending |
+                        ForEach-Object { "$($_.Name):$($_.Count)" }) -join ','
+                }
+            } |
+            Sort-Object Date |
+            Format-Table -AutoSize
+
+        Write-Host ""
+        Write-Host "=== Replay Abnormal Execution Reasons ==="
+        $abnormalTrades |
+            Group-Object AbnormalReason |
+            Sort-Object Count -Descending |
+            Select-Object Count, Name |
+            Format-Table -AutoSize
+    }
 }
 
 if ($exitPolicyRows.Count -gt 0) {
@@ -864,6 +892,27 @@ if ($executionEventRows.Count -gt 0) {
         Sort-Object Count -Descending |
         Select-Object Count, Name |
         Format-Table -AutoSize
+
+    $qualityEvents = @($executionEventRows | Where-Object {
+        $_.Event -match 'STALE|REJECT|CANCEL_FAIL|FAILED|ENTRY_FILLED_RISK_EXCEEDED|EMERGENCY'
+    })
+    if ($qualityEvents.Count -gt 0) {
+        Write-Host ""
+        Write-Host "=== Replay Execution Quality Events By Date ==="
+        $qualityEvents |
+            Group-Object { ([datetime]$_.Time).ToString('yyyy-MM-dd') }, Event |
+            Sort-Object Name |
+            Select-Object Count, Name |
+            Format-Table -AutoSize
+
+        Write-Host ""
+        Write-Host "=== Replay Execution Quality Events By Path ==="
+        $qualityEvents |
+            Group-Object ResearchPath, Event |
+            Sort-Object Count -Descending |
+            Select-Object Count, Name |
+            Format-Table -AutoSize
+    }
 }
 
 if ($executionDecisionRows.Count -gt 0) {

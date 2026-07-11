@@ -11,6 +11,7 @@ public sealed class ResearchLogger
 {
     private readonly string _directory;
     private readonly Dictionary<string, ConfigSnapshot> _snapshots = new();
+    private readonly bool _compact;
 
     public sealed record ActualOutcome(
         bool ActualVerified,
@@ -38,11 +39,12 @@ public sealed class ResearchLogger
         decimal AvgBullScore,
         decimal AvgBearScore);
 
-    public ResearchLogger(string strategyName)
+    public ResearchLogger(string strategyName, string logMode = "Full")
     {
         var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         _directory = Path.Combine(root, "ATAS", "StrategyLogs", strategyName);
         Directory.CreateDirectory(_directory);
+        _compact = string.Equals(logMode, "Compact", StringComparison.OrdinalIgnoreCase);
     }
 
     public void WriteConfigSnapshot(ConfigSnapshot snapshot)
@@ -397,6 +399,9 @@ public sealed class ResearchLogger
 
     public void AppendScoreBreakdown(string snapshotId, DateTime time, int bar, string side, Core.Scoring.ScoreBreakdown score)
     {
+        if (_compact)
+            return;
+
         var path = Path.Combine(_directory, $"{snapshotId}_score_breakdown.csv");
         EnsureHeader(path, "SnapshotID,Time,Bar,Side,ScoreName,TotalScore,Threshold,Passed,Component,RawValue,ComponentPassed,Weight,Contribution,Reason");
 
@@ -772,6 +777,9 @@ public sealed class ResearchLogger
         string reason,
         string executionScope = "")
     {
+        if (_compact && stage is not ("ExecutionDecision" or "ResearchOutcome"))
+            return;
+
         var path = Path.Combine(_directory, $"{snapshotId}_funnel_events.csv");
         EnsureHeader(path, ContextHeader("Time,Bar,Stage,SignalID,ResearchPath,Side,SetupType,Result,Reason,ExecutionScope,TimeBucket"));
         File.AppendAllText(path,

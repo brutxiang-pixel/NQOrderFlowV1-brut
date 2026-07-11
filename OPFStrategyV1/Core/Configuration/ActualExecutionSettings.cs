@@ -30,18 +30,19 @@ public sealed record ActualExecutionSettings(
     bool ActualRequireFailureRetest,
     bool ActualEnableWideStopExecution,
     decimal ActualWideStopMultiplier,
-    string ActualRrTiers)
+    string ActualRrTiers,
+    string ResearchLogMode)
 {
     public static ActualExecutionSettings Default()
     {
         return new ActualExecutionSettings(
-            Version: "ACTUAL_EXEC_1.57",
+            Version: "ACTUAL_EXEC_1.73_2C_FIX2",
             EnableActualOrders: true,
-            ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|AlmostConfirmed|ShadowCandidate|StructureConfirmShadow_ConfirmBarStop|StructureConfirmShadow_ConfirmBarStop_Min10|StructureConfirmShadow_ConfirmBarStop_Wait1|StructureConfirmShadow_SwingStop|TrendPullbackConfirmed|BreakawayFvg|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated|FailureReverse_LongQualified|FailureReverse_RetestFailed|FailureReverse_RetestFailed_WideStop1_5R",
+            ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated|FailureReverse_RetestFailed",
             ActualAllowResearchPaths: false,
-            ActualOrderQuantity: 1m,
+            ActualOrderQuantity: 2m,
             ActualTargetR: 1.5m,
-            ActualMaxTradesPerDay: 20,
+            ActualMaxTradesPerDay: 12,
             ActualUseFullLossGuard: false,
             ActualUseConsecutiveLossGuard: false,
             ActualTimeInForce: "Day",
@@ -62,7 +63,8 @@ public sealed record ActualExecutionSettings(
             ActualRequireFailureRetest: false,
             ActualEnableWideStopExecution: true,
             ActualWideStopMultiplier: 1.5m,
-            ActualRrTiers: "1.0|1.2|1.5");
+            ActualRrTiers: "1.0|1.2|1.5",
+            ResearchLogMode: "Compact");
     }
 
     public static ActualExecutionSettings LoadOrCreateDefault(out string path, out string status)
@@ -136,7 +138,8 @@ public sealed record ActualExecutionSettings(
             ActualMinSetupQualityScore = settings.ActualMinSetupQualityScore <= 0m ? fallback.ActualMinSetupQualityScore : settings.ActualMinSetupQualityScore,
             ActualFailureReverseMinSetupQualityScore = settings.ActualFailureReverseMinSetupQualityScore <= 0m ? fallback.ActualFailureReverseMinSetupQualityScore : settings.ActualFailureReverseMinSetupQualityScore,
             ActualWideStopMultiplier = settings.ActualWideStopMultiplier <= 1m ? fallback.ActualWideStopMultiplier : settings.ActualWideStopMultiplier,
-            ActualRrTiers = string.IsNullOrWhiteSpace(settings.ActualRrTiers) ? fallback.ActualRrTiers : settings.ActualRrTiers
+            ActualRrTiers = string.IsNullOrWhiteSpace(settings.ActualRrTiers) ? fallback.ActualRrTiers : settings.ActualRrTiers,
+            ResearchLogMode = string.IsNullOrWhiteSpace(settings.ResearchLogMode) ? fallback.ResearchLogMode : settings.ResearchLogMode
         };
     }
 }

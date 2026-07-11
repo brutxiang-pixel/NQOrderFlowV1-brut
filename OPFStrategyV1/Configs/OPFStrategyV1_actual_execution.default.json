@@ -1,11 +1,11 @@
 {
-  "Version": "ACTUAL_EXEC_1.57",
+  "Version": "ACTUAL_EXEC_1.73_2C_FIX2",
   "EnableActualOrders": true,
-  "ActualExecutionPaths": "ObservationConfirm|ObservationConfirm_WideStop1_5R|AlmostConfirmed|ShadowCandidate|StructureConfirmShadow_ConfirmBarStop|StructureConfirmShadow_ConfirmBarStop_Min10|StructureConfirmShadow_ConfirmBarStop_Wait1|StructureConfirmShadow_SwingStop|TrendPullbackConfirmed|BreakawayFvg|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated|FailureReverse_LongQualified|FailureReverse_RetestFailed|FailureReverse_RetestFailed_WideStop1_5R",
+  "ActualExecutionPaths": "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated|FailureReverse_RetestFailed",
   "ActualAllowResearchPaths": false,
-  "ActualOrderQuantity": 1,
+  "ActualOrderQuantity": 2,
   "ActualTargetR": 1.5,
-  "ActualMaxTradesPerDay": 20,
+  "ActualMaxTradesPerDay": 12,
   "ActualUseFullLossGuard": false,
   "ActualUseConsecutiveLossGuard": false,
   "ActualTimeInForce": "Day",
@@ -26,5 +26,6 @@
   "ActualRequireFailureRetest": false,
   "ActualEnableWideStopExecution": true,
   "ActualWideStopMultiplier": 1.5,
-  "ActualRrTiers": "1.0|1.2|1.5"
+  "ActualRrTiers": "1.0|1.2|1.5",
+  "ResearchLogMode": "Compact"
 }

@@ -40,6 +40,39 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal DailyVolumeQualityRescueMaxRiskPoints = 22m;
     private const decimal DailyVolumeQualityRescueMinEstimatedRr = 0.8m;
     private const int DailyVolumeQualityRescueMaxTradesPerDay = 2;
+    private const decimal ZoneBirthVolumeV122MinSetupQualityScore = 45m;
+    private const decimal ZoneBirthVolumeV122MaxRiskPoints = 25m;
+    private const decimal ZoneBirthVolumeV122MinEstimatedRr = 0.3m;
+    private const decimal StrictVolumeV122MinSetupQualityScore = 45m;
+    private const decimal StrictVolumeV122MaxRiskPoints = 25m;
+    private const decimal StrictVolumeV122MinEstimatedRr = 0.5m;
+    private const decimal BreakawayVolumeV128MinSetupQualityScore = 80m;
+    private const decimal BreakawayVolumeV128LongMaxRiskPoints = 25m;
+    private const decimal BreakawayVolumeV128ShortMaxRiskPoints = 30m;
+    private const decimal BreakawayVolumeV128MinEstimatedRr = 1m;
+    private const decimal BreakawayLongSelectiveV134MinSetupQualityScore = 95m;
+    private const decimal BreakawayLongSelectiveV134MaxRiskPoints = 18m;
+    private const decimal BreakawayLongSelectiveV134MinEstimatedRr = 1.5m;
+    private const decimal ObservationLongVolumeV123MinSetupQualityScore = 70m;
+    private const decimal ObservationLongVolumeV123MaxRiskPoints = 18m;
+    private const decimal ObservationLongVolumeV123MinEstimatedRr = 0.8m;
+    private const decimal UnknownMicroRiskVolumeV126MinSetupQualityScore = 45m;
+    private const decimal UnknownMicroRiskVolumeV126MaxRiskPoints = 8.5m;
+    private const decimal UnknownMicroRiskVolumeV126MinEstimatedRr = 1.5m;
+    private const decimal ObservationShortVolumeV124MinSetupQualityScore = 60m;
+    private const decimal ObservationShortVolumeV124MaxRiskPoints = 18m;
+    private const decimal ObservationShortVolumeV124MinEstimatedRr = 1m;
+    private const decimal ObservationConfirmLongV137MaxRiskPoints = 12m;
+    private const decimal ObservationConfirmWideStopVolumeV131LongMinSetupQualityScore = 70m;
+    private const decimal ObservationConfirmWideStopVolumeV131ShortMinSetupQualityScore = 60m;
+    private const decimal ObservationConfirmWideStopVolumeV131MaxRiskPoints = 22m;
+    private const decimal ObservationConfirmWideStopVolumeV131MinEstimatedRr = 0.8m;
+    private const decimal ObservationConfirmWideStopLowRiskV132MinSetupQualityScore = 56m;
+    private const decimal ObservationConfirmWideStopLowRiskV132MaxRiskPoints = 18m;
+    private const decimal ObservationConfirmWideStopLowRiskV132MinEstimatedRr = 0.5m;
+    private const decimal ObservationConfirmRisk22V132MinSetupQualityScore = 70m;
+    private const decimal ObservationConfirmRisk22V132MaxRiskPoints = 22m;
+    private const decimal ObservationConfirmRisk22V132MinEstimatedRr = 0.8m;
     private const decimal EntryFillRiskDriftTolerancePoints = 1m;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
@@ -74,6 +107,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private readonly List<ResearchTracker> _researchTrackers = new();
     private readonly List<ReplayExecutionState> _recentReplayExecutions = new();
     private readonly Dictionary<string, ActualTradeOutcome> _actualTradeOutcomesBySignalPath = new();
+    private readonly HashSet<string> _writtenExecutionTradeIds = new();
     private readonly HashSet<string> _writtenResearchOutcomeKeys = new();
     private readonly List<OpfCandle> _recentCandles = new();
     private readonly SemaphoreSlim _executionLock = new(1, 1);
@@ -126,6 +160,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private decimal _actualFailureRetestMaxRiskPoints = 11m;
     private decimal _actualFailureRetestMinSetupQualityScore = 56m;
     private bool _actualRequireFailureRetest = true;
+    private bool _compactResearchLogging;
     private bool _isStoppingActualExecution;
     private static PropertyInfo? _vwapProperty;
 
@@ -135,7 +170,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     [Category("OPF Profile")]
     [DisplayName("Execution Profile")]
-    public string ExecutionProfileName { get; set; } = "MNQ_1Contract_Target150_200";
+    public string ExecutionProfileName { get; set; } = "MNQ_2Contract_Evidence";
 
     [Category("OPF Research")]
     [DisplayName("Enable Research Logging")]
@@ -171,11 +206,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     [Category("OPF Execution")]
     [DisplayName("Actual Order Quantity")]
-    public decimal ReplayOrderQuantity { get; set; } = 1m;
+    public decimal ReplayOrderQuantity { get; set; } = 2m;
 
     [Category("OPF Execution")]
     [DisplayName("Actual Target R")]
-    public decimal ReplayTargetR { get; set; } = 2m;
+    public decimal ReplayTargetR { get; set; } = 1.5m;
 
     [Category("OPF Execution")]
     [DisplayName("Actual Max Trades Per Day")]
@@ -224,7 +259,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             out var actualExecutionConfigStatus);
         ApplyActualExecutionSettings(actualExecutionSettings);
 
-        var profileSelection = ProfileCatalog.Select(InstrumentProfileName, ExecutionProfileName);
+        var resolvedExecutionProfileName = ResolveExecutionProfileName(actualExecutionSettings);
+        var profileSelection = ProfileCatalog.Select(InstrumentProfileName, resolvedExecutionProfileName);
         _snapshot = ConfigSnapshot.Create(
             profileSelection,
             actualExecutionConfigPath,
@@ -233,7 +269,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         if (EnableResearchLogging)
         {
-            _researchLogger = new ResearchLogger("OPFStrategyV1");
+            _researchLogger = new ResearchLogger("OPFStrategyV1", actualExecutionSettings.ResearchLogMode);
             _researchLogger.WriteConfigSnapshot(_snapshot);
             _researchLogger.AppendSignalHeader(_snapshot.SnapshotId);
             _researchLogger.AppendInfo(
@@ -257,9 +293,23 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                     _snapshot.SnapshotId,
                     0,
                     DateTime.UtcNow,
-                    $"UNKNOWN_EXECUTION_PROFILE requested={ExecutionProfileName} fallback={profileSelection.ExecutionProfile.Name} supported={ProfileCatalog.SupportedExecutionProfileNames}");
+                    $"UNKNOWN_EXECUTION_PROFILE requested={resolvedExecutionProfileName} fallback={profileSelection.ExecutionProfile.Name} supported={ProfileCatalog.SupportedExecutionProfileNames}");
             }
         }
+    }
+
+    private string ResolveExecutionProfileName(ActualExecutionSettings settings)
+    {
+        if (settings.ActualOrderQuantity == 2m &&
+            string.Equals(settings.ResearchLogMode, "Compact", StringComparison.OrdinalIgnoreCase) &&
+            settings.ActualTargetR == 1.5m &&
+            !settings.ActualUseFullLossGuard &&
+            !settings.ActualUseConsecutiveLossGuard)
+        {
+            return "MNQ_2Contract_Evidence";
+        }
+
+        return ExecutionProfileName;
     }
 
     private void ApplyActualExecutionSettings(ActualExecutionSettings settings)
@@ -288,6 +338,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _actualRequireFailureRetest = settings.ActualRequireFailureRetest;
         ActualWideStopMultiplier = settings.ActualWideStopMultiplier;
         ActualEnableWideStopExecution = settings.ActualEnableWideStopExecution;
+        _compactResearchLogging = string.Equals(settings.ResearchLogMode, "Compact", StringComparison.OrdinalIgnoreCase);
 
         if (Enum.TryParse<TimeInForce>(settings.ActualTimeInForce, ignoreCase: true, out var timeInForce))
             ReplayTimeInForce = timeInForce;
@@ -1795,10 +1846,40 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
         if (IsDailyVolumeQualityRescue(signal, researchPath, risk))
             executeReasons.Add($"DailyVolumeQualityRescueV120:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
+        if (IsZoneBirthVolumeExpansionV122(signal, researchPath))
+            executeReasons.Add($"ZoneBirthVolumeV122:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+        if (IsStrictVolumeExpansionV122(signal, researchPath))
+        {
+            var tag = string.Equals(researchPath, "ObservationStrict_BullFresh", StringComparison.OrdinalIgnoreCase)
+                ? "StrictBullFreshVolumeV130"
+                : "StrictObservationVolumeV122";
+            executeReasons.Add($"{tag}:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+        }
+        if (IsBreakawayVolumeExpansionV128(signal, researchPath))
+        {
+            var tag = BreakawayVolumeV128Tag(signal, risk);
+            executeReasons.Add($"{tag}:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+        }
+        if (IsObservationLongVolumeExpansionV123(signal, researchPath, risk))
+        {
+            executeReasons.Add($"ObservationLongVolumeV123:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+            if (IsObservationConfirmLongRisk12V137(signal, researchPath, risk))
+                executeReasons.Add($"ObservationConfirmLongRisk12V137:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##}");
+        }
+        if (IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath))
+            executeReasons.Add($"UnknownMicroRiskVolumeV126:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+        if (IsObservationShortVolumeExpansionV124(signal, researchPath, risk))
+            executeReasons.Add($"ObservationShortVolumeV124:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+        if (IsObservationConfirmRisk22V132(signal, researchPath, risk))
+            executeReasons.Add($"ObservationConfirmRisk22V132:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+        if (IsObservationConfirmWideStopVolumeV131(signal, researchPath))
+            executeReasons.Add($"{ObservationConfirmWideStopVolumeV131Tag(signal, risk)}:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+        if (IsObservationConfirmWideStopLowRiskV132(signal, researchPath, risk))
+            executeReasons.Add($"OCWideStopLowRiskV132:side={signal.Side},risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
             executeReasons.Add($"FailureRetestWideFiller:dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
         if (targetR != ReplayTargetR)
-            executeReasons.Add($"LongProfitExtensionV114:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
+            executeReasons.Add($"ActualTargetOverride:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
         var executeReason = string.Join("|", executeReasons);
         AppendExecutionDecision(signal, entryCandle, "Execute", executeReason, researchPath, stop, risk, tradeId);
         AppendExecutionEvent(signal, tradeId, entryCandle, "ENTRY_SEND", "ENTRY", researchPath, entry, qty, $"stop={stop:0.########}|target={target:0.########}");
@@ -1880,6 +1961,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             "ObservationStrict_Other" or
             "ObservationStrict_Other_WideStop1_5R" or
             "ShadowCandidate" or
+            "UnknownRegimeZoneTouch" or
             "ZoneBirthResearch" or
             "FailureReverse_ObservationInvalidated" or
             "FailureReverse_LongQualified" or
@@ -1895,13 +1977,33 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var isFailureRetest = IsFailureRetestPath(researchPath);
         var isDailyVolumeFloor = IsDailyVolumeFloorAllowed(signal, researchPath);
         var isMainlineVolumeFiller = IsMainlineVolumeFiller(signal, researchPath);
-        if (_actualRequireTrendRegime && !signal.RegimeScore.Passed && !isImmediateFailureReverse && !isObservationConfirm && !isFailureRetest && !isDailyVolumeFloor && !isMainlineVolumeFiller)
+        var isV122VolumeExpansion = IsV122VolumeExpansionAllowed(signal, researchPath);
+        var isBreakawayVolumeExpansion = IsBreakawayVolumeExpansionV128(signal, researchPath);
+        var isUnknownMicroRiskVolumeExpansion = IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath);
+        var isObservationConfirmWideStopVolume = IsObservationConfirmWideStopVolumeV131(signal, researchPath);
+        var isObservationConfirmWideStopLowRisk = IsObservationConfirmWideStopLowRiskV132Quality(signal, researchPath);
+        var isObservationConfirmRisk22 = IsObservationConfirmRisk22V132Quality(signal, researchPath);
+        if (_actualRequireTrendRegime && !signal.RegimeScore.Passed && !isImmediateFailureReverse && !isObservationConfirm && !isFailureRetest && !isDailyVolumeFloor && !isMainlineVolumeFiller && !isV122VolumeExpansion && !isBreakawayVolumeExpansion && !isUnknownMicroRiskVolumeExpansion && !isObservationConfirmWideStopVolume && !isObservationConfirmWideStopLowRisk && !isObservationConfirmRisk22)
             reasons.Add($"StrategyRegimeNotTrend:score={signal.RegimeScore.TotalScore:0.##}");
 
         var minSetupQuality = isDailyVolumeFloor
             ? DailyVolumeFloorMinSetupQualityScore
             : isMainlineVolumeFiller
             ? MainlineVolumeFillerMinSetupQualityScore
+            : isBreakawayVolumeExpansion
+            ? BreakawayVolumeV128MinSetupQualityScore
+            : isUnknownMicroRiskVolumeExpansion
+            ? UnknownMicroRiskVolumeV126MinSetupQualityScore
+            : isObservationConfirmWideStopVolume
+            ? ObservationConfirmWideStopVolumeV131MinSetupQualityScore(signal)
+            : isObservationConfirmWideStopLowRisk
+            ? ObservationConfirmWideStopLowRiskV132MinSetupQualityScore
+            : isObservationConfirmRisk22
+            ? ObservationConfirmRisk22V132MinSetupQualityScore
+            : IsZoneBirthVolumeExpansionPath(researchPath)
+            ? ZoneBirthVolumeV122MinSetupQualityScore
+            : IsStrictVolumeExpansionPath(researchPath)
+            ? StrictVolumeV122MinSetupQualityScore
             : isObservationConfirm
             ? _actualObservationConfirmMinSetupQualityScore
             : isFailureRetest
@@ -1947,6 +2049,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ObservationConfirmRiskCap(CandidateSignal signal, string researchPath)
     {
+        if (IsObservationConfirmPath(researchPath) && signal.Side == TradeSide.Long)
+            return ObservationConfirmLongV137MaxRiskPoints;
+        if (IsObservationConfirmRisk22V132Quality(signal, researchPath))
+            return Math.Max(_actualObservationConfirmMaxRiskPoints, ObservationConfirmRisk22V132MaxRiskPoints);
+        if (IsObservationLongVolumeExpansionAllowedV123(signal, researchPath))
+            return Math.Max(_actualObservationConfirmMaxRiskPoints, ObservationLongVolumeV123MaxRiskPoints);
+        if (IsObservationShortVolumeExpansionAllowedV124(signal, researchPath))
+            return Math.Max(_actualObservationConfirmMaxRiskPoints, ObservationShortVolumeV124MaxRiskPoints);
         if (IsDailyVolumeQualityRescueAllowed(signal, researchPath))
             return Math.Max(_actualObservationConfirmMaxRiskPoints, DailyVolumeQualityRescueMaxRiskPoints);
         if (IsObservationConfirmVolumeRiskExpansionAllowed(signal, researchPath))
@@ -1957,6 +2067,20 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal MaxAllowedActualRiskPoints(CandidateSignal signal, string researchPath)
     {
+        if (IsBreakawayLongSelectiveV134Quality(signal, researchPath))
+            return BreakawayLongSelectiveV134MaxRiskPoints;
+        if (IsBreakawayVolumeExpansionV128(signal, researchPath))
+            return BreakawayVolumeV128MaxRiskPoints(signal);
+        if (IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath))
+            return UnknownMicroRiskVolumeV126MaxRiskPoints;
+        if (IsZoneBirthVolumeExpansionV122(signal, researchPath))
+            return ZoneBirthVolumeV122MaxRiskPoints;
+        if (IsStrictVolumeExpansionV122(signal, researchPath))
+            return StrictVolumeV122MaxRiskPoints;
+        if (IsObservationConfirmWideStopLowRiskV132Quality(signal, researchPath))
+            return ObservationConfirmWideStopLowRiskV132MaxRiskPoints;
+        if (IsObservationConfirmWideStopVolumeV131(signal, researchPath))
+            return ObservationConfirmWideStopVolumeV131MaxRiskPoints;
         if (IsDailyVolumeFloorPath(researchPath))
             return DailyVolumeFloorMaxRiskPoints;
         if (IsBreakawayPath(researchPath))
@@ -2018,23 +2142,62 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private string[] ActualExecutionPathSkipReasons(CandidateSignal signal, string researchPath)
     {
-        if (IsDailyVolumeResearchFillerPath(researchPath) && !IsDailyVolumeResearchFillerAllowed(signal, researchPath))
+        if (IsBreakawayPath(researchPath) &&
+            signal.Side == TradeSide.Long)
+            return new[] { "BreakawayLongActualDisabledV135" };
+
+        if (IsEvidenceFrozenActualPath(researchPath))
+            return new[] { $"EvidenceFrozenActualPathV135:{researchPath}" };
+
+        if (IsZoneBirthVolumeExpansionPath(researchPath) && signal.Side == TradeSide.Long)
+            return new[] { "ZoneBirthLongActualDisabledV133" };
+
+        if (IsObservationConfirmWideStopPath(researchPath) &&
+            !IsObservationConfirmWideStopVolumeV131(signal, researchPath) &&
+            !IsObservationConfirmWideStopLowRiskV132Quality(signal, researchPath))
+            return new[] { $"ObservationConfirmWideStopQualityTooLowV132:side={signal.Side},score={signal.SetupQualityScore.TotalScore:0.##},min={ObservationConfirmWideStopLowRiskV132MinSetupQualityScore:0.##}" };
+
+        if (string.Equals(researchPath, "AlmostConfirmed", StringComparison.OrdinalIgnoreCase))
+            return new[] { "AlmostConfirmedActualDisabledV131" };
+
+        if (string.Equals(researchPath, "ObservationStrict_BullFresh", StringComparison.OrdinalIgnoreCase))
+            return new[] { "StrictBullFreshActualDisabledV131" };
+
+        if (IsZoneBirthVolumeExpansionPath(researchPath) && signal.Side == TradeSide.Short)
+            return new[] { "ZoneBirthShortActualDisabledV123" };
+
+        if (IsBreakawayPath(researchPath) && !IsBreakawayVolumeExpansionV128(signal, researchPath))
+            return new[] { $"BreakawayVolumeV128QualityTooLow:score={signal.SetupQualityScore.TotalScore:0.##},min={BreakawayVolumeV128MinSetupQualityScore:0.##}" };
+
+        if (IsZoneBirthVolumeExpansionPath(researchPath) && !IsZoneBirthVolumeExpansionV122(signal, researchPath))
+            return new[] { $"ZoneBirthVolumeV122QualityTooLow:score={signal.SetupQualityScore.TotalScore:0.##},min={ZoneBirthVolumeV122MinSetupQualityScore:0.##}" };
+
+        if (IsUnknownMicroRiskVolumeExpansionPath(researchPath))
+            return new[] { "UnknownMicroRiskActualDisabledV127" };
+
+        if (IsStrictVolumeExpansionPath(researchPath) && !IsStrictVolumeExpansionV122(signal, researchPath))
+            return new[] { $"StrictObservationVolumeV122QualityTooLow:score={signal.SetupQualityScore.TotalScore:0.##},min={StrictVolumeV122MinSetupQualityScore:0.##}" };
+
+        if (IsDailyVolumeResearchFillerPath(researchPath) && !IsZoneBirthVolumeExpansionPath(researchPath) && !IsDailyVolumeResearchFillerAllowed(signal, researchPath))
             return new[] { $"DailyVolumeResearchFillerOnlyBeforeDailyTarget:trades={_replayTradesToday},target={_actualObservationConfirmFillerUntilDailyTrades}" };
 
         if (IsMainlineVolumeFillerPath(researchPath) && !IsMainlineVolumeFiller(signal, researchPath))
             return new[] { $"MainlineVolumeFillerQualityTooLow:score={signal.SetupQualityScore.TotalScore:0.##},min={MainlineVolumeFillerMinSetupQualityScore:0.##}" };
 
-        if (IsDailyVolumeFloorPath(researchPath) && !IsDailyVolumeFloorAllowed(signal, researchPath))
+        if (IsDailyVolumeFloorPath(researchPath) && !IsObservationConfirmWideStopVolumeV131(signal, researchPath) && !IsDailyVolumeFloorAllowed(signal, researchPath))
             return new[] { $"DailyVolumeFloorOnlyBeforeDailyTarget:trades={_replayTradesToday},target={_actualObservationConfirmFillerUntilDailyTrades},score={signal.SetupQualityScore.TotalScore:0.##},min={DailyVolumeFloorMinSetupQualityScore:0.##}" };
 
         if (string.Equals(researchPath, "FailureReverse_ObservationInvalidated", StringComparison.OrdinalIgnoreCase) &&
             signal.Side == TradeSide.Long)
             return new[] { "FailureImmediateLongDisabled" };
 
+        if (IsFailureRetestWideStopPath(researchPath))
+            return new[] { "FailureRetestWideStopActualDisabledV136" };
+
         if (IsFailureRetestWideStopPath(researchPath) && !IsFailureRetestWideStopVolumeFiller(researchPath))
             return new[] { $"FailureRetestWideOnlyBeforeDailyTarget:trades={_replayTradesToday},target={_actualObservationConfirmFillerUntilDailyTrades}" };
 
-        if (string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase) && !IsBreakawayVolumeExpansionV128(signal, researchPath))
             return new[] { "BreakawayBroadDisabledV110" };
 
         if (!_actualRequireFailureRetest || signal.SetupType != SetupType.FailureReverse)
@@ -2053,6 +2216,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private static bool IsObservationConfirmPath(string researchPath)
     {
         return string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUnknownMicroRiskVolumeExpansionPath(string researchPath)
+    {
+        return string.Equals(researchPath, "UnknownRegimeZoneTouch", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsObservationConfirmWideStopPath(string researchPath)
@@ -2083,6 +2251,17 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             string.Equals(researchPath, "ShadowCandidate", StringComparison.OrdinalIgnoreCase);
     }
 
+    private static bool IsZoneBirthVolumeExpansionPath(string researchPath)
+    {
+        return string.Equals(researchPath, "ZoneBirthResearch", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsStrictVolumeExpansionPath(string researchPath)
+    {
+        return string.Equals(researchPath, "ObservationStrict_BullFresh", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "ObservationStrict_Other", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsDailyVolumeFloorPath(string researchPath)
     {
         return IsObservationConfirmWideStopPath(researchPath) ||
@@ -2109,6 +2288,158 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             signal.SetupQualityScore.TotalScore >= MainlineVolumeFillerMinSetupQualityScore;
     }
 
+    private bool IsV122VolumeExpansionAllowed(CandidateSignal signal, string researchPath)
+    {
+        return IsZoneBirthVolumeExpansionV122(signal, researchPath) || IsStrictVolumeExpansionV122(signal, researchPath);
+    }
+
+    private bool IsZoneBirthVolumeExpansionV122(CandidateSignal signal, string researchPath)
+    {
+        return IsZoneBirthVolumeExpansionPath(researchPath) &&
+            signal.SetupQualityScore.TotalScore >= ZoneBirthVolumeV122MinSetupQualityScore;
+    }
+
+    private bool IsStrictVolumeExpansionV122(CandidateSignal signal, string researchPath)
+    {
+        return IsStrictVolumeExpansionPath(researchPath) &&
+            signal.SetupQualityScore.TotalScore >= StrictVolumeV122MinSetupQualityScore;
+    }
+
+    private bool IsBreakawayVolumeExpansionV128(CandidateSignal signal, string researchPath)
+    {
+        return IsBreakawayPath(researchPath) &&
+            signal.SetupQualityScore.TotalScore >= BreakawayVolumeV128MinSetupQualityScore;
+    }
+
+    private static bool IsBreakawayLongSelectiveV134Quality(CandidateSignal signal, string researchPath)
+    {
+        return IsBreakawayPath(researchPath) &&
+            signal.Side == TradeSide.Long &&
+            signal.SetupQualityScore.TotalScore >= BreakawayLongSelectiveV134MinSetupQualityScore;
+    }
+
+    private static bool IsEvidenceFrozenActualPath(string researchPath)
+    {
+        return string.Equals(researchPath, "ShadowCandidate", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "ObservationStrict_Other", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "StructureConfirmShadow_ConfirmBarStop", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "StructureConfirmShadow_ConfirmBarStop_Min10", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "StructureConfirmShadow_ConfirmBarStop_Wait1", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "StructureConfirmShadow_SwingStop", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static decimal BreakawayVolumeV128MaxRiskPoints(CandidateSignal signal)
+    {
+        return signal.Side == TradeSide.Short
+            ? BreakawayVolumeV128ShortMaxRiskPoints
+            : BreakawayVolumeV128LongMaxRiskPoints;
+    }
+
+    private static string BreakawayVolumeV128Tag(CandidateSignal signal, decimal risk)
+    {
+        if (signal.Side == TradeSide.Long)
+            return "BreakawayLongSelectiveV134";
+
+        return signal.Side == TradeSide.Short && risk > BreakawayVolumeV128LongMaxRiskPoints
+            ? "BreakawayShortWideV128"
+            : "BreakawayVolumeV128";
+    }
+
+    private bool IsUnknownMicroRiskVolumeExpansionV126(CandidateSignal signal, string researchPath)
+    {
+        return IsUnknownMicroRiskVolumeExpansionPath(researchPath) &&
+            signal.SetupQualityScore.TotalScore >= UnknownMicroRiskVolumeV126MinSetupQualityScore;
+    }
+
+    private bool IsObservationLongVolumeExpansionAllowedV123(CandidateSignal signal, string researchPath)
+    {
+        return IsObservationConfirmPath(researchPath) &&
+            signal.Side == TradeSide.Long &&
+            signal.SetupQualityScore.TotalScore >= ObservationLongVolumeV123MinSetupQualityScore;
+    }
+
+    private bool IsObservationLongVolumeExpansionV123(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        return IsObservationLongVolumeExpansionAllowedV123(signal, researchPath) &&
+            risk > _actualObservationConfirmMaxRiskPoints &&
+            risk <= ObservationLongVolumeV123MaxRiskPoints;
+    }
+
+    private static bool IsObservationConfirmLongRisk12V137(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        return IsObservationConfirmPath(researchPath) &&
+            signal.Side == TradeSide.Long &&
+            risk > 11m &&
+            risk <= ObservationConfirmLongV137MaxRiskPoints;
+    }
+
+    private static bool IsObservationConfirmLongWideRiskCutV137(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        return IsObservationConfirmPath(researchPath) &&
+            signal.Side == TradeSide.Long &&
+            risk > ObservationConfirmLongV137MaxRiskPoints;
+    }
+
+    private bool IsObservationShortVolumeExpansionAllowedV124(CandidateSignal signal, string researchPath)
+    {
+        return IsObservationConfirmPath(researchPath) &&
+            signal.Side == TradeSide.Short &&
+            signal.SetupQualityScore.TotalScore >= ObservationShortVolumeV124MinSetupQualityScore;
+    }
+
+    private bool IsObservationShortVolumeExpansionV124(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        return IsObservationShortVolumeExpansionAllowedV124(signal, researchPath) &&
+            risk > _actualObservationConfirmMaxRiskPoints &&
+            risk <= ObservationShortVolumeV124MaxRiskPoints;
+    }
+
+    private static bool IsObservationConfirmRisk22V132Quality(CandidateSignal signal, string researchPath)
+    {
+        return IsObservationConfirmPath(researchPath) &&
+            signal.SetupQualityScore.TotalScore >= ObservationConfirmRisk22V132MinSetupQualityScore;
+    }
+
+    private static bool IsObservationConfirmRisk22V132(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        return IsObservationConfirmRisk22V132Quality(signal, researchPath) &&
+            risk > ObservationLongVolumeV123MaxRiskPoints &&
+            risk <= ObservationConfirmRisk22V132MaxRiskPoints;
+    }
+
+    private static decimal ObservationConfirmWideStopVolumeV131MinSetupQualityScore(CandidateSignal signal)
+    {
+        return signal.Side == TradeSide.Long
+            ? ObservationConfirmWideStopVolumeV131LongMinSetupQualityScore
+            : ObservationConfirmWideStopVolumeV131ShortMinSetupQualityScore;
+    }
+
+    private static bool IsObservationConfirmWideStopVolumeV131(CandidateSignal signal, string researchPath)
+    {
+        return IsObservationConfirmWideStopPath(researchPath) &&
+            signal.SetupQualityScore.TotalScore >= ObservationConfirmWideStopVolumeV131MinSetupQualityScore(signal);
+    }
+
+    private static string ObservationConfirmWideStopVolumeV131Tag(CandidateSignal signal, decimal risk)
+    {
+        var side = signal.Side == TradeSide.Long ? "Long" : "Short";
+        var bucket = risk <= 18m ? "Risk18" : "Risk22";
+        return $"OCWideStop{side}{bucket}V131";
+    }
+
+    private static bool IsObservationConfirmWideStopLowRiskV132Quality(CandidateSignal signal, string researchPath)
+    {
+        return IsObservationConfirmWideStopPath(researchPath) &&
+            signal.SetupQualityScore.TotalScore >= ObservationConfirmWideStopLowRiskV132MinSetupQualityScore;
+    }
+
+    private static bool IsObservationConfirmWideStopLowRiskV132(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        return !IsObservationConfirmWideStopVolumeV131(signal, researchPath) &&
+            IsObservationConfirmWideStopLowRiskV132Quality(signal, researchPath) &&
+            risk <= ObservationConfirmWideStopLowRiskV132MaxRiskPoints;
+    }
+
     private bool IsFailureRetestWideStopVolumeFiller(string researchPath)
     {
         return IsFailureRetestWideStopPath(researchPath) &&
@@ -2117,9 +2448,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private static string MainlineVolumeFillerTag(string researchPath)
     {
+        if (string.Equals(researchPath, "AlmostConfirmed", StringComparison.OrdinalIgnoreCase))
+            return "AlmostConfirmedVolumeV130";
+
         return string.Equals(researchPath, "ShadowCandidate", StringComparison.OrdinalIgnoreCase)
-            ? "ShadowCandidateFillerV121"
-            : "AlmostConfirmedFillerV121";
+            ? "ShadowCandidateFillerV122"
+            : "MainlineVolumeFillerV122";
     }
 
     private static bool IsTrendPullbackConfirmedPath(string researchPath)
@@ -2138,42 +2472,98 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var isMainlineVolumeFiller = IsMainlineVolumeFiller(signal, researchPath);
         var isObservationVolumeRiskBand = IsObservationConfirmVolumeRiskExpansion(signal, researchPath, risk);
         var isDailyVolumeQualityRescue = IsDailyVolumeQualityRescue(signal, researchPath, risk);
-        if (isDailyVolumeFloor && risk > DailyVolumeFloorMaxRiskPoints)
+        var isV122VolumeExpansion = IsV122VolumeExpansionAllowed(signal, researchPath);
+        var isBreakawayVolumeExpansion = IsBreakawayVolumeExpansionV128(signal, researchPath);
+        var isBreakawayLongSelective = IsBreakawayLongSelectiveV134Quality(signal, researchPath);
+        var isObservationLongVolumeExpansion = IsObservationLongVolumeExpansionV123(signal, researchPath, risk);
+        var isObservationShortVolumeExpansion = IsObservationShortVolumeExpansionV124(signal, researchPath, risk);
+        var isUnknownMicroRiskVolumeExpansion = IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath);
+        var isObservationConfirmWideStopVolume = IsObservationConfirmWideStopVolumeV131(signal, researchPath);
+        var isObservationConfirmWideStopLowRiskQuality = IsObservationConfirmWideStopLowRiskV132Quality(signal, researchPath);
+        var isObservationConfirmWideStopLowRisk = IsObservationConfirmWideStopLowRiskV132(signal, researchPath, risk);
+        var isObservationConfirmRisk22 = IsObservationConfirmRisk22V132(signal, researchPath, risk);
+        if (isDailyVolumeFloor && !isObservationConfirmWideStopVolume && risk > DailyVolumeFloorMaxRiskPoints)
             reasons.Add($"DailyVolumeFloorRiskCapExceeded:risk={risk:0.##},max={DailyVolumeFloorMaxRiskPoints:0.##}");
         if (isMainlineVolumeFiller && risk > MainlineVolumeFillerMaxRiskPoints)
             reasons.Add($"MainlineVolumeFillerRiskCapExceeded:risk={risk:0.##},max={MainlineVolumeFillerMaxRiskPoints:0.##}");
-        if (IsBreakawayPath(researchPath) && _actualBreakawayMaxRiskPoints > 0m && risk > _actualBreakawayMaxRiskPoints)
+        if (isObservationConfirmWideStopLowRiskQuality && !isObservationConfirmWideStopVolume && risk > ObservationConfirmWideStopLowRiskV132MaxRiskPoints)
+            reasons.Add($"OCWideStopLowRiskV132RiskCapExceeded:risk={risk:0.##},max={ObservationConfirmWideStopLowRiskV132MaxRiskPoints:0.##},side={signal.Side}");
+        if (isObservationConfirmWideStopVolume && risk > ObservationConfirmWideStopVolumeV131MaxRiskPoints)
+            reasons.Add($"ObservationConfirmWideStopVolumeV131RiskCapExceeded:risk={risk:0.##},max={ObservationConfirmWideStopVolumeV131MaxRiskPoints:0.##},side={signal.Side}");
+        if (isBreakawayVolumeExpansion)
+        {
+            var breakawayMaxRisk = isBreakawayLongSelective
+                ? BreakawayLongSelectiveV134MaxRiskPoints
+                : BreakawayVolumeV128MaxRiskPoints(signal);
+            if (risk > breakawayMaxRisk)
+            {
+                var reason = isBreakawayLongSelective
+                    ? "BreakawayLongSelectiveV134RiskCapExceeded"
+                    : "BreakawayVolumeV128RiskCapExceeded";
+                reasons.Add($"{reason}:risk={risk:0.##},max={breakawayMaxRisk:0.##},side={signal.Side}");
+            }
+        }
+        if (isUnknownMicroRiskVolumeExpansion && risk > UnknownMicroRiskVolumeV126MaxRiskPoints)
+            reasons.Add($"UnknownMicroRiskVolumeV126RiskCapExceeded:risk={risk:0.##},max={UnknownMicroRiskVolumeV126MaxRiskPoints:0.##}");
+        if (IsZoneBirthVolumeExpansionV122(signal, researchPath) && risk > ZoneBirthVolumeV122MaxRiskPoints)
+            reasons.Add($"ZoneBirthVolumeV122RiskCapExceeded:risk={risk:0.##},max={ZoneBirthVolumeV122MaxRiskPoints:0.##}");
+        if (IsStrictVolumeExpansionV122(signal, researchPath) && risk > StrictVolumeV122MaxRiskPoints)
+            reasons.Add($"StrictObservationVolumeV122RiskCapExceeded:risk={risk:0.##},max={StrictVolumeV122MaxRiskPoints:0.##}");
+        if (IsBreakawayPath(researchPath) && !isBreakawayVolumeExpansion && _actualBreakawayMaxRiskPoints > 0m && risk > _actualBreakawayMaxRiskPoints)
             reasons.Add($"BreakawayRiskCapExceeded:risk={risk:0.##},max={_actualBreakawayMaxRiskPoints:0.##}");
         if (IsObservationConfirmPath(researchPath))
         {
+            if (IsObservationConfirmLongWideRiskCutV137(signal, researchPath, risk))
+                reasons.Add($"LongObservationWideRiskCutV137:risk={risk:0.##},max={ObservationConfirmLongV137MaxRiskPoints:0.##}");
+
             var maxObservationRisk = ObservationConfirmRiskCap(signal, researchPath);
             if (maxObservationRisk > 0m && risk > maxObservationRisk)
                 reasons.Add($"ObservationConfirmRiskCapExceeded:risk={risk:0.##},max={maxObservationRisk:0.##}");
 
-            if (IsLongObservationRiskExpansionDisabled(signal, risk))
+            if (IsLongObservationRiskExpansionDisabled(signal, risk) && !isObservationLongVolumeExpansion)
                 reasons.Add($"LongObservationRiskExpansionDisabledV111:risk={risk:0.##}");
-            if (IsShortObservationMidRiskQualityCut(signal, risk))
+            if (IsShortObservationMidRiskQualityCut(signal, risk) && !isObservationShortVolumeExpansion)
                 reasons.Add($"ShortObservationMidRiskQualityCutV112:score={signal.SetupQualityScore.TotalScore:0.##},min={ShortObservationMidRiskQualityCutMinScore:0.##},risk={risk:0.##}");
         }
         if (IsFailureRetestPath(researchPath) && !isDailyVolumeFloor && _actualFailureRetestMaxRiskPoints > 0m && risk > _actualFailureRetestMaxRiskPoints)
             reasons.Add($"FailureRetestRiskCapExceeded:risk={risk:0.##},max={_actualFailureRetestMaxRiskPoints:0.##}");
-        if (IsDailyVolumeResearchFillerPath(researchPath) && risk > DailyVolumeResearchFillerMaxRiskPoints)
+        if (IsDailyVolumeResearchFillerPath(researchPath) && !IsZoneBirthVolumeExpansionV122(signal, researchPath) && risk > DailyVolumeResearchFillerMaxRiskPoints)
             reasons.Add($"DailyVolumeResearchFillerRiskCapExceeded:risk={risk:0.##},max={DailyVolumeResearchFillerMaxRiskPoints:0.##}");
 
-        if (instrument.MaxRiskPointsHard > 0m && risk > instrument.MaxRiskPointsHard)
+        if (!isBreakawayVolumeExpansion && instrument.MaxRiskPointsHard > 0m && risk > instrument.MaxRiskPointsHard)
             reasons.Add($"RiskTooWideHard:risk={risk:0.##},max={instrument.MaxRiskPointsHard:0.##}");
 
         var atr14 = CalculateAtr14(entryCandle);
         var maxAllowedRisk = MaxAllowedRiskPoints(instrument, atr14);
-        if (!isDailyVolumeFloor && !isMainlineVolumeFiller && !isObservationVolumeRiskBand && !isDailyVolumeQualityRescue && maxAllowedRisk > 0m && risk > maxAllowedRisk)
+        if (!isDailyVolumeFloor && !isMainlineVolumeFiller && !isObservationVolumeRiskBand && !isDailyVolumeQualityRescue && !isV122VolumeExpansion && !isBreakawayVolumeExpansion && !isObservationLongVolumeExpansion && !isObservationShortVolumeExpansion && !isUnknownMicroRiskVolumeExpansion && !isObservationConfirmWideStopVolume && !isObservationConfirmWideStopLowRisk && !isObservationConfirmRisk22 && maxAllowedRisk > 0m && risk > maxAllowedRisk)
             reasons.Add($"RiskTooWideVolAdjusted:risk={risk:0.##},max={maxAllowedRisk:0.##},atr14={atr14:0.##}");
 
         var reward = EstimateActualExecutionReward(signal, researchPath, entryCandle.Close, risk);
-        var estimatedRr = reward.Points <= 0m || risk <= 0m ? 0m : Math.Round(reward.Points / risk, 4);
-        var minEstimatedRr = isDailyVolumeFloor
+        var estimatedRr = EstimatedActualRr(signal, researchPath, entryCandle.Close, risk);
+        var minEstimatedRr = isObservationConfirmWideStopLowRisk
+            ? ObservationConfirmWideStopLowRiskV132MinEstimatedRr
+            : isObservationConfirmRisk22
+            ? ObservationConfirmRisk22V132MinEstimatedRr
+            : isObservationConfirmWideStopVolume
+            ? ObservationConfirmWideStopVolumeV131MinEstimatedRr
+            : isDailyVolumeFloor
             ? DailyVolumeFloorMinEstimatedRr
             : isMainlineVolumeFiller
                 ? MainlineVolumeFillerMinEstimatedRr
+            : isBreakawayVolumeExpansion
+                ? isBreakawayLongSelective
+                    ? BreakawayLongSelectiveV134MinEstimatedRr
+                    : BreakawayVolumeV128MinEstimatedRr
+            : isObservationLongVolumeExpansion
+                ? ObservationLongVolumeV123MinEstimatedRr
+            : isObservationShortVolumeExpansion
+                ? ObservationShortVolumeV124MinEstimatedRr
+            : isUnknownMicroRiskVolumeExpansion
+                ? UnknownMicroRiskVolumeV126MinEstimatedRr
+            : IsZoneBirthVolumeExpansionV122(signal, researchPath)
+                ? ZoneBirthVolumeV122MinEstimatedRr
+            : IsStrictVolumeExpansionV122(signal, researchPath)
+                ? StrictVolumeV122MinEstimatedRr
             : isDailyVolumeQualityRescue
                 ? DailyVolumeQualityRescueMinEstimatedRr
             : ActualMinEstimatedRr > 0m ? ActualMinEstimatedRr : instrument.MinEstimatedRr;
@@ -2183,11 +2573,20 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return reasons.ToArray();
     }
 
+    private decimal EstimatedActualRr(CandidateSignal signal, string researchPath, decimal entry, decimal risk)
+    {
+        var reward = EstimateActualExecutionReward(signal, researchPath, entry, risk);
+        return reward.Points <= 0m || risk <= 0m ? 0m : Math.Round(reward.Points / risk, 4);
+    }
+
     private RewardEstimate EstimateActualExecutionReward(CandidateSignal signal, string researchPath, decimal entry, decimal risk)
     {
         var targetR = ActualTargetRFor(signal, researchPath, risk);
+        if (IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath))
+            return new RewardEstimate(risk * targetR, $"UnknownMicroRiskVolumeV126TargetR:{targetR:0.##}");
+
         if (targetR != ReplayTargetR)
-            return new RewardEstimate(Math.Round(risk * targetR, 2), $"LongProfitExtensionV114TargetR:{targetR:0.##}");
+            return new RewardEstimate(Math.Round(risk * targetR, 2), $"ActualTargetOverride:{targetR:0.##}");
 
         return EstimateReward(signal, researchPath, entry, risk);
     }
@@ -2214,18 +2613,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ActualTargetRFor(TradeSide side, string researchPath, decimal risk)
     {
-        if (side != TradeSide.Long)
-            return ReplayTargetR;
-
-        if (risk <= 11m || risk > 15m)
-            return ReplayTargetR;
-
-        if (IsObservationConfirmPath(researchPath))
-            return 3m;
-
-        return IsObservationConfirmWideStopPath(researchPath)
-            ? 2.5m
-            : ReplayTargetR;
+        return ReplayTargetR;
     }
 
     private static decimal TargetFromRisk(TradeSide side, decimal entry, decimal risk, decimal targetR)
@@ -2370,30 +2758,40 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 return;
             }
 
+            var oldExitQty = _replayExecution.ExitFilledQty;
+            var oldExitValue = _replayExecution.ExitAvgPrice * oldExitQty;
             _replayExecution.ExitFilledQty += fillQty;
+            if (fillQty > 0m && _replayExecution.ExitFilledQty > 0m)
+                _replayExecution.ExitAvgPrice = (oldExitValue + trade.Price * fillQty) / _replayExecution.ExitFilledQty;
+
             LogExecutionInfo($"EXEC_EXIT_FILLED trade={tradeId} role={role} price={trade.Price:0.########}");
             AppendExecutionEvent(_replayExecution, "EXIT_FILLED", role, trade.Price, trade.Volume, string.Empty);
-            var validation = ValidateExecutionFill(_replayExecution, trade.Price, role);
-            if (validation.IsAbnormal)
-            {
-                LogExecutionInfo($"EXEC_ABNORMAL trade={tradeId} role={role} reason={validation.Reason} exit={trade.Price:0.########} expected={validation.ExpectedExitPrice:0.########} drift={validation.ExitPriceDriftPoints:0.########}");
-                AppendExecutionEvent(_replayExecution, "ABNORMAL_EXECUTION", role, trade.Price, trade.Volume, $"{validation.Reason}|expected={validation.ExpectedExitPrice:0.########}|drift={validation.ExitPriceDriftPoints:0.########}");
-            }
-            UpdateReplayExecutionDailyResult(_replayExecution.CreatedTime.Date, validation.NormalDollars, role);
             _replayExecution.UpdateActualExcursion(trade.Price);
-            AppendExecutionTrade(_replayExecution, trade, role, validation);
-            TryWriteActualResearchOutcomeOnExit(_replayExecution, role);
             await TryCancelExecutionOrderAsync(_replayExecution.EntryOrder, "ExitFilledCancelEntry");
 
             var completeQty = _replayExecution.BracketQty > 0m ? _replayExecution.BracketQty : _replayExecution.Quantity;
-            if (_replayExecution.ExitFilledQty + 0.0000001m >= completeQty)
+            if (_replayExecution.ExitFilledQty + 0.0000001m < completeQty)
+                return;
+
+            var finalExitPrice = _replayExecution.ExitAvgPrice > 0m ? _replayExecution.ExitAvgPrice : trade.Price;
+            var validation = ValidateExecutionFill(_replayExecution, finalExitPrice, role);
+            if (validation.IsAbnormal)
             {
-                _replayExecution.ExitCompleted = true;
-                _replayExecution.ExitBar = _lastResearchCandle?.Bar;
-                _replayExecution.ExitPrice = trade.Price;
-                _replayExecution.ExitRole = role;
-                MarkProtectionCleanupPending(_replayExecution, $"ExitFilled:{role}");
+                LogExecutionInfo($"EXEC_ABNORMAL trade={tradeId} role={role} reason={validation.Reason} exit={finalExitPrice:0.########} expected={validation.ExpectedExitPrice:0.########} drift={validation.ExitPriceDriftPoints:0.########}");
+                AppendExecutionEvent(_replayExecution, "ABNORMAL_EXECUTION", role, finalExitPrice, _replayExecution.ExitFilledQty, $"{validation.Reason}|expected={validation.ExpectedExitPrice:0.########}|drift={validation.ExitPriceDriftPoints:0.########}");
             }
+            UpdateReplayExecutionDailyResult(_replayExecution.CreatedTime.Date, validation.NormalDollars, role);
+            var loggedExitPrice = IsNormalizedReplayExitFill(validation)
+                ? validation.ExpectedExitPrice
+                : finalExitPrice;
+            _replayExecution.ExitCompleted = true;
+            _replayExecution.ExitBar = _lastResearchCandle?.Bar;
+            _replayExecution.ExitPrice = loggedExitPrice;
+            _replayExecution.ExitRole = role;
+
+            AppendExecutionTrade(_replayExecution, loggedExitPrice, role, validation);
+            TryWriteActualResearchOutcomeOnExit(_replayExecution, role);
+            MarkProtectionCleanupPending(_replayExecution, $"ExitFilled:{role}");
 
             if (_replayExecution.ProtectionCleanupPending)
                 await CleanupProtectionOrdersAsync(_replayExecution, $"ExitFilled:{role}");
@@ -2443,6 +2841,36 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             reasons.Add($"AbnormalExitRole:{exitRole}");
         }
 
+        var entryIsAbnormal = entryDrift > tolerance;
+        var isExitRoleNormal = string.Equals(exitRole, "TP", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(exitRole, "SL", StringComparison.OrdinalIgnoreCase);
+        var canNormalizeReplayExit = !entryIsAbnormal &&
+            isExitRoleNormal &&
+            expectedExit > 0m &&
+            drift > tolerance;
+        if (canNormalizeReplayExit)
+        {
+            var normalizedPoints = execution.Side == TradeSide.Long
+                ? expectedExit - entry
+                : entry - expectedExit;
+            var normalizedPointsR = execution.InitialRiskPoints <= 0m
+                ? 0m
+                : Math.Round(normalizedPoints / execution.InitialRiskPoints, 4);
+            var normalizedDollars = Math.Round(normalizedPoints * _snapshot.InstrumentProfile.PointValue * execution.Quantity, 2);
+            reasons.Add($"NormalizedReplayExitFill:{exitRole}:raw={exitPrice:0.########},expected={expectedExit:0.########}");
+            return new ExecutionFillValidation(
+                false,
+                string.Join("|", reasons),
+                expectedExit,
+                drift,
+                normalizedDollars,
+                normalizedPoints,
+                normalizedPointsR,
+                rawPoints,
+                rawDollars,
+                rawPointsR);
+        }
+
         var isAbnormal = reasons.Count > 0;
         return new ExecutionFillValidation(
             isAbnormal,
@@ -2464,6 +2892,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (string.Equals(exitRole, "SL", StringComparison.OrdinalIgnoreCase))
             return execution.Stop;
         return 0m;
+    }
+
+    private static bool IsNormalizedReplayExitFill(ExecutionFillValidation validation)
+    {
+        return validation.Reason.Contains("NormalizedReplayExitFill", StringComparison.OrdinalIgnoreCase);
     }
 
     private decimal ExecutionFillTolerance()
@@ -2593,6 +3026,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private static bool IsEntryFillRiskDriftAccepted(ReplayExecutionState execution)
     {
+        if (IsBreakawayPath(execution.ResearchPath))
+            return false;
+        if (IsObservationConfirmPath(execution.ResearchPath) && execution.Side == TradeSide.Long)
+            return false;
+
         return execution.PlannedRiskPoints <= execution.MaxAllowedRiskPoints &&
             execution.InitialRiskPoints <= execution.MaxAllowedRiskPoints + EntryFillRiskDriftTolerancePoints;
     }
@@ -2876,6 +3314,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (_snapshot is null || _lastResearchCandle is null)
             return;
+        if (!_writtenExecutionTradeIds.Add(execution.TradeId))
+        {
+            LogExecutionInfo($"EXEC_TRADE_DUPLICATE_SUPPRESSED trade={execution.TradeId} role={exitRole} exit={exit:0.########}");
+            AppendExecutionEvent(execution, "TRADE_DUPLICATE_SUPPRESSED", exitRole, exit, 0m, "ExecutionTradeAlreadyWritten");
+            return;
+        }
 
         var entry = execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice;
         var rawPoints = execution.Side == TradeSide.Long
@@ -2964,10 +3408,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         if (execution.EntryFilledQty <= 0m)
         {
-            UpdateReplayExecutionDailyResult(execution.CreatedTime.Date, 0m, "STOPPED_NO_ENTRY");
             AppendExecutionEvent(execution, "EXIT_ABORTED_NO_ENTRY", "STOPPED_NO_ENTRY", execution.CreatedPrice, 0m, "StrategyStoppedBeforeEntryFill");
-            AppendExecutionTrade(execution, execution.CreatedPrice, "STOPPED_NO_ENTRY");
-            TryWriteActualResearchOutcomeOnExit(execution, "STOPPED_NO_ENTRY");
 
             execution.ExitCompleted = true;
             execution.ExitBar = _lastResearchCandle.Bar;
@@ -3679,15 +4120,30 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (_snapshot is null)
             return;
+        if (_compactResearchLogging && !ShouldWriteCompactExitPolicyPath(tracker.ResearchPath))
+            return;
 
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed1_5R", 1.5m, tracker.First1_5RBar);
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed2R", 2m, tracker.First2RBar);
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed2_5R", 2.5m, tracker.First2_5RBar);
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed3R", 3m, tracker.First3RBar);
+        if (_compactResearchLogging)
+            return;
+
         AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE_Then2_5R", 2.5m, tracker.First2_5RBar, 0m, tracker.FirstBreakEvenAfter1_5RBar);
         AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1R_Then2_5R", 2.5m, tracker.First2_5RBar, 1m, tracker.First1RLockAfter1_5RBar);
         AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE_Then3R", 3m, tracker.First3RBar, 0m, tracker.FirstBreakEvenAfter1_5RBar);
         AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1R_Then3R", 3m, tracker.First3RBar, 1m, tracker.First1RLockAfter1_5RBar);
+    }
+
+    private static bool ShouldWriteCompactExitPolicyPath(string researchPath)
+    {
+        return string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "ObservationConfirm_WideStop1_5R", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "BreakawayFvg_Qualified", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "FailureReverse_ObservationInvalidated", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(researchPath, "FailureReverse_RetestFailed", StringComparison.OrdinalIgnoreCase);
     }
 
     private void AppendExitPolicyEvaluation(ResearchTracker tracker, OpfCandle exitCandle, string exitPolicy, decimal targetR, int? firstTargetBar)
@@ -4480,6 +4936,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public Order? TargetOrder { get; set; }
         public decimal BracketQty { get; set; }
         public decimal ExitFilledQty { get; set; }
+        public decimal ExitAvgPrice { get; set; }
         public bool BracketSubmitted { get; set; }
         public bool ExitCompleted { get; set; }
         public int? ExitBar { get; set; }

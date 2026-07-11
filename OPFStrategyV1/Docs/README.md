@@ -33,6 +33,7 @@ Supported execution profile names:
 
 - `MNQ_1Contract_Target150_200`
 - `MNQ_1Contract_Target300`
+- `MNQ_2Contract_Evidence`
 - `MNQ_2Contract_Target300`
 
 The selected profiles are written into each `ConfigSnapshot.json`. The snapshot records requested profile names, actual profile objects, `ProfileCatalogVersion`, and fallback flags. If a name is unknown, the strategy falls back to the MNQ single-contract default and writes a warning line to the research log.
@@ -835,6 +836,198 @@ From `OPF_RESEARCH_1.21`, Actual execution makes the v1.20 volume experiment mor
 - `DailyVolumeQualityRescueV120`, v1.15 entry/TP behavior, v1.16/v1.17 execution safety, and the `RiskDriftAcceptedV120` filled-risk tolerance remain unchanged.
 - The expected validation question is whether this broader release can materially lift June trade count beyond the v1.20 target while keeping NetR positive enough to identify which expansion path deserves later tightening.
 
+From `OPF_RESEARCH_1.22`, Actual execution becomes a deliberate volume-discovery build targeting roughly 200 June trades before the next quality-tightening phase:
+
+- Actual defaults now use `ACTUAL_EXEC_1.58`.
+- `ActualMaxTradesPerDay` is set to `12`, making it an experiment cap for the June 200-trade target rather than the older broad safety ceiling of 20.
+- `ZoneBirthResearch` is added to Actual execution with v1.22 guardrails: `SetupQualityScore >= 40`, risk `<= 25`, and `EstimatedRR >= 0.3`.
+- `ObservationStrict_BullFresh` and `ObservationStrict_Other` are added to Actual execution with v1.22 guardrails: `SetupQualityScore >= 45`, risk `<= 25`, and `EstimatedRR >= 0.5`.
+- These v1.22 volume paths bypass the trend-regime hard gate and ATR-adjusted risk gate, but still respect the instrument hard risk cap, active-trade protection, same-bar ambiguity guard, replay stop guard, and one-contract execution profile.
+- `ShadowCandidate` remains enabled and is tagged `ShadowCandidateFillerV122`; `AlmostConfirmed` is disabled for Actual execution and skipped with `AlmostConfirmedActualDisabledV122`.
+- Executed v1.22 expansion rows include `ZoneBirthVolumeV122` or `StrictObservationVolumeV122` in `execution_decisions.csv`.
+- The expected validation question is no longer whether every day reaches exactly five trades. It is whether the full June replay reaches about 200 trades, which expansion path supplies the volume, and whether `ZoneBirthVolumeV122`, `StrictObservationVolumeV122`, and `ShadowCandidateFillerV122` should be retained, tightened, or removed by NetR, NetDollars, side, risk bucket, and daily distribution.
+
+From `OPF_RESEARCH_1.23`, Actual execution replaces the v1.22 bad volume pool instead of simply shrinking trade count:
+
+- Actual defaults now use `ACTUAL_EXEC_1.59`.
+- The v1.23 path choice is based on the prior June research estimate before coding: removing `ObservationStrict_BullFresh` and `ZoneBirthResearch` Short would leave roughly 99 Actual trades; `BreakawayFvg` under `risk <= 25`, `SetupQualityScore >= 80`, `EstimatedRR >= 1.0` estimated about 37 additional candidates; `ObservationConfirm` Long under `risk <= 18`, `SetupQualityScore >= 56`, `EstimatedRR >= 0.8` estimated about 87 additional candidates.
+- `ObservationStrict_BullFresh` is disabled for Actual execution and skipped with `StrictBullFreshActualDisabledV123`.
+- `ZoneBirthResearch` Short is disabled for Actual execution and skipped with `ZoneBirthShortActualDisabledV123`; `ZoneBirthResearch` Long remains enabled under the v1.22 guardrails.
+- `BreakawayFvg` can execute as `BreakawayVolumeV123` with `SetupQualityScore >= 80`, risk `<= 25`, and `EstimatedRR >= 1.0`; it bypasses the old broad-breakaway disable and the old 11-point breakaway cap, but not the instrument hard risk cap.
+- `ObservationConfirm` Long can execute as `ObservationLongVolumeV123` in the 11-18 point risk band with `SetupQualityScore >= 56` and `EstimatedRR >= 0.8`; this bypasses the v1.11 Long risk-expansion disable only for this tagged v1.23 experiment.
+- `ActualMaxTradesPerDay` remains `12` so the experiment can approach 200 June trades without removing the replay safety ceiling.
+- The expected validation question is whether replacing the bad `StrictBullFresh` / `ZoneBirth Short` volume with `BreakawayVolumeV123` and `ObservationLongVolumeV123` reaches the 180-220 trade range while keeping NetR and NetDollars positive.
+
+From `OPF_RESEARCH_1.24`, Actual execution keeps the June 200-trade mainline target and shifts from raw expansion to targeted volume replacement:
+
+- Actual defaults now use `ACTUAL_EXEC_1.60`.
+- `BreakawayVolumeV123` remains enabled and its experiment risk cap is raised from `25` to `30` points, keeping `SetupQualityScore >= 80` and `EstimatedRR >= 1.0`.
+- `ObservationLongVolumeV123` is tightened from `SetupQualityScore >= 56` to `>= 70`, because the v1.23 June replay showed the lower-score Long expansion was the main losing pool while `Score >= 70` remained positive.
+- `ZoneBirthVolumeV122` Long remains enabled, but its minimum setup quality is raised from `40` to `45` to remove the weakest v1.23 score bucket. `ZoneBirthResearch` Short remains disabled with `ZoneBirthShortActualDisabledV123`.
+- `UnknownRegimeZoneTouch` is added as `UnknownMicroRiskVolumeV124` with `SetupQualityScore >= 25`, risk `<= 8.5`, and `EstimatedRR >= 1.5`; it bypasses the trend-regime hard gate only for this micro-risk volume experiment.
+- `ObservationConfirm` Short is added as `ObservationShortVolumeV124` in the 11-18 point risk band with `SetupQualityScore >= 60` and `EstimatedRR >= 1.0`; this path is intended to add controlled Short volume, not to change the core setup family.
+- The pre-change June research estimate for v1.24 was roughly: remove 22 low-score Observation Long trades and 15 low-score ZoneBirth trades, add about 17 wider Breakaway opportunities, about 49 Unknown micro-risk opportunities, and about 36 Observation Short volume opportunities, targeting roughly 200 Actual trades while keeping each new pool independently tagged.
+- The expected validation question is whether v1.24 reaches about 180-220 June trades, keeps NetR/NetDollars positive, and whether `UnknownMicroRiskVolumeV124` and `ObservationShortVolumeV124` are good enough to retain after their first full-month evidence batch.
+
+From `OPF_RESEARCH_1.25`, Actual execution keeps the profitable v1.24 skeleton and fixes the main volume path that did not actually execute:
+
+- Actual defaults now use `ACTUAL_EXEC_1.61`.
+- `UnknownRegimeZoneTouch` executions are retagged as `UnknownMicroRiskVolumeV125`.
+- The Unknown micro-risk pool is tightened from `SetupQualityScore >= 25` to `>= 35` while keeping risk `<= 8.5`.
+- `UnknownMicroRiskVolumeV125` now evaluates reward with the actual fixed target model, `1.5R`, instead of the research-only nearest-structure reward model. This aligns RR filtering with the order that will actually be sent.
+- Stop-time executions with no confirmed entry fill no longer write synthetic `STOPPED_NO_ENTRY` rows into `execution_trades.csv`; they remain audit events only, so trade count and Other exits represent actual filled trades.
+- `BreakawayVolumeV123`, `ObservationLongVolumeV123` at `Score >= 70`, `ZoneBirthVolumeV122` at `Score >= 45`, and `ObservationShortVolumeV124` are otherwise unchanged.
+- The expected validation question is whether v1.25 restores meaningful volume from the Unknown micro-risk pool without giving back the v1.24 profit improvement, and whether no-entry stop events disappear from the trade statistics.
+
+From `OPF_RESEARCH_1.26`, Actual execution keeps the v1.25 profitable skeleton and makes the Unknown micro-risk test measurable in a full-month replay:
+
+- Actual defaults now use `ACTUAL_EXEC_1.62`.
+- `UnknownRegimeZoneTouch` executions are retagged as `UnknownMicroRiskVolumeV126`.
+- The Unknown micro-risk pool is tightened to `SetupQualityScore >= 45` and keeps risk `<= 8.5`, because the v1.25 June replay showed the lower-score Unknown candidates were noisy while the small-risk pool was the intended volume source.
+- `UnknownMicroRiskVolumeV126` uses the exact fixed `1.5R` target distance for Actual RR checks instead of rounding reward points before division. This removes the `EstimatedRR=1.499x` boundary skip that prevented otherwise valid `1.5R` micro-risk candidates from executing.
+- No new setup family is added. `BreakawayVolumeV123`, `ObservationLongVolumeV123`, `ObservationShortVolumeV124`, and `ZoneBirthVolumeV122` remain unchanged so the next monthly replay can isolate whether the Unknown micro-risk fix adds useful volume.
+- The expected validation questions are: how many `UnknownMicroRiskVolumeV126` trades execute, their Long/Short split, TP/SL, NetR and NetDollars; whether total monthly trades move meaningfully above v1.25's 95 trades; whether adjusted NetR remains positive after abnormal raw-fill accounting; and whether lifecycle integrity remains `ExecutedDecisions = ExecutionTrades` with no stale protection or no-entry synthetic trade rows.
+
+From `OPF_RESEARCH_1.27`, Actual execution shifts the volume/profit experiment back to the strongest proven pool, Breakaway:
+
+- Actual defaults now use `ACTUAL_EXEC_1.63`.
+- `BreakawayFvg` executions are retagged as `BreakawayVolumeV127`.
+- `BreakawayVolumeV127` keeps the high-quality gate at `SetupQualityScore >= 80` and `EstimatedRR >= 1.0`, but explicitly allows the high-score Breakaway risk band up to `30` points. This is the only path allowed to bypass the instrument `25` point hard-risk guard in this version, and it still has its own `risk <= 30` cap.
+- The v1.26 June replay estimated roughly eight additional `25 < risk <= 30` Breakaway candidates. Their research profile was mixed but promising enough for a controlled full-month Actual test: 3 Excellent, 2 Good, and 3 Catastrophic.
+- Same-bar target-touched Breakaway rows remain skipped. Although some were profitable in research, they are not enabled because the target may have been touched before the close-based entry could actually exist.
+- `UnknownRegimeZoneTouch` Actual execution is disabled with `UnknownMicroRiskActualDisabledV127` after v1.26 showed that its small-risk candidates were almost entirely same-bar ambiguous. It remains available in research logs.
+- The expected validation questions are: whether `BreakawayVolumeV127` raises total monthly trades from v1.26's 121 toward the next volume target; whether the added `25-30` risk band is positive by NetR, NetDollars, TP/SL, side, and day; whether the wider Breakaway risk increases abnormal fills; and whether disabling Unknown Actual reduces noisy skip analysis without reducing real trades.
+
+From `OPF_RESEARCH_1.28`, Actual execution keeps the Breakaway expansion on the mainline but splits the wide-risk experiment by side:
+
+- Actual defaults now use `ACTUAL_EXEC_1.64`.
+- `BreakawayFvg` executions are retagged as `BreakawayVolumeV128`, except Short entries with `25 < risk <= 30`, which are tagged as `BreakawayShortWideV128` for separate attribution.
+- Long Breakaway risk is capped back at `25` points after the v1.27 June replay showed `Long 25-30` was negative. Short Breakaway keeps the `30` point experimental cap because the same replay showed a small positive sample in that band.
+- Breakaway no longer accepts entry-fill risk drift above its side-specific cap. A planned Breakaway at the cap that fills beyond the cap should log `ENTRY_FILLED_RISK_EXCEEDED` and flatten instead of writing a hidden over-cap trade.
+- No new setup family is added. This version is a controlled cleanup of the v1.27 Breakaway experiment, not a new entry model.
+- The expected validation questions are: whether monthly trade count remains acceptable after removing `Long 25-30`; whether `BreakawayShortWideV128` is positive by NetR, NetDollars, TP/SL, and day; whether there are zero Breakaway trades above their side-specific cap; whether abnormal execution count stays low; and whether the total result improves versus the v1.27 raw-fill baseline of `125` trades, `+25.99R`, and `+$866.5`.
+
+From `OPF_RESEARCH_1.29`, Actual execution keeps the v1.28 Breakaway structure and removes a proven drag from Actual orders:
+
+- Actual defaults now use `ACTUAL_EXEC_1.65`.
+- `ObservationConfirm_WideStop1_5R` is removed from the default `ActualExecutionPaths`.
+- If an older runtime config still enables `ObservationConfirm_WideStop1_5R`, the strategy skips it with `ObservationConfirmWideStopActualDisabledV129`.
+- The path remains research-only, so monthly evidence can still compare its hypothetical outcome against actual trading without spending real/replay orders on it.
+- No Breakaway rule is changed from v1.28. `BreakawayVolumeV128`, `BreakawayShortWideV128`, and the side-specific risk caps remain the main validation path.
+- The expected validation questions are: whether removing the v1.28 `ObservationConfirm_WideStop1_5R` drag of `7` trades, `-1.80R`, and `-$43` improves total NetR/NetDollars; whether average daily trade count remains acceptable near 5/day; whether Breakaway remains the largest positive contributor; whether lifecycle integrity remains complete; and whether abnormal execution count does not increase.
+
+From `OPF_RESEARCH_1.30`, Actual execution becomes a deliberate volume-discovery build with a hard monthly target near 200 trades:
+
+- Actual defaults now use `ACTUAL_EXEC_1.66`.
+- `AlmostConfirmed` is added back to `ActualExecutionPaths` and executes as `AlmostConfirmedVolumeV130` under the existing mainline filler guardrails: `SetupQualityScore >= 60`, risk `<= 18`, and `EstimatedRR >= 0.8`.
+- `ObservationStrict_BullFresh` is re-enabled for Actual execution and tagged as `StrictBullFreshVolumeV130`. It uses the strict-volume guardrails: `SetupQualityScore >= 45`, risk `<= 25`, and `EstimatedRR >= 0.5`.
+- `ObservationConfirm_WideStop1_5R` remains disabled for Actual execution with `ObservationConfirmWideStopActualDisabledV129`.
+- The v1.28 Breakaway structure remains unchanged: `BreakawayVolumeV128`, `BreakawayShortWideV128`, and the side-specific risk caps stay active.
+- This version intentionally accepts more noise to reach enough sample size. The added pools must be judged by their own tags, not blended into the base strategy.
+- The expected validation questions are: whether the month reaches the 180-220 trade range; whether total NetR/NetDollars remains positive despite the volume expansion; how much volume and PnL come from `AlmostConfirmedVolumeV130` and `StrictBullFreshVolumeV130`; whether Breakaway remains positive after the added active-trade competition; whether low-trade days improve; and whether lifecycle integrity remains complete with no increase in stale/reject/cancel failures.
+
+From `OPF_RESEARCH_1.35`, Actual execution moves from volume discovery back to evidence-controlled profit optimization after the April/May/June review:
+
+- Actual defaults now use `ACTUAL_EXEC_1.71`.
+- The v1.34 selective `BreakawayFvg` Long restore is retired; all Breakaway Long Actual rows are skipped with `BreakawayLongActualDisabledV135`.
+- The default Actual path list is narrowed to `ObservationConfirm`, `ObservationConfirm_WideStop1_5R`, Breakaway Short, and Failure Retest paths.
+- `ShadowCandidate`, `ObservationStrict_Other`, and `StructureConfirmShadow_*` remain research paths but are blocked from Actual execution with `EvidenceFrozenActualPathV135`.
+- This version does not add a new setup family and does not change the default `ActualTargetR=1.5`; the next replay should verify that the OC skeleton remains stable before testing OC-specific profit-extension rules.
+
+From `OPF_RESEARCH_1.36`, Actual execution keeps the v1.35 OC skeleton and makes two-month replay analysis practical:
+
+- Actual defaults now use `ACTUAL_EXEC_1.72`.
+- `FailureReverse_RetestFailed_WideStop1_5R` is removed from Actual execution after the v1.35 May replay showed it was a small negative pool.
+- Older runtime configs that still include that path are blocked with `FailureRetestWideStopActualDisabledV136`.
+- `ResearchLogMode` defaults to `Compact`, which skips `score_breakdown.csv`, limits `funnel_events.csv` to execution decisions and research outcomes, and writes fixed-target exit-policy rows only for current Actual-skeleton paths.
+- The compact mode still preserves the files needed for monthly/two-month analysis: execution trades, decisions, events, research outcomes, risk evaluations, no-trade, edge attribution, candidate/confirmation evaluations, regime summaries, zones, and config snapshots.
+- The expected validation questions are whether removing the wide Failure Retest drag keeps May/June profitability intact, whether compact logs remain sufficient for daily/path/TP analysis, and whether file size stays manageable for two-month replay batches.
+
+From `OPF_RESEARCH_1.37`, Actual execution keeps the v1.36 path set and makes one controlled quality cut before the April/May/June replay:
+
+- Actual defaults now use `ACTUAL_EXEC_1.73`.
+- Long `ObservationConfirm` Actual entries with `InitialRiskPoints > 12` are skipped with `LongObservationWideRiskCutV137`.
+- Long `ObservationConfirm` entries in the narrow `11 < risk <= 12` band remain eligible and are tagged with `ObservationConfirmLongRisk12V137` when executed.
+- Short `ObservationConfirm`, Breakaway Short, Failure Retest, target R, max daily trades, and compact logging are unchanged.
+- This version does not add a new setup family. It tests whether removing the April/May drag from wide-risk Long `ObservationConfirm` improves NetR/NetDollars while keeping average trade count acceptable.
+- The expected validation questions for the three-month replay are: whether April improves materially, whether May/June retain enough of their positive Long OC contribution, whether average daily trade count remains near or above 5, how many rows are skipped by `LongObservationWideRiskCutV137`, and whether abnormal execution rows remain isolated from normal PnL.
+
+From `OPF_RESEARCH_1.38`, Actual execution keeps the v1.37 profitable baseline and prepares the next three-month replay for two-contract evidence accumulation without reducing trade count:
+
+- Actual defaults now use `ACTUAL_EXEC_1.74`.
+- `ActualOrderQuantity` defaults to `2`, and the strategy default execution profile is `MNQ_2Contract_Evidence`.
+- `MNQ_2Contract_Evidence` uses two fixed MNQ contracts but keeps daily target and daily loss stops disabled so the replay does not reduce signal count during evidence accumulation.
+- `ObservationConfirm` Long keeps the v1.37 planned-risk guard, and its post-fill risk drift is now capped at `12` points as well. If a fill reprices risk above that cap, the strategy records `ENTRY_FILLED_RISK_EXCEEDED` and emergency-flattens instead of accepting the over-cap trade.
+- No setup family is added, and no profitable/negative path is removed in this version because trade count must not fall below the v1.37 baseline.
+- Actual TP remains governed by the existing strategy target rules. A research-only `DynamicPathV138` exit policy is added to `exit_policy_evaluations.csv`: `ObservationConfirm=2R`, `ObservationConfirm_WideStop1_5R=3R`, and other current Actual-skeleton paths stay at `1.5R`.
+- The expected validation questions are whether two-contract execution roughly doubles NetDollars without changing NetR structure, whether average trades/day remains near the v1.37 baseline, whether post-fill `ObservationConfirm` Long risk no longer exceeds `12`, and whether `DynamicPathV138` provides enough evidence to justify a future actual TP change.
+
+From `OPF_RESEARCH_1.39`, Actual execution promotes the strongest v1.38 TP evidence into one controlled profit-capture test:
+
+- Actual defaults now use `ACTUAL_EXEC_1.75`.
+- `ActualOrderQuantity` remains `2`, and the default execution profile remains `MNQ_2Contract_Evidence`.
+- `ObservationConfirm` Actual executions use `TargetR=2.0` for both Long and Short rows.
+- `ObservationConfirm_WideStop1_5R`, Breakaway, Failure Retest, path whitelist, risk gates, max daily trades, compact logging, and the v1.37 Long OC risk guard are unchanged.
+- The old Long-only v1.14 `3R/2.5R` TP override is no longer used for Actual execution, so this version isolates the v1.39 variable: base `ObservationConfirm` moves to `2R`, all other current Actual-skeleton paths stay at the default `1.5R`.
+- Executed OC rows with the override include `ObservationConfirmTarget2RV139` in `execution_decisions.csv`, and `exit_policy_evaluations.csv` writes `DynamicPathV139` with the same policy.
+- The expected validation questions for the three-month replay are whether v1.39 improves NetR/NetDollars versus the v1.37 profit baseline and v1.38 two-contract evidence batch, whether average daily trades stay near or above the v1.37 baseline, and whether OC 2R increases profit size without turning many former 1.5R winners into SL/Other exits.
+
+From `OPF_RESEARCH_1.40`, Actual execution repairs the v1.39 profit-capture regression and returns to the v1.37/v1.38 target structure:
+
+- Actual defaults now use `ACTUAL_EXEC_1.76`.
+- `ActualOrderQuantity` remains `2`, and the runtime snapshot is forced to `MNQ_2Contract_Evidence` when the loaded JSON is the two-contract evidence configuration. This prevents an old ATAS panel value such as `MNQ_1Contract_Target150_200` from misleading profile consistency analysis.
+- Base `ObservationConfirm` Actual executions return to the default `ActualTargetR=1.5`; the v1.39 all-OC `2R` override is disabled.
+- `ObservationConfirm_WideStop1_5R`, Breakaway, Failure Retest, path whitelist, risk gates, max daily trades, compact logging, and the v1.37 Long OC risk guard are unchanged.
+- `exit_policy_evaluations.csv` writes `DynamicPathV140`, matching the actual v1.40 policy: current Actual-skeleton paths use `1.5R`. Fixed `2R/2.5R/3R` policy rows remain available as research-only comparisons.
+- The expected validation questions for the next three-month replay are whether v1.40 restores the v1.37 positive-R structure while keeping the two-contract NetDollars benefit, whether daily average trades remain near or above 5, and whether profile consistency now reports `MNQ_2Contract_Evidence`.
+
+Current rollback state:
+
+- The active running baseline is restored to `OPF_RESEARCH_1.37` / `ACTUAL_EXEC_1.73`.
+- v1.37 is the strategy skeleton for the next optimization branch: one MNQ contract, fixed `ActualTargetR=1.5`, compact logging, v1.36 path set, and the Long `ObservationConfirm` `risk > 12` cut.
+- v1.38-v1.40 remain evidence batches only. Their main findings are: two-contract execution can raise dollars but should not be mixed into the structural baseline; all-OC `2R` damaged the R structure; returning OC to `1.5R` repaired v1.39 but still did not beat v1.37 in R.
+- The next version should be planned from v1.37, not from v1.40, and should target one controlled improvement: reduce the weak `OC_Base` subgroup while preserving `OC_Filler` and total daily trade count.
+
+From `OPF_RESEARCH_1.41`, Actual execution starts the next optimization branch from the v1.37 skeleton:
+
+- Actual defaults now use `ACTUAL_EXEC_1.77`.
+- `ActualOrderQuantity` defaults to `2`, and the strategy default execution profile is `MNQ_2Contract_Evidence`.
+- Actual target remains fixed at `ActualTargetR=1.5`; no dynamic TP or all-OC `2R` override is active.
+- `OC_Filler`, `ObservationConfirmRisk22V132`, `ObservationConfirmLongRisk12V137`, wide-stop OC tags, Breakaway, Failure Retest, path whitelist, max daily trades, compact logging, and the v1.37 Long `risk > 12` cut are preserved.
+- Only the weak untagged base `ObservationConfirm` subgroup is lightly filtered: base Long rows require `SetupQualityScore >= 60`, and base Short rows with `8 < risk <= 11` require `SetupQualityScore >= 70`.
+- New skip reasons are `OCBaseLongQualityCutV141` and `OCBaseShortRisk8_11QualityCutV141`.
+- The validation question for the next three-month replay is whether v1.41 improves NetR/NetDollars versus v1.37 while preserving the v1.37/v1.40 trade-count range. The first checks should be daily trades, Long/Short split, `OC_Filler` contribution, `OC_Base` skipped count, `OCBase...V141` avoided-loss quality, and abnormal execution rows.
+
+From `OPF_RESEARCH_1.42`, Actual execution fully returns to the v1.37 rule skeleton for a clean two-contract replay:
+
+- Actual defaults now use `ACTUAL_EXEC_1.78`.
+- `ActualOrderQuantity` remains `2`, and `ActualTargetR` remains fixed at `1.5`.
+- The v1.41 `OC_Base` quality cuts are removed; there are no `OCBase...V141` skip reasons in active execution.
+- The retained skeleton is v1.37: compact logging, v1.36 path set, v1.37 Long `ObservationConfirm` `risk > 12` cut, and no all-OC `2R` target override.
+- The profile snapshot bug is fixed for this replay: when the JSON settings are the two-contract evidence preset, the snapshot resolves `ExecutionProfileName` to `MNQ_2Contract_Evidence` even if the ATAS panel still contains an older one-contract profile string.
+- The validation question is simple: compare v1.42 against v1.37 using the same 4/5/6 sample, with two contracts active and without v1.41 filter interference. First checks are schema/profile consistency, `Quantity=2`, daily trades, NetR, NetDollars, path/tag contribution, and abnormal execution rows.
+
+From `OPF_RESEARCH_1.37_2C`, Actual execution is a clean rerun of the v1.37 rule skeleton with only the contract count changed for evidence:
+
+- Actual defaults use `ACTUAL_EXEC_1.73_2C`.
+- `ActualOrderQuantity=2`, `ActualTargetR=1.5`, `ActualMaxTradesPerDay=12`, guards disabled, and compact logging remain active.
+- No v1.38 dynamic target test, v1.39 all-OC `2R`, v1.41 `OCBase...V141` quality cuts, or v1.42 strategy-side changes are part of this run.
+- The validation question is whether the v1.37 skeleton itself scales to two contracts over the April/May/June replay when the only intended variable is execution size.
+
+From `OPF_RESEARCH_1.37_2C_FIX1`, the strategy keeps the same v1.37 two-contract evidence configuration and fixes execution logging for multi-contract exits:
+
+- Actual defaults use `ACTUAL_EXEC_1.73_2C_FIX1`.
+- Multiple TP/SL fills for the same two-contract order are aggregated into one execution-trade row using the weighted average exit price.
+- The strategy rules, path whitelist, target R, risk gates, and contract count are unchanged from `OPF_RESEARCH_1.37_2C`.
+- The validation question is whether `execution_trades.csv` now has one normal row per `TradeID` and whether the clean two-contract replay moves closer to the original v1.37 baseline scaled by size.
+
+From `OPF_RESEARCH_1.37_2C_FIX2`, strategy rules remain unchanged and replay TP/SL fill normalization is added:
+
+- Actual defaults use `ACTUAL_EXEC_1.73_2C_FIX2`.
+- If a TP/SL order role is correct, the entry fill is within tolerance, and ATAS replay reports an exit price far beyond the planned TP/SL price, the trade is scored at the expected TP/SL price and marked with `NormalizedReplayExitFill`.
+- `FLATTEN` exits and trades with abnormal entry fill remain abnormal and contribute zero normal PnL/R.
+- Raw replay fill impact remains available through `RawPoints`, `RawDollars`, and `RawPointsR`.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
@@ -843,7 +1036,7 @@ Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke
 2. Core CSV files are present: config snapshot, signals, research outcomes, risk evaluations, score breakdown, execution events, and execution trades.
 3. `ExecutedDecisions = ExecutionTrades = ActualVerifiedUniqueTrades`, with no duplicate Actual-verified rows.
 4. Every Actual exit has `PROTECTION_CLEANUP_DONE`, with no `STALE`, `REJECT`, `CANCEL_FAIL`, or `FAILED` events.
-5. The tested configuration is frozen: MNQ, one contract, default `ActualTargetR=1.5` with any documented per-version TP overrides, daily target/loss stops disabled for evidence accumulation, max-trades safety ceiling, and Actual path whitelist.
+5. The tested configuration is frozen: MNQ, documented `ActualOrderQuantity`, default `ActualTargetR=1.5` with any documented per-version TP overrides, daily target/loss stops disabled for evidence accumulation, max-trades safety ceiling, and Actual path whitelist.
 6. Full-day average Actual trades should stay near 5/day; individual low-trade days are acceptable only when profitability improves and the missed volume is explainable by research/skipped-signal evidence.
 7. Results are explainable through `MFE_R`, `MAE_R`, `ExitEfficiency`, `RunupCapturePct`, and no-trade reasons, even if the batch is not yet strongly profitable.
 

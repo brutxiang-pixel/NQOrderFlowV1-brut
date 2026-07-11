@@ -78,6 +78,19 @@ public static class ProfileCatalog
     {
         ["MNQ_1Contract_Target150_200"] = ExecutionProfile.MnqOneContractTarget150(),
         ["MNQ_1Contract_Target300"] = ExecutionProfile.MnqOneContractTarget300(),
+        ["MNQ_2Contract_Evidence"] = new ExecutionProfile(
+            Name: "MNQ_2Contract_Evidence",
+            Version: "EXEC_0.1",
+            DailyTargetDollars: 0m,
+            DailyLossLimitDollars: 0m,
+            MaxContracts: 2,
+            ContractSizingMode: "Fixed",
+            FixedContracts: 2,
+            MaxRiskPerTradeDollars: 200m,
+            StopAfterDailyTarget: false,
+            ContinueResearchAfterDailyTarget: true,
+            MaxFullLossTradesPerDay: 2,
+            MaxConsecutiveLossesPerDay: 2),
         ["MNQ_2Contract_Target300"] = new ExecutionProfile(
             Name: "MNQ_2Contract_Target300",
             Version: "EXEC_0.1",
