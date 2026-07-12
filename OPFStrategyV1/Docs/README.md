@@ -1047,6 +1047,14 @@ From `OPF_RESEARCH_1.44`, the v1.43 bad-day stabilizer is superseded before broa
 - Executed rows with the override include the path-specific v1.44 tag plus `ActualTargetOverride:targetR=2` in `execution_decisions.csv`.
 - The validation question for the next three-month replay is whether selective 2R improves NetR/NetDollars versus `OPF_RESEARCH_1.37_2C_FIX2` without reducing trade count or turning many former 1.5R winners into SL.
 
+From `OPF_RESEARCH_1.45`, Actual execution keeps the v1.37 two-contract skeleton and narrows the profit-expansion test to the only v1.44 subgroup with cross-month support:
+
+- Actual defaults use `ACTUAL_EXEC_1.81`.
+- `ObservationConfirm` Short no longer receives the v1.44 `2R` override; `OCShortBaseTarget2RV144` is removed and all `ObservationConfirm` paths return to the default `1.5R` target.
+- `BreakawayFvg` / `BreakawayFvg_Qualified` Short keeps the `2R` target and is tagged `BreakawayShortTarget2RV145`.
+- No entry rules, path whitelist, risk gates, daily guards, order quantity, max daily trades, or compact logging settings are changed.
+- The validation question for the March-June replay is whether Breakaway Short `2R` improves NetR/NetDollars versus `OPF_RESEARCH_1.37_2C_FIX2` while the OC pool is no longer harmed by a full-position `2R` target.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

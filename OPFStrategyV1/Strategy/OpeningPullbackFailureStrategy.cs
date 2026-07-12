@@ -73,7 +73,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ObservationConfirmRisk22V132MinSetupQualityScore = 70m;
     private const decimal ObservationConfirmRisk22V132MaxRiskPoints = 22m;
     private const decimal ObservationConfirmRisk22V132MinEstimatedRr = 0.8m;
-    private const decimal SelectiveProfitTargetV144R = 2.0m;
+    private const decimal SelectiveProfitTargetV145R = 2.0m;
     private const decimal EntryFillRiskDriftTolerancePoints = 1m;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
@@ -1879,7 +1879,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             executeReasons.Add($"OCWideStopLowRiskV132:side={signal.Side},risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
             executeReasons.Add($"FailureRetestWideFiller:dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
-        var profitTargetTag = SelectiveProfitTargetV144Tag(signal.Side, researchPath, risk);
+        var profitTargetTag = SelectiveProfitTargetV145Tag(signal.Side, researchPath);
         if (!string.IsNullOrEmpty(profitTargetTag))
             executeReasons.Add($"{profitTargetTag}:targetR={targetR:0.##},risk={risk:0.##}");
         if (targetR != ReplayTargetR)
@@ -2617,26 +2617,19 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ActualTargetRFor(TradeSide side, string researchPath, decimal risk)
     {
-        if (!string.IsNullOrEmpty(SelectiveProfitTargetV144Tag(side, researchPath, risk)))
-            return SelectiveProfitTargetV144R;
+        if (!string.IsNullOrEmpty(SelectiveProfitTargetV145Tag(side, researchPath)))
+            return SelectiveProfitTargetV145R;
 
         return ReplayTargetR;
     }
 
-    private static string SelectiveProfitTargetV144Tag(TradeSide side, string researchPath, decimal risk)
+    private static string SelectiveProfitTargetV145Tag(TradeSide side, string researchPath)
     {
-        if (side == TradeSide.Short &&
-            string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase) &&
-            risk <= 11m)
-        {
-            return "OCShortBaseTarget2RV144";
-        }
-
         if (side == TradeSide.Short &&
             (string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase) ||
              string.Equals(researchPath, "BreakawayFvg_Qualified", StringComparison.OrdinalIgnoreCase)))
         {
-            return "BreakawayShortTarget2RV144";
+            return "BreakawayShortTarget2RV145";
         }
 
         return string.Empty;

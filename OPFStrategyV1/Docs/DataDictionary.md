@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.44`.
+This document describes the current research files produced by `OPF_RESEARCH_1.45`.
 
 ## Common Context
 
