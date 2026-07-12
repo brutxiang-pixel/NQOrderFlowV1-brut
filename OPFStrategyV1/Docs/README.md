@@ -1055,6 +1055,18 @@ From `OPF_RESEARCH_1.45`, Actual execution keeps the v1.37 two-contract skeleton
 - No entry rules, path whitelist, risk gates, daily guards, order quantity, max daily trades, or compact logging settings are changed.
 - The validation question for the March-June replay is whether Breakaway Short `2R` improves NetR/NetDollars versus `OPF_RESEARCH_1.37_2C_FIX2` while the OC pool is no longer harmed by a full-position `2R` target.
 
+From `OPF_RESEARCH_1.46`, `v1.45` is treated as the stable-profit candidate and Actual execution resumes controlled positive-expectancy volume expansion:
+
+- Actual defaults use `ACTUAL_EXEC_1.82`.
+- `ActualOrderQuantity=2`, base `ActualTargetR=1.5`, Breakaway Short `2R`, daily guards disabled, compact logging, and the existing OC / Breakaway / Failure execution skeleton remain unchanged.
+- The Actual path list adds existing research paths `BreakawayRetest`, `TrendPullbackConfirmed`, and `StructureConfirmShadow_SwingStop`.
+- Directional evidence gates keep only the positive sub-pools from the v1.45 research review:
+  - `BreakawayRetest` can execute both sides.
+  - `TrendPullbackConfirmed` executes Short only; Long is skipped with `TrendPullbackLongDisabledV146`.
+  - `StructureConfirmShadow_SwingStop` executes Long only; Short is skipped with `StructureSwingShortDisabledV146`.
+- Executed rows from these expansion pools include `PositiveExpansionV146` in `execution_decisions.csv`.
+- The validation question for the next broad replay is whether volume expands beyond the v1.45 `396` normal trades / `79` effective days baseline while total NetR and NetDollars stay positive and improve.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

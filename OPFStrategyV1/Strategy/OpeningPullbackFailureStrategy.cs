@@ -1879,6 +1879,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             executeReasons.Add($"OCWideStopLowRiskV132:side={signal.Side},risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
             executeReasons.Add($"FailureRetestWideFiller:dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
+        if (IsPositiveExpansionV146(signal, researchPath))
+            executeReasons.Add($"PositiveExpansionV146:path={researchPath},side={signal.Side},risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##}");
         var profitTargetTag = SelectiveProfitTargetV145Tag(signal.Side, researchPath);
         if (!string.IsNullOrEmpty(profitTargetTag))
             executeReasons.Add($"{profitTargetTag}:targetR={targetR:0.##},risk={risk:0.##}");
@@ -2153,6 +2155,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (IsEvidenceFrozenActualPath(researchPath))
             return new[] { $"EvidenceFrozenActualPathV135:{researchPath}" };
 
+        if (string.Equals(researchPath, "TrendPullbackConfirmed", StringComparison.OrdinalIgnoreCase) &&
+            signal.Side == TradeSide.Long)
+            return new[] { "TrendPullbackLongDisabledV146" };
+
+        if (string.Equals(researchPath, "StructureConfirmShadow_SwingStop", StringComparison.OrdinalIgnoreCase) &&
+            signal.Side == TradeSide.Short)
+            return new[] { "StructureSwingShortDisabledV146" };
+
         if (IsZoneBirthVolumeExpansionPath(researchPath) && signal.Side == TradeSide.Long)
             return new[] { "ZoneBirthLongActualDisabledV133" };
 
@@ -2328,8 +2338,21 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             string.Equals(researchPath, "ObservationStrict_Other", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(researchPath, "StructureConfirmShadow_ConfirmBarStop", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(researchPath, "StructureConfirmShadow_ConfirmBarStop_Min10", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(researchPath, "StructureConfirmShadow_ConfirmBarStop_Wait1", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(researchPath, "StructureConfirmShadow_SwingStop", StringComparison.OrdinalIgnoreCase);
+            string.Equals(researchPath, "StructureConfirmShadow_ConfirmBarStop_Wait1", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsPositiveExpansionV146(CandidateSignal signal, string researchPath)
+    {
+        if (string.Equals(researchPath, "BreakawayRetest", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.Equals(researchPath, "TrendPullbackConfirmed", StringComparison.OrdinalIgnoreCase))
+            return signal.Side == TradeSide.Short;
+
+        if (string.Equals(researchPath, "StructureConfirmShadow_SwingStop", StringComparison.OrdinalIgnoreCase))
+            return signal.Side == TradeSide.Long;
+
+        return false;
     }
 
     private static decimal BreakawayVolumeV128MaxRiskPoints(CandidateSignal signal)

@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.45`.
+This document describes the current research files produced by `OPF_RESEARCH_1.46`.
 
 ## Common Context
 
@@ -811,3 +811,5 @@ From `OPF_RESEARCH_0.19`, replay index also includes:
 - `DailyTargetDollars`
 - `DailyLossLimitDollars`
 - `MaxContracts`
+
+From `OPF_RESEARCH_1.46`, `execution_decisions.csv` can include `PositiveExpansionV146` for controlled positive-expectancy volume expansion rows. The tag applies to Actual executions from `BreakawayRetest`, Short `TrendPullbackConfirmed`, and Long `StructureConfirmShadow_SwingStop`. Long `TrendPullbackConfirmed` rows are skipped with `TrendPullbackLongDisabledV146`, and Short `StructureConfirmShadow_SwingStop` rows are skipped with `StructureSwingShortDisabledV146`.
