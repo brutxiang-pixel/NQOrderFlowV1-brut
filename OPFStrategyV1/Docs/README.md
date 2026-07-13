@@ -1087,6 +1087,13 @@ From `OPF_RESEARCH_1.48`, strategy rules remain unchanged from v1.47 and Actual 
 - Pending unfilled entries are shown as `PENDING_ENTRY` on the chart and HUD. SL/TP lines are drawn only after an entry fill exists, so planned brackets are no longer mistaken for active protective orders.
 - No entry paths, risk thresholds, target-R rules, order quantity, daily guards, or v1.47 expansion tags are changed.
 
+From `OPF_RESEARCH_1.49`, strategy rules remain unchanged and Actual execution adds an account-position reconciliation guard:
+
+- Actual defaults use `ACTUAL_EXEC_1.85`.
+- If ATAS reports `CurrentPosition != 0` while OPF has no active execution, the strategy logs `ORPHAN_POSITION_DETECTED`, sends an `ORPHAN_FLATTEN_SEND` market order in the opposite direction, and skips new Actual entries with `SKIP_ORPHAN_POSITION` until the account position is flat.
+- The HUD `ActualExec` line now includes `pos=...` so screenshots can distinguish internal execution state from the actual ATAS account position.
+- This version targets the February replay case where HUD showed `active=False` while the ATAS account panel still showed a residual position. No entry paths, risk thresholds, target-R rules, order quantity, daily guards, or v1.47 expansion tags are changed.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

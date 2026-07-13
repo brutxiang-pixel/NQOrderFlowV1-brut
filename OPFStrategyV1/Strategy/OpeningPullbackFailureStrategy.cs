@@ -164,6 +164,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private bool _actualRequireFailureRetest = true;
     private bool _compactResearchLogging;
     private bool _isStoppingActualExecution;
+    private bool _orphanPositionFlattenPending;
+    private int _orphanPositionFlattenLastBar = -1;
     private static PropertyInfo? _vwapProperty;
 
     [Category("OPF Profile")]
@@ -379,6 +381,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _lastResearchCandle = current;
         UpdateActualExecutionExcursion(current);
         ScheduleStaleUnfilledEntryAbortIfNeeded(current);
+        ScheduleOrphanPositionFlattenIfNeeded(current);
         ScheduleProtectionCleanupIfNeeded("ClosedBar");
         var zones = _zoneDetector.Update(current);
         var regime = _trendScoreEngine.Update(current);
@@ -1773,6 +1776,15 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             _researchLogger?.AppendInfo(_snapshot.SnapshotId, entryCandle.Bar, entryCandle.Time, $"EXEC_SKIP_ACTIVE signal={signal.SignalId} active={activeExecution.TradeId}");
             AppendExecutionDecision(signal, entryCandle, "Skip", $"ActiveTrade:{activeExecution.TradeId}", researchPath, stop, risk);
             AppendExecutionEvent(signal, activeExecution.TradeId, entryCandle, "SKIP_ACTIVE", "-", researchPath, entryCandle.Close, 0m, activeExecution.TradeId);
+            return;
+        }
+        var currentPosition = CurrentPosition;
+        if (currentPosition != 0m)
+        {
+            var reason = $"OrphanPosition:pos={currentPosition:0.########}";
+            _researchLogger?.AppendInfo(_snapshot.SnapshotId, entryCandle.Bar, entryCandle.Time, $"EXEC_SKIP_ORPHAN_POSITION signal={signal.SignalId} pos={currentPosition:0.########}");
+            AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_ORPHAN_POSITION", "-", researchPath, entryCandle.Close, Math.Abs(currentPosition), reason);
             return;
         }
         if (Portfolio is null || Security is null)
@@ -3248,6 +3260,55 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return currentBar - execution.CreatedBar >= StaleUnfilledEntryMaxBars;
     }
 
+    private void ScheduleOrphanPositionFlattenIfNeeded(OpfCandle candle)
+    {
+        if (!EnableReplayOrders || Portfolio is null || Security is null)
+            return;
+
+        var position = CurrentPosition;
+        if (position == 0m)
+        {
+            _orphanPositionFlattenPending = false;
+            return;
+        }
+
+        if (IsReplayExecutionActive(_replayExecution))
+            return;
+
+        if (_orphanPositionFlattenPending && candle.Bar - _orphanPositionFlattenLastBar < 2)
+            return;
+
+        _orphanPositionFlattenPending = true;
+        _orphanPositionFlattenLastBar = candle.Bar;
+        EnqueueExecutionAction("FlattenOrphanPosition", async () =>
+        {
+            var latestPosition = CurrentPosition;
+            if (latestPosition == 0m || IsReplayExecutionActive(_replayExecution) || Portfolio is null || Security is null)
+                return;
+
+            var qty = Math.Abs(latestPosition);
+            var direction = latestPosition > 0m ? OrderDirections.Sell : OrderDirections.Buy;
+            var reason = $"pos={latestPosition:0.########}|bar={candle.Bar}";
+            LogExecutionInfo($"EXEC_ORPHAN_POSITION_DETECTED {reason}");
+            AppendStandaloneExecutionEvent("ORPHAN_POSITION_DETECTED", "FLATTEN", candle, candle.Close, qty, reason);
+
+            var order = new Order
+            {
+                Portfolio = Portfolio,
+                Security = Security,
+                Type = OrderTypes.Market,
+                Direction = direction,
+                QuantityToFill = qty,
+                TimeInForce = ReplayTimeInForce,
+                Comment = $"OPF|ORPHAN-POSITION|FLATTEN|{reason}",
+                AutoCancel = false
+            };
+
+            AppendStandaloneExecutionEvent("ORPHAN_FLATTEN_SEND", "FLATTEN", candle, candle.Close, qty, $"dir={direction}|{reason}");
+            await OpenOrderAsync(order);
+        });
+    }
+
     private void ScheduleProtectionLossCheckIfNeeded(string reason)
     {
         var execution = _replayExecution;
@@ -3431,6 +3492,26 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             role,
             signal.Side.ToString(),
             researchPath,
+            price,
+            quantity,
+            message);
+    }
+
+    private void AppendStandaloneExecutionEvent(string eventName, string role, OpfCandle candle, decimal price, decimal quantity, string message)
+    {
+        if (_snapshot is null)
+            return;
+
+        _researchLogger?.AppendExecutionEvent(
+            _snapshot.SnapshotId,
+            string.Empty,
+            "ORPHAN-POSITION",
+            candle.Time,
+            candle.Bar,
+            eventName,
+            role,
+            "-",
+            "-",
             price,
             quantity,
             message);
@@ -4774,7 +4855,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         hud.AppendLine($"Zones: {_activeZoneCount}  Candidates: {_candidateCount}  Confirmed: {_confirmedCount}");
         hud.AppendLine($"Research: active={_researchTrackers.Count} done={_researchOutcomeCount}");
         var cleanupCount = _replayExecution is null ? 0 : CountWorkingProtectionOrders(_replayExecution);
-        hud.AppendLine($"ActualExec: {(EnableReplayOrders ? "ON" : "OFF")} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} active={IsReplayExecutionActive(_replayExecution)} cleanup={cleanupCount}");
+        hud.AppendLine($"ActualExec: {(EnableReplayOrders ? "ON" : "OFF")} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} active={IsReplayExecutionActive(_replayExecution)} pos={CurrentPosition:0.##} cleanup={cleanupCount}");
         var dailyTarget = _snapshot?.ExecutionProfile.DailyTargetDollars ?? 0m;
         var dailyLoss = _snapshot?.ExecutionProfile.DailyLossLimitDollars ?? 0m;
         hud.AppendLine($"Today: TP={_replayTpToday} SL={_replaySlToday} Other={_replayOtherExitToday} NetR={_replayDailyR:0.00} PnL=${_replayDailyPnlDollars:0.##} target=${dailyTarget:0.##} loss=${dailyLoss:0.##}");

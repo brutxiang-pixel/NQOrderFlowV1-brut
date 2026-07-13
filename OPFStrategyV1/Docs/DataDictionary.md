@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.48`.
+This document describes the current research files produced by `OPF_RESEARCH_1.49`.
 
 ## Common Context
 
@@ -821,3 +821,9 @@ From `OPF_RESEARCH_1.48`, `execution_events.csv` may include:
 - `ENTRY_STALE_NO_FILL`: an Actual entry order remained unfilled long enough to be treated as a no-entry execution and canceled.
 - `EXIT_ABORTED_NO_ENTRY` with role `NO_ENTRY_FILL`: the execution was completed without PnL because no entry fill was confirmed.
 - `LATE_ENTRY_AFTER_COMPLETED`: ATAS reported a delayed entry fill after the execution was already completed; the strategy sends an emergency flatten for the late-filled quantity.
+
+From `OPF_RESEARCH_1.49`, `execution_events.csv` may include:
+
+- `ORPHAN_POSITION_DETECTED`: ATAS `CurrentPosition` was non-zero while OPF had no active execution.
+- `ORPHAN_FLATTEN_SEND`: OPF submitted a market order to flatten that residual account position.
+- `SKIP_ORPHAN_POSITION`: an otherwise eligible Actual entry was skipped while the account still had a residual position.
