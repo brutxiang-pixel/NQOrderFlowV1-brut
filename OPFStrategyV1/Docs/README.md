@@ -1103,6 +1103,14 @@ From `OPF_RESEARCH_1.50`, strategy rules remain unchanged and Actual execution f
 - Orphan-position flatten is sent once per residual-position episode and is unlocked only after `CurrentPosition` returns to zero.
 - No entry paths, risk thresholds, target-R rules, order quantity, daily guards, or v1.47 expansion tags are changed.
 
+From `OPF_RESEARCH_1.51`, strategy rules remain unchanged and Actual execution adds a daily abnormal-fill circuit breaker:
+
+- Actual defaults use `ACTUAL_EXEC_1.87`.
+- When an entry fill is rejected as `EntryFillOutOfRange`, the strategy still sends the emergency flatten for the filled quantity, then blocks further Actual order submissions for the same session day.
+- Later eligible signals on that day are skipped with `SKIP_DAILY_ABNORMAL_FILL_GUARD`; research logging continues so the day can still be audited without creating more bad Actual orders.
+- The HUD `ActualExec` line shows `abnormalGuard=<n>` while this guard is active.
+- No entry paths, risk thresholds, target-R rules, order quantity, daily guards, or v1.47 expansion tags are changed.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

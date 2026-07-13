@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.50`.
+This document describes the current research files produced by `OPF_RESEARCH_1.51`.
 
 ## Common Context
 
@@ -832,3 +832,8 @@ From `OPF_RESEARCH_1.50`, duplicate exit handling is tightened:
 
 - `DUPLICATE_EXIT_FILL` with `duplicateFlattenIgnored`: a duplicate `FLATTEN` fill arrived after the execution was already complete and was intentionally not answered with another flatten order.
 - `DUPLICATE_EXIT_FLATTEN_SUPPRESSED`: a duplicate SL/TP fill did not require a residual-position flatten because the account was already flat or a duplicate-exit flatten had already been submitted.
+
+From `OPF_RESEARCH_1.51`, abnormal entry-fill handling adds a session-day circuit breaker:
+
+- `DAILY_ABNORMAL_FILL_GUARD_ON`: an `EntryFillOutOfRange` event activated the guard for the current session day after emergency flatten submission.
+- `SKIP_DAILY_ABNORMAL_FILL_GUARD`: an otherwise eligible Actual entry was skipped because the same session day already had an abnormal entry fill.
