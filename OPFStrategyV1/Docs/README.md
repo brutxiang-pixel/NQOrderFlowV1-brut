@@ -1094,6 +1094,15 @@ From `OPF_RESEARCH_1.49`, strategy rules remain unchanged and Actual execution a
 - The HUD `ActualExec` line now includes `pos=...` so screenshots can distinguish internal execution state from the actual ATAS account position.
 - This version targets the February replay case where HUD showed `active=False` while the ATAS account panel still showed a residual position. No entry paths, risk thresholds, target-R rules, order quantity, daily guards, or v1.47 expansion tags are changed.
 
+From `OPF_RESEARCH_1.50`, strategy rules remain unchanged and Actual execution fixes the duplicate-flatten loop found in the February-June replay:
+
+- Actual defaults use `ACTUAL_EXEC_1.86`, and the code default now matches the JSON template so `ConfigSnapshot.json` should no longer fall back to an older `ActualExecutionSettings.Version`.
+- Duplicate `FLATTEN` fills after an execution is already completed are logged as `DUPLICATE_EXIT_FILL` with `duplicateFlattenIgnored`; they no longer submit another emergency flatten.
+- Duplicate SL/TP fills can submit at most one residual-position flatten, and only when ATAS `CurrentPosition` is still non-zero.
+- Rejected out-of-range entry fills submit emergency flatten only for the newly filled quantity that has not already been covered.
+- Orphan-position flatten is sent once per residual-position episode and is unlocked only after `CurrentPosition` returns to zero.
+- No entry paths, risk thresholds, target-R rules, order quantity, daily guards, or v1.47 expansion tags are changed.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

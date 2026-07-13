@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.49`.
+This document describes the current research files produced by `OPF_RESEARCH_1.50`.
 
 ## Common Context
 
@@ -827,3 +827,8 @@ From `OPF_RESEARCH_1.49`, `execution_events.csv` may include:
 - `ORPHAN_POSITION_DETECTED`: ATAS `CurrentPosition` was non-zero while OPF had no active execution.
 - `ORPHAN_FLATTEN_SEND`: OPF submitted a market order to flatten that residual account position.
 - `SKIP_ORPHAN_POSITION`: an otherwise eligible Actual entry was skipped while the account still had a residual position.
+
+From `OPF_RESEARCH_1.50`, duplicate exit handling is tightened:
+
+- `DUPLICATE_EXIT_FILL` with `duplicateFlattenIgnored`: a duplicate `FLATTEN` fill arrived after the execution was already complete and was intentionally not answered with another flatten order.
+- `DUPLICATE_EXIT_FLATTEN_SUPPRESSED`: a duplicate SL/TP fill did not require a residual-position flatten because the account was already flat or a duplicate-exit flatten had already been submitted.

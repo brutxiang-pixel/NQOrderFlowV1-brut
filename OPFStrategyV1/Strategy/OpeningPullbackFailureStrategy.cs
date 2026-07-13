@@ -2845,7 +2845,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 LogExecutionInfo($"EXEC_ENTRY_FILL_REJECTED trade={tradeId} {reason}");
                 AppendExecutionEvent(_replayExecution, "ENTRY_FILL_REJECTED", "ENTRY", trade.Price, trade.Volume, reason);
                 _replayExecution.EmergencyFlattenSubmitted = true;
-                await SubmitEmergencyFlattenAsync(fillQty, reason, OppositeDirection(trade.Order.Direction));
+                var flattenQty = Math.Max(0m, _replayExecution.EntryFilledQty - _replayExecution.EmergencyFlattenSubmittedQty);
+                if (flattenQty > 0m)
+                {
+                    _replayExecution.EmergencyFlattenSubmittedQty += flattenQty;
+                    await SubmitEmergencyFlattenAsync(flattenQty, reason, OppositeDirection(trade.Order.Direction));
+                }
                 return;
             }
 
@@ -2860,10 +2865,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (_replayExecution.ExitCompleted)
             {
                 LogExecutionInfo($"EXEC_DUPLICATE_EXIT_FILL trade={tradeId} role={role} price={trade.Price:0.########} volume={fillQty:0.########}");
-                AppendExecutionEvent(_replayExecution, "DUPLICATE_EXIT_FILL", role, trade.Price, fillQty, "emergencyFlatten");
+                var duplicateReason = role == "FLATTEN"
+                    ? "duplicateFlattenIgnored"
+                    : "duplicateProtectiveExit";
+                AppendExecutionEvent(_replayExecution, "DUPLICATE_EXIT_FILL", role, trade.Price, fillQty, duplicateReason);
                 MarkProtectionCleanupPending(_replayExecution, $"DuplicateExit:{role}");
                 await CleanupProtectionOrdersAsync(_replayExecution, $"DuplicateExit:{role}");
-                await SubmitEmergencyFlattenAsync(fillQty, $"DuplicateExit:{role}", OppositeDirection(trade.Order.Direction));
+                if (role is "SL" or "TP")
+                    await SubmitDuplicateExitFlattenIfNeededAsync(_replayExecution, fillQty, role);
                 return;
             }
 
@@ -3275,7 +3284,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (IsReplayExecutionActive(_replayExecution))
             return;
 
-        if (_orphanPositionFlattenPending && candle.Bar - _orphanPositionFlattenLastBar < 2)
+        if (_orphanPositionFlattenPending)
             return;
 
         _orphanPositionFlattenPending = true;
@@ -3436,6 +3445,27 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (_replayExecution is not null)
                 AppendExecutionEvent(_replayExecution, "CANCEL_FAIL", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, $"reason={reason}|err={ex.GetType().Name}:{ex.Message}");
         }
+    }
+
+    private async Task SubmitDuplicateExitFlattenIfNeededAsync(ReplayExecutionState execution, decimal fillQty, string role)
+    {
+        if (execution.DuplicateExitFlattenSubmitted)
+        {
+            AppendExecutionEvent(execution, "DUPLICATE_EXIT_FLATTEN_SUPPRESSED", role, 0m, fillQty, "alreadySubmitted");
+            return;
+        }
+
+        var position = CurrentPosition;
+        var qty = Math.Abs(position);
+        if (qty <= 0m)
+        {
+            AppendExecutionEvent(execution, "DUPLICATE_EXIT_FLATTEN_SUPPRESSED", role, 0m, fillQty, "positionFlat");
+            return;
+        }
+
+        execution.DuplicateExitFlattenSubmitted = true;
+        var direction = position > 0m ? OrderDirections.Sell : OrderDirections.Buy;
+        await SubmitEmergencyFlattenAsync(qty, $"DuplicateExit:{role}|pos={position:0.########}", direction);
     }
 
     private async Task SubmitEmergencyFlattenAsync(decimal quantity, string reason, OrderDirections? directionOverride = null)
@@ -5184,6 +5214,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public int LastProtectionCleanupBar { get; set; } = -1;
         public string ProtectionCleanupReason { get; set; } = string.Empty;
         public bool EmergencyFlattenSubmitted { get; set; }
+        public decimal EmergencyFlattenSubmittedQty { get; set; }
+        public bool DuplicateExitFlattenSubmitted { get; set; }
         public decimal ActualMfePoints { get; private set; }
         public decimal ActualMaePoints { get; private set; }
         public decimal ActualMfeR => InitialRiskPoints <= 0m ? 0m : Math.Round(ActualMfePoints / InitialRiskPoints, 4);
