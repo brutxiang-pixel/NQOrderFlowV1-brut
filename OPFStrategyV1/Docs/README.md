@@ -1067,6 +1067,18 @@ From `OPF_RESEARCH_1.46`, `v1.45` is treated as the stable-profit candidate and 
 - Executed rows from these expansion pools include `PositiveExpansionV146` in `execution_decisions.csv`.
 - The validation question for the next broad replay is whether volume expands beyond the v1.45 `396` normal trades / `79` effective days baseline while total NetR and NetDollars stay positive and improve.
 
+From `OPF_RESEARCH_1.47`, `v1.45` remains the stable-profit candidate and `v1.46` is not promoted to a baseline. The next test expands the proven OC / Breakaway main pools more aggressively instead of relying on small side pools:
+
+- Actual defaults use `ACTUAL_EXEC_1.83`.
+- `ActualOrderQuantity=2`, base `ActualTargetR=1.5`, Breakaway Short `2R`, daily guards disabled, compact logging, and the max daily trade safety ceiling remain unchanged.
+- The default Actual path list removes the v1.46 `TrendPullbackConfirmed` / `StructureConfirmShadow_SwingStop` execution test and keeps `BreakawayRetest` only as a small positive secondary path.
+- `ObservationConfirm` filler expands from `48 <= score < 56`, max 3 filler trades, before daily trade 5 to `46 <= score < 56`, max 5 filler trades, before daily trade 7.
+- `ObservationConfirm` volume risk expansion widens from risk `<=18` to risk `<=20`.
+- High-quality `ObservationConfirm` daily-volume rescue can now take up to 4 trades per day instead of 2, still only before daily trade 7.
+- `BreakawayFvg` volume expansion lowers the setup-quality threshold from `80` to `76`; Breakaway Long remains blocked by the existing v1.35 rule.
+- Executed rows from the new volume test include one or more of `OCFillerExpansionV147`, `OCRiskExpansionV147`, `DailyVolumeQualityRescueV147`, and `BreakawayVolumeV147`.
+- The validation question for the next broad replay is whether the strategy adds at least 40 trades versus the v1.45 `396` normal-trade baseline while the v1.47 expansion tags are positive on their own and total NetR/NetDollars stay above v1.45.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

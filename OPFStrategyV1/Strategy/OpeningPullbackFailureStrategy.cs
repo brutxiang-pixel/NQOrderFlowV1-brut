@@ -39,14 +39,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal DailyVolumeQualityRescueMinSetupQualityScore = 70m;
     private const decimal DailyVolumeQualityRescueMaxRiskPoints = 22m;
     private const decimal DailyVolumeQualityRescueMinEstimatedRr = 0.8m;
-    private const int DailyVolumeQualityRescueMaxTradesPerDay = 2;
+    private const int DailyVolumeQualityRescueMaxTradesPerDay = 4;
     private const decimal ZoneBirthVolumeV122MinSetupQualityScore = 45m;
     private const decimal ZoneBirthVolumeV122MaxRiskPoints = 25m;
     private const decimal ZoneBirthVolumeV122MinEstimatedRr = 0.3m;
     private const decimal StrictVolumeV122MinSetupQualityScore = 45m;
     private const decimal StrictVolumeV122MaxRiskPoints = 25m;
     private const decimal StrictVolumeV122MinEstimatedRr = 0.5m;
-    private const decimal BreakawayVolumeV128MinSetupQualityScore = 80m;
+    private const decimal BreakawayVolumeV128MinSetupQualityScore = 76m;
     private const decimal BreakawayVolumeV128LongMaxRiskPoints = 25m;
     private const decimal BreakawayVolumeV128ShortMaxRiskPoints = 30m;
     private const decimal BreakawayVolumeV128MinEstimatedRr = 1m;
@@ -153,11 +153,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private decimal _actualFailureReverseMinSetupQualityScore = 40m;
     private decimal _actualBreakawayMaxRiskPoints = 11m;
     private decimal _actualObservationConfirmMaxRiskPoints = 11m;
-    private decimal _actualObservationConfirmVolumeMaxRiskPoints = 11m;
+    private decimal _actualObservationConfirmVolumeMaxRiskPoints = 20m;
     private decimal _actualObservationConfirmMinSetupQualityScore = 56m;
-    private decimal _actualObservationConfirmFillerMinSetupQualityScore = 48m;
-    private int _actualObservationConfirmMaxFillerTradesPerDay = 3;
-    private int _actualObservationConfirmFillerUntilDailyTrades = 5;
+    private decimal _actualObservationConfirmFillerMinSetupQualityScore = 46m;
+    private int _actualObservationConfirmMaxFillerTradesPerDay = 5;
+    private int _actualObservationConfirmFillerUntilDailyTrades = 7;
     private decimal _actualFailureRetestMaxRiskPoints = 11m;
     private decimal _actualFailureRetestMinSetupQualityScore = 56m;
     private bool _actualRequireFailureRetest = true;
@@ -1833,6 +1833,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             executeReasons.Add($"ObservationFiller:score={signal.SetupQualityScore.TotalScore:0.##},count={_observationConfirmFillerTradesToday + 1}/{_actualObservationConfirmMaxFillerTradesPerDay}");
             if (signal.SetupQualityScore.TotalScore < 50m)
                 executeReasons.Add("DailyVolumeFiller48");
+            if (IsObservationConfirmFillerExpansionV147(signal, researchPath))
+                executeReasons.Add($"OCFillerExpansionV147:score={signal.SetupQualityScore.TotalScore:0.##},count={_observationConfirmFillerTradesToday + 1},dailyTrades={_replayTradesToday}");
         }
         if (IsDailyVolumeResearchFillerAllowed(signal, researchPath))
             executeReasons.Add($"DailyVolumeResearchFiller:{researchPath},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
@@ -1844,9 +1846,15 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         {
             executeReasons.Add($"ObservationRiskExpansion:risk={risk:0.##},base={_actualObservationConfirmMaxRiskPoints:0.##},max={_actualObservationConfirmVolumeMaxRiskPoints:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
             executeReasons.Add("DailyVolumeBaseRisk18");
+            if (IsObservationConfirmRiskExpansionV147(signal, researchPath, risk))
+                executeReasons.Add($"OCRiskExpansionV147:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},dailyTrades={_replayTradesToday}");
         }
         if (IsDailyVolumeQualityRescue(signal, researchPath, risk))
+        {
             executeReasons.Add($"DailyVolumeQualityRescueV120:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
+            if (IsDailyVolumeQualityRescueExpansionV147(signal, researchPath, risk))
+                executeReasons.Add($"DailyVolumeQualityRescueV147:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},count={_observationConfirmQualityRescueTradesToday + 1},dailyTrades={_replayTradesToday}");
+        }
         if (IsZoneBirthVolumeExpansionV122(signal, researchPath))
             executeReasons.Add($"ZoneBirthVolumeV122:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
         if (IsStrictVolumeExpansionV122(signal, researchPath))
@@ -1860,6 +1868,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         {
             var tag = BreakawayVolumeV128Tag(signal, risk);
             executeReasons.Add($"{tag}:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+            if (IsBreakawayVolumeExpansionV147(signal, researchPath))
+                executeReasons.Add($"BreakawayVolumeV147:side={signal.Side},risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##}");
         }
         if (IsObservationLongVolumeExpansionV123(signal, researchPath, risk))
         {
@@ -2048,6 +2058,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             score >= _actualObservationConfirmFillerMinSetupQualityScore;
     }
 
+    private bool IsObservationConfirmFillerExpansionV147(CandidateSignal signal, string researchPath)
+    {
+        if (!IsObservationConfirmFiller(signal, researchPath))
+            return false;
+
+        return signal.SetupQualityScore.TotalScore < 48m ||
+            _observationConfirmFillerTradesToday >= 3 ||
+            _replayTradesToday >= 5;
+    }
+
     private bool IsDailyVolumeSameBarTargetOnlyAllowed(CandidateSignal signal, string researchPath, string[] sameBarSkipReasons)
     {
         return false;
@@ -2110,6 +2130,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             risk <= _actualObservationConfirmVolumeMaxRiskPoints;
     }
 
+    private bool IsObservationConfirmRiskExpansionV147(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        if (!IsObservationConfirmVolumeRiskExpansion(signal, researchPath, risk))
+            return false;
+
+        return risk > 18m || _replayTradesToday >= 5;
+    }
+
     private bool IsObservationConfirmVolumeRiskExpansionAllowed(CandidateSignal signal, string researchPath)
     {
         if (!IsObservationConfirmPath(researchPath))
@@ -2129,6 +2157,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return IsDailyVolumeQualityRescueAllowed(signal, researchPath) &&
             risk > _actualObservationConfirmVolumeMaxRiskPoints &&
             risk <= DailyVolumeQualityRescueMaxRiskPoints;
+    }
+
+    private bool IsDailyVolumeQualityRescueExpansionV147(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        if (!IsDailyVolumeQualityRescue(signal, researchPath, risk))
+            return false;
+
+        return _observationConfirmQualityRescueTradesToday >= 2 || _replayTradesToday >= 5;
     }
 
     private bool IsDailyVolumeQualityRescueAllowed(CandidateSignal signal, string researchPath)
@@ -2322,6 +2358,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private bool IsBreakawayVolumeExpansionV128(CandidateSignal signal, string researchPath)
     {
         return IsBreakawayPath(researchPath) &&
+            signal.SetupQualityScore.TotalScore >= BreakawayVolumeV128MinSetupQualityScore;
+    }
+
+    private static bool IsBreakawayVolumeExpansionV147(CandidateSignal signal, string researchPath)
+    {
+        return IsBreakawayPath(researchPath) &&
+            signal.SetupQualityScore.TotalScore < 80m &&
             signal.SetupQualityScore.TotalScore >= BreakawayVolumeV128MinSetupQualityScore;
     }
 

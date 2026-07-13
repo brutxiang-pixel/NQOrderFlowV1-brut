@@ -36,9 +36,9 @@ public sealed record ActualExecutionSettings(
     public static ActualExecutionSettings Default()
     {
         return new ActualExecutionSettings(
-            Version: "ACTUAL_EXEC_1.82",
+            Version: "ACTUAL_EXEC_1.83",
             EnableActualOrders: true,
-            ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|BreakawayRetest|TrendPullbackConfirmed|StructureConfirmShadow_SwingStop|FailureReverse_ObservationInvalidated|FailureReverse_RetestFailed",
+            ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|BreakawayRetest|FailureReverse_ObservationInvalidated|FailureReverse_RetestFailed",
             ActualAllowResearchPaths: false,
             ActualOrderQuantity: 2m,
             ActualTargetR: 1.5m,
@@ -50,11 +50,11 @@ public sealed record ActualExecutionSettings(
             ActualMinEstimatedRr: 1.0m,
             ActualBreakawayMaxRiskPoints: 11m,
             ActualObservationConfirmMaxRiskPoints: 11m,
-            ActualObservationConfirmVolumeMaxRiskPoints: 18m,
+            ActualObservationConfirmVolumeMaxRiskPoints: 20m,
             ActualObservationConfirmMinSetupQualityScore: 56m,
-            ActualObservationConfirmFillerMinSetupQualityScore: 48m,
-            ActualObservationConfirmMaxFillerTradesPerDay: 3,
-            ActualObservationConfirmFillerUntilDailyTrades: 5,
+            ActualObservationConfirmFillerMinSetupQualityScore: 46m,
+            ActualObservationConfirmMaxFillerTradesPerDay: 5,
+            ActualObservationConfirmFillerUntilDailyTrades: 7,
             ActualFailureRetestMaxRiskPoints: 11m,
             ActualFailureRetestMinSetupQualityScore: 56m,
             ActualRequireTrendRegime: true,
