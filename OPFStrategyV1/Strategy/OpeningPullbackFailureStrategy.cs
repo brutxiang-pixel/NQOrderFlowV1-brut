@@ -81,6 +81,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ZoneQualityThreshold = 70m;
     private const decimal SetupQualityThreshold = 80m;
     private const int MaxPullbackBars = 24;
+    private const int StaleUnfilledEntryMaxBars = 2;
     private static readonly TimeSpan ReplayStopGuardStart = new(20, 40, 0);
     private static readonly TimeSpan FridayReplayStopGuardStart = new(16, 40, 0);
     private readonly IZoneDetector _zoneDetector = new FvgZoneDetector(
@@ -377,6 +378,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var current = ToOpfCandle(bar, candle);
         _lastResearchCandle = current;
         UpdateActualExecutionExcursion(current);
+        ScheduleStaleUnfilledEntryAbortIfNeeded(current);
         ScheduleProtectionCleanupIfNeeded("ClosedBar");
         var zones = _zoneDetector.Update(current);
         var regime = _trendScoreEngine.Update(current);
@@ -2802,6 +2804,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         LogExecutionInfo($"EXEC_MYTRADE trade={tradeId} role={role} price={trade.Price:0.########} volume={trade.Volume:0.########} orderExt={tradeOrder.ExtId} orderState={tradeOrder.State} orderType={tradeOrder.Type} orderDir={tradeOrder.Direction} orderPrice={tradeOrder.Price:0.########} orderTrig={tradeOrder.TriggerPrice:0.########} orderUnfilled={tradeOrder.Unfilled:0.########}");
         AppendExecutionEvent(_replayExecution, "MYTRADE", role, trade.Price, trade.Volume, $"orderExt={tradeOrder.ExtId}|orderState={tradeOrder.State}|orderType={tradeOrder.Type}|orderDir={tradeOrder.Direction}|orderPrice={tradeOrder.Price:0.########}|orderTrig={tradeOrder.TriggerPrice:0.########}|orderUnfilled={tradeOrder.Unfilled:0.########}");
 
+        if (_replayExecution.ExitCompleted && role == "ENTRY")
+        {
+            var fillQty = Math.Max(0m, trade.Volume);
+            var reason = $"LateEntryAfterCompleted:exitRole={_replayExecution.ExitRole ?? "-"}";
+            LogExecutionInfo($"EXEC_LATE_ENTRY_AFTER_COMPLETED trade={tradeId} price={trade.Price:0.########} volume={fillQty:0.########} reason={reason}");
+            AppendExecutionEvent(_replayExecution, "LATE_ENTRY_AFTER_COMPLETED", "ENTRY", trade.Price, fillQty, reason);
+            await SubmitEmergencyFlattenAsync(fillQty, reason, OppositeDirection(trade.Order.Direction));
+            return;
+        }
+
         if (role == "ENTRY")
         {
             var fillQty = Math.Max(0m, trade.Volume);
@@ -3187,6 +3199,53 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (NeedsProtectionCleanup(execution))
                 await CleanupProtectionOrdersAsync(execution!, reason);
         });
+    }
+
+    private void ScheduleStaleUnfilledEntryAbortIfNeeded(OpfCandle candle)
+    {
+        var execution = _replayExecution;
+        if (!IsStaleUnfilledEntry(execution, candle.Bar))
+            return;
+
+        execution!.EntryAbortPending = true;
+        var barsSinceSend = candle.Bar - execution.CreatedBar;
+        EnqueueExecutionAction("AbortStaleUnfilledEntry", async () =>
+        {
+            if (execution.EntryFilledQty > 0m || execution.ExitCompleted)
+                return;
+
+            var entryStateText = execution.EntryOrder?.State.ToString() ?? "-";
+            var entryUnfilledText = execution.EntryOrder is null ? "-" : execution.EntryOrder.Unfilled.ToString("0.########");
+            var reason = $"bars={barsSinceSend}|entryState={entryStateText}|entryUnfilled={entryUnfilledText}";
+            LogExecutionInfo($"EXEC_ENTRY_STALE_NO_FILL trade={execution.TradeId} {reason}");
+            AppendExecutionEvent(execution, "ENTRY_STALE_NO_FILL", "ENTRY", execution.CreatedPrice, execution.Quantity, reason);
+            await TryCancelExecutionOrderAsync(execution.EntryOrder, "StaleNoEntryFill");
+
+            execution.ExitCompleted = true;
+            execution.ExitBar = candle.Bar;
+            execution.ExitPrice = execution.CreatedPrice;
+            execution.ExitRole = "NO_ENTRY_FILL";
+            AppendExecutionEvent(execution, "EXIT_ABORTED_NO_ENTRY", "NO_ENTRY_FILL", execution.CreatedPrice, 0m, "StaleUnfilledEntry");
+            MarkProtectionCleanupPending(execution, "StaleNoEntryFill");
+            await CleanupProtectionOrdersAsync(execution, "StaleNoEntryFill");
+        });
+    }
+
+    private static bool IsStaleUnfilledEntry(ReplayExecutionState? execution, int currentBar)
+    {
+        if (execution is null ||
+            execution.ExitCompleted ||
+            execution.EntryAbortPending ||
+            execution.EntryFilledQty > 0m)
+        {
+            return false;
+        }
+
+        var entryState = execution.EntryOrder?.State.ToString();
+        if (!string.IsNullOrWhiteSpace(entryState) && IsInactiveOrderState(entryState))
+            return true;
+
+        return currentBar - execution.CreatedBar >= StaleUnfilledEntryMaxBars;
     }
 
     private void ScheduleProtectionLossCheckIfNeeded(string reason)
@@ -4740,6 +4799,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         var side = execution.Side == TradeSide.Long ? "L" : "S";
         var entry = execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice;
+        if (execution.EntryFilledQty <= 0m)
+            return $"pending {side} {execution.ResearchPath} E={entry:0.00} fill=0/{execution.Quantity:0.##}";
+
         return $"{side} {execution.ResearchPath} E={entry:0.00} SL={execution.Stop:0.00} TP={execution.Target:0.00} fill={execution.EntryFilledQty:0.##}/{execution.Quantity:0.##}";
     }
 
@@ -4811,6 +4873,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private bool ShouldDrawActualExecution(ReplayExecutionState execution)
     {
+        if (execution.ExitCompleted && execution.EntryFilledQty <= 0m)
+            return false;
         if (execution.ExitCompleted && execution.ExitBar.HasValue && ActualLineLookbackBars > 0 && _lastSeenBar - execution.ExitBar.Value > ActualLineLookbackBars)
             return false;
         return true;
@@ -4826,11 +4890,15 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         var isActive = IsReplayExecutionActive(execution);
         var alpha = isActive ? 230 : 90;
-        var suffix = execution.ProtectionCleanupPending ? "CLEANUP" : isActive ? "ACTIVE" : $"EXIT {execution.ExitRole ?? "-"}";
+        var isPendingEntry = execution.EntryFilledQty <= 0m && !execution.ExitCompleted;
+        var suffix = isPendingEntry ? "PENDING_ENTRY" : execution.ProtectionCleanupPending ? "CLEANUP" : isActive ? "ACTIVE" : $"EXIT {execution.ExitRole ?? "-"}";
         var x1 = isActive ? ChartArea.X : GetActualExecutionStartX(execution);
         var x2 = isActive ? ChartArea.X + ChartArea.Width : GetActualExecutionEndX(execution);
 
         DrawActualHLine(context, entry, Color.FromArgb(alpha, Color.DeepSkyBlue), 2, $"ACT {execution.Side} ENTRY {entry:0.00} {suffix}", x1, x2, labelSlot: labelSlotOffset);
+        if (isPendingEntry)
+            return;
+
         DrawActualHLine(context, execution.Stop, Color.FromArgb(alpha, Color.OrangeRed), 2, $"SL {execution.Stop:0.00}", x1, x2, labelSlot: labelSlotOffset + 1);
         DrawActualHLine(context, execution.Target, Color.FromArgb(alpha, Color.LimeGreen), 2, $"TP {execution.Target:0.00} ({execution.TargetR:0.0}R)", x1, x2, labelSlot: labelSlotOffset + 2);
 
@@ -5030,6 +5098,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public bool ProtectionCleanupPending { get; set; }
         public bool ProtectionCleanupDone { get; set; }
         public bool ProtectionCleanupInProgress { get; set; }
+        public bool EntryAbortPending { get; set; }
         public int ProtectionCleanupAttempts { get; set; }
         public int LastProtectionCleanupBar { get; set; } = -1;
         public string ProtectionCleanupReason { get; set; } = string.Empty;

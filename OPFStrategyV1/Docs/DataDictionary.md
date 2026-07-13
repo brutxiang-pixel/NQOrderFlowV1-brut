@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.47`.
+This document describes the current research files produced by `OPF_RESEARCH_1.48`.
 
 ## Common Context
 
@@ -815,3 +815,9 @@ From `OPF_RESEARCH_0.19`, replay index also includes:
 From `OPF_RESEARCH_1.46`, `execution_decisions.csv` can include `PositiveExpansionV146` for controlled positive-expectancy volume expansion rows. The tag applies to Actual executions from `BreakawayRetest`, Short `TrendPullbackConfirmed`, and Long `StructureConfirmShadow_SwingStop`. Long `TrendPullbackConfirmed` rows are skipped with `TrendPullbackLongDisabledV146`, and Short `StructureConfirmShadow_SwingStop` rows are skipped with `StructureSwingShortDisabledV146`.
 
 From `OPF_RESEARCH_1.47`, `execution_decisions.csv` can include the main-pool expansion tags `OCFillerExpansionV147`, `OCRiskExpansionV147`, `DailyVolumeQualityRescueV147`, and `BreakawayVolumeV147`. These identify the trades added by the v1.47 higher-volume test so their standalone NetR and NetDollars can be compared against the stable v1.45 baseline.
+
+From `OPF_RESEARCH_1.48`, `execution_events.csv` may include:
+
+- `ENTRY_STALE_NO_FILL`: an Actual entry order remained unfilled long enough to be treated as a no-entry execution and canceled.
+- `EXIT_ABORTED_NO_ENTRY` with role `NO_ENTRY_FILL`: the execution was completed without PnL because no entry fill was confirmed.
+- `LATE_ENTRY_AFTER_COMPLETED`: ATAS reported a delayed entry fill after the execution was already completed; the strategy sends an emergency flatten for the late-filled quantity.

@@ -1079,6 +1079,14 @@ From `OPF_RESEARCH_1.47`, `v1.45` remains the stable-profit candidate and `v1.46
 - Executed rows from the new volume test include one or more of `OCFillerExpansionV147`, `OCRiskExpansionV147`, `DailyVolumeQualityRescueV147`, and `BreakawayVolumeV147`.
 - The validation question for the next broad replay is whether the strategy adds at least 40 trades versus the v1.45 `396` normal-trade baseline while the v1.47 expansion tags are positive on their own and total NetR/NetDollars stay above v1.45.
 
+From `OPF_RESEARCH_1.48`, strategy rules remain unchanged from v1.47 and Actual execution fixes a stale unfilled-entry bug found during February replay:
+
+- Actual defaults use `ACTUAL_EXEC_1.84`.
+- If an Actual market entry has no confirmed fill after `2` closed bars, or the entry order becomes inactive before filling, the strategy logs `ENTRY_STALE_NO_FILL`, cancels the entry order, marks the execution as `NO_ENTRY_FILL`, and releases the active-trade block.
+- If ATAS later reports a delayed entry fill for that completed no-entry execution, the strategy logs `LATE_ENTRY_AFTER_COMPLETED` and submits an emergency flatten order for the late-filled quantity.
+- Pending unfilled entries are shown as `PENDING_ENTRY` on the chart and HUD. SL/TP lines are drawn only after an entry fill exists, so planned brackets are no longer mistaken for active protective orders.
+- No entry paths, risk thresholds, target-R rules, order quantity, daily guards, or v1.47 expansion tags are changed.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
