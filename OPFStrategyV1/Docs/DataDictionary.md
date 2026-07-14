@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.53`.
+This document describes the current research files produced by `OPF_RESEARCH_1.54`.
 
 ## Common Context
 
@@ -844,3 +844,8 @@ From `OPF_RESEARCH_1.53`, split Actual entry fills are accumulated before SL/TP 
 
 - `ENTRY_PARTIAL_FILL_WAITING`: cumulative entry quantity is still below the requested quantity, so bracket submission is waiting for the remaining fill.
 - `ENTRY_PARTIAL_FILL_ABORT`: the remaining entry quantity did not fill within the aggregation window; the strategy cancels the remainder and emergency-flattens the filled quantity.
+
+From `OPF_RESEARCH_1.54`, expected inactive OCO cleanup states use non-failure audit events:
+
+- `OCO_SIBLING_INACTIVE`: the opposite protective order moved to ATAS `Failed` after SL or TP already completed the execution.
+- `CANCEL_ALREADY_INACTIVE`: cleanup attempted to cancel an OCO sibling that ATAS had already removed.

@@ -493,6 +493,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     protected override void OnOrderCancelFailed(Order order, string message)
     {
         base.OnOrderCancelFailed(order, message);
+        if (IsExpectedOcoCancelAlreadyInactive(order, message))
+        {
+            LogExecutionInfo($"EXEC_CANCEL_ALREADY_INACTIVE role={ParseExecutionRole(order?.Comment)} ext={order?.ExtId} msg={message}");
+            AppendOrderFailureEvent(order, "CANCEL_ALREADY_INACTIVE", message);
+            return;
+        }
+
         LogExecutionInfo($"EXEC_CANCEL_FAILED role={ParseExecutionRole(order?.Comment)} ext={order?.ExtId} msg={message}");
         AppendOrderFailureEvent(order, "CANCEL_FAIL", message);
     }
@@ -515,7 +522,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         LogExecutionInfo($"EXEC_ORDER_ATTACH src={source} trade={tradeId} role={role} state={order.State} ext={order.ExtId} type={order.Type} dir={order.Direction} price={order.Price:0.########} trig={order.TriggerPrice:0.########} unfilled={order.Unfilled:0.########} qty={order.QuantityToFill:0.########}");
         if (IsFailedOrderState(order.State.ToString()))
-            AppendExecutionEvent(_replayExecution, "ORDER_STATE_FAILED", role, order.Price > 0m ? order.Price : order.TriggerPrice, order.QuantityToFill, $"src={source}|state={order.State}|ext={order.ExtId}");
+        {
+            var eventName = IsExpectedOcoSiblingInactive(order)
+                ? "OCO_SIBLING_INACTIVE"
+                : "ORDER_STATE_FAILED";
+            AppendExecutionEvent(_replayExecution, eventName, role, order.Price > 0m ? order.Price : order.TriggerPrice, order.QuantityToFill, $"src={source}|state={order.State}|ext={order.ExtId}");
+        }
     }
 
     private void LogNewZones(OpfCandle candle, IReadOnlyList<DetectedZone> zones)
@@ -3537,6 +3549,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
         catch (Exception ex)
         {
+            if (IsExpectedOcoCancelAlreadyInactive(workingOrder, ex.Message))
+            {
+                LogExecutionInfo($"EXEC_CANCEL_ALREADY_INACTIVE reason={reason} ext={workingOrder.ExtId} msg={ex.Message}");
+                if (_replayExecution is not null)
+                    AppendExecutionEvent(_replayExecution, "CANCEL_ALREADY_INACTIVE", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, $"reason={reason}|msg={ex.Message}");
+                return;
+            }
+
             LogExecutionInfo($"EXEC_CANCEL_FAIL reason={reason} ext={workingOrder.ExtId} err={ex.GetType().Name}:{ex.Message}");
             if (_replayExecution is not null)
                 AppendExecutionEvent(_replayExecution, "CANCEL_FAIL", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, $"reason={reason}|err={ex.GetType().Name}:{ex.Message}");
@@ -3995,6 +4015,35 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         return state.Equals("Failed", StringComparison.OrdinalIgnoreCase) ||
             state.Equals("Rejected", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsExpectedOcoSiblingInactive(Order? order)
+    {
+        if (order is null ||
+            !string.Equals(order.State.ToString(), "Failed", StringComparison.OrdinalIgnoreCase) ||
+            !IsExitOrder(order) ||
+            !TryParseExecutionComment(order.Comment, out var tradeId, out _))
+        {
+            return false;
+        }
+
+        var execution = FindReplayExecution(tradeId);
+        return execution is not null && execution.ExitCompleted && execution.ProtectionCleanupPending;
+    }
+
+    private bool IsExpectedOcoCancelAlreadyInactive(Order? order, string? message)
+    {
+        if (order is null ||
+            string.IsNullOrWhiteSpace(message) ||
+            !message.Contains("for cancel not found", StringComparison.OrdinalIgnoreCase) ||
+            !IsExitOrder(order) ||
+            !TryParseExecutionComment(order.Comment, out var tradeId, out _))
+        {
+            return false;
+        }
+
+        var execution = FindReplayExecution(tradeId);
+        return execution is not null && execution.ExitCompleted && execution.ProtectionCleanupPending;
     }
 
     private ReplayExecutionState? FindReplayExecution(string tradeId)

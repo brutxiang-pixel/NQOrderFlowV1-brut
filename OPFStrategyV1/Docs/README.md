@@ -1128,6 +1128,14 @@ From `OPF_RESEARCH_1.53`, strategy rules remain unchanged and Actual execution f
 - `execution_events.csv` records `ENTRY_PARTIAL_FILL_WAITING` and `ENTRY_PARTIAL_FILL_ABORT` for auditing.
 - No entry paths, quality thresholds, risk gates, target-R rules, order quantity, or v1.52 Breakaway expansion rules are changed.
 
+From `OPF_RESEARCH_1.54`, strategy and order behavior remain unchanged and execution audit events distinguish expected OCO cleanup states from real failures:
+
+- Actual defaults use `ACTUAL_EXEC_1.90`.
+- After one protective leg fills, an ATAS `Failed` state on the inactive sibling is recorded as `OCO_SIBLING_INACTIVE` instead of `ORDER_STATE_FAILED`.
+- A cleanup cancel that reports `Order ... for cancel not found` after the execution has already exited is recorded as `CANCEL_ALREADY_INACTIVE` instead of `CANCEL_FAIL`.
+- Register failures, unexpected failed/rejected orders, and cancel failures outside completed-exit OCO cleanup remain failure events.
+- No entry paths, quality thresholds, risk gates, target-R rules, order quantity, or v1.53 partial-fill behavior are changed.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
