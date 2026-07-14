@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.55`.
+This document describes the current research files produced by `OPF_RESEARCH_1.56`.
 
 ## Common Context
 
@@ -857,3 +857,5 @@ From `OPF_RESEARCH_1.55`, end-of-replay open executions are closed before strate
 - `REPLAY_STOP_POSITION_FLAT`: the account became flat during protective-order cancellation, so no additional session-close market order was required.
 - `SESSION_FLATTEN` in `execution_trades.csv` is a normal real-fill exit role with actual PnL/R, not a synthetic `STOPPED` row.
 - Breakaway Long Actual execution is disabled and the Breakaway Short setup-quality threshold is restored to `76`.
+
+From `OPF_RESEARCH_1.56`, `ReplayStopExitPending` suppresses protection-loss emergency flatten detection while the strategy intentionally cancels SL/TP orders for a session-close exit. The `SESSION_FLATTEN` submission follows the completed cancellation requests immediately, preventing duplicate exit fills without changing the v1.55 strategy rules.

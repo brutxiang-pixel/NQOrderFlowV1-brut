@@ -1146,6 +1146,14 @@ From `OPF_RESEARCH_1.55`, the v1.54 execution-safety baseline combines the full 
 - v1.53 partial-entry protection, v1.54 OCO audit classification, OC filler/risk expansion, Failure paths, two-contract quantity, and all other risk/target rules remain unchanged.
 - The focused validation is March 16 and March 30 plus representative normal days: there should be real `REPLAY_STOP_FLATTEN_SEND` / `SESSION_FLATTEN` fills, `PROTECTION_CLEANUP_DONE`, no `STOPPED`, and no Breakaway Long Actual executions.
 
+From `OPF_RESEARCH_1.56`, the v1.55 strategy rules remain unchanged and the end-of-replay exit sequence prevents a duplicate emergency flatten:
+
+- Actual defaults use `ACTUAL_EXEC_1.92`.
+- While `ReplayStopExitPending` is active, canceled SL/TP orders are not treated as an unexpected protection loss, so the strategy does not submit an additional `EMERGENCY_FLATTEN` beside `SESSION_FLATTEN`.
+- After the protective-order cancellation requests complete, `SESSION_FLATTEN` is sent immediately without the former 250 ms delay.
+- Entry paths, quality thresholds, risk gates, target-R rules, order quantity, and all other v1.55 strategy behavior remain unchanged.
+- Focused validation uses March 16 and March 30: expect two real `SESSION_FLATTEN` exits, normal `PROTECTION_CLEANUP_DONE`, and zero `EMERGENCY_FLATTEN_SEND`, `DUPLICATE_EXIT_FILL`, or `STOPPED` events.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

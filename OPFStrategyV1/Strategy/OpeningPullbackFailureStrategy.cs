@@ -3389,7 +3389,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             await TryCancelExecutionOrderAsync(execution.EntryOrder, "ReplayStopExit:Entry");
             await TryCancelExecutionOrderAsync(execution.StopOrder, "ReplayStopExit:SL");
             await TryCancelExecutionOrderAsync(execution.TargetOrder, "ReplayStopExit:TP");
-            await Task.Delay(250);
 
             if (execution.ExitCompleted)
                 return;
@@ -3525,6 +3524,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return execution is not null &&
             execution.BracketSubmitted &&
             !execution.ExitCompleted &&
+            !execution.ReplayStopExitPending &&
             !execution.EmergencyFlattenSubmitted &&
             RemainingExecutionQuantity(execution) > 0m &&
             !IsWorkingExecutionOrder(execution.StopOrder) &&
