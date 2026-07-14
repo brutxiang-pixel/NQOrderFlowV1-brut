@@ -1111,6 +1111,15 @@ From `OPF_RESEARCH_1.51`, strategy rules remain unchanged and Actual execution a
 - The HUD `ActualExec` line shows `abnormalGuard=<n>` while this guard is active.
 - No entry paths, risk thresholds, target-R rules, order quantity, daily guards, or v1.47 expansion tags are changed.
 
+From `OPF_RESEARCH_1.52`, Actual execution returns to the main profitability-and-volume objective by expanding the existing Breakaway pool:
+
+- Actual defaults use `ACTUAL_EXEC_1.88`.
+- The v1.51 execution safety guard remains active.
+- Breakaway Short keeps the v1.45 `2R` target and lowers its volume-quality threshold from `SetupQualityScore >= 76` to `>= 72`.
+- Breakaway Long is no longer globally blocked when it is a high-quality selective row: `SetupQualityScore >= 88`, risk `<= 22`, and `EstimatedRR >= 1.2`. These rows are tagged `BreakawayLongSelectiveV152`.
+- OC, OC filler, wide-stop OC, Failure Retest, order quantity, daily guards, and base `ActualTargetR=1.5` are unchanged.
+- The validation question for the next broad replay is whether Breakaway expansion increases trade count and total NetR/NetDollars while `BreakawayLongSelectiveV152` and the newly widened Short `BreakawayVolumeV147` rows are non-negative as standalone subgroups.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

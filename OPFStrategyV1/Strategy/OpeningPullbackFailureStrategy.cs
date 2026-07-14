@@ -46,13 +46,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal StrictVolumeV122MinSetupQualityScore = 45m;
     private const decimal StrictVolumeV122MaxRiskPoints = 25m;
     private const decimal StrictVolumeV122MinEstimatedRr = 0.5m;
-    private const decimal BreakawayVolumeV128MinSetupQualityScore = 76m;
+    private const decimal BreakawayVolumeV128MinSetupQualityScore = 72m;
     private const decimal BreakawayVolumeV128LongMaxRiskPoints = 25m;
     private const decimal BreakawayVolumeV128ShortMaxRiskPoints = 30m;
     private const decimal BreakawayVolumeV128MinEstimatedRr = 1m;
-    private const decimal BreakawayLongSelectiveV134MinSetupQualityScore = 95m;
-    private const decimal BreakawayLongSelectiveV134MaxRiskPoints = 18m;
-    private const decimal BreakawayLongSelectiveV134MinEstimatedRr = 1.5m;
+    private const decimal BreakawayLongSelectiveV152MinSetupQualityScore = 88m;
+    private const decimal BreakawayLongSelectiveV152MaxRiskPoints = 22m;
+    private const decimal BreakawayLongSelectiveV152MinEstimatedRr = 1.2m;
     private const decimal ObservationLongVolumeV123MinSetupQualityScore = 70m;
     private const decimal ObservationLongVolumeV123MaxRiskPoints = 18m;
     private const decimal ObservationLongVolumeV123MinEstimatedRr = 0.8m;
@@ -2116,8 +2116,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal MaxAllowedActualRiskPoints(CandidateSignal signal, string researchPath)
     {
-        if (IsBreakawayLongSelectiveV134Quality(signal, researchPath))
-            return BreakawayLongSelectiveV134MaxRiskPoints;
+        if (IsBreakawayLongSelectiveV152Quality(signal, researchPath))
+            return BreakawayLongSelectiveV152MaxRiskPoints;
         if (IsBreakawayVolumeExpansionV128(signal, researchPath))
             return BreakawayVolumeV128MaxRiskPoints(signal);
         if (IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath))
@@ -2208,7 +2208,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private string[] ActualExecutionPathSkipReasons(CandidateSignal signal, string researchPath)
     {
         if (IsBreakawayPath(researchPath) &&
-            signal.Side == TradeSide.Long)
+            signal.Side == TradeSide.Long &&
+            !IsBreakawayLongSelectiveV152Quality(signal, researchPath))
             return new[] { "BreakawayLongActualDisabledV135" };
 
         if (IsEvidenceFrozenActualPath(researchPath))
@@ -2391,11 +2392,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             signal.SetupQualityScore.TotalScore >= BreakawayVolumeV128MinSetupQualityScore;
     }
 
-    private static bool IsBreakawayLongSelectiveV134Quality(CandidateSignal signal, string researchPath)
+    private static bool IsBreakawayLongSelectiveV152Quality(CandidateSignal signal, string researchPath)
     {
         return IsBreakawayPath(researchPath) &&
             signal.Side == TradeSide.Long &&
-            signal.SetupQualityScore.TotalScore >= BreakawayLongSelectiveV134MinSetupQualityScore;
+            signal.SetupQualityScore.TotalScore >= BreakawayLongSelectiveV152MinSetupQualityScore;
     }
 
     private static bool IsEvidenceFrozenActualPath(string researchPath)
@@ -2431,7 +2432,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private static string BreakawayVolumeV128Tag(CandidateSignal signal, decimal risk)
     {
         if (signal.Side == TradeSide.Long)
-            return "BreakawayLongSelectiveV134";
+            return "BreakawayLongSelectiveV152";
 
         return signal.Side == TradeSide.Short && risk > BreakawayVolumeV128LongMaxRiskPoints
             ? "BreakawayShortWideV128"
@@ -2567,7 +2568,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var isDailyVolumeQualityRescue = IsDailyVolumeQualityRescue(signal, researchPath, risk);
         var isV122VolumeExpansion = IsV122VolumeExpansionAllowed(signal, researchPath);
         var isBreakawayVolumeExpansion = IsBreakawayVolumeExpansionV128(signal, researchPath);
-        var isBreakawayLongSelective = IsBreakawayLongSelectiveV134Quality(signal, researchPath);
+        var isBreakawayLongSelective = IsBreakawayLongSelectiveV152Quality(signal, researchPath);
         var isObservationLongVolumeExpansion = IsObservationLongVolumeExpansionV123(signal, researchPath, risk);
         var isObservationShortVolumeExpansion = IsObservationShortVolumeExpansionV124(signal, researchPath, risk);
         var isUnknownMicroRiskVolumeExpansion = IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath);
@@ -2586,12 +2587,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (isBreakawayVolumeExpansion)
         {
             var breakawayMaxRisk = isBreakawayLongSelective
-                ? BreakawayLongSelectiveV134MaxRiskPoints
+                ? BreakawayLongSelectiveV152MaxRiskPoints
                 : BreakawayVolumeV128MaxRiskPoints(signal);
             if (risk > breakawayMaxRisk)
             {
                 var reason = isBreakawayLongSelective
-                    ? "BreakawayLongSelectiveV134RiskCapExceeded"
+                    ? "BreakawayLongSelectiveV152RiskCapExceeded"
                     : "BreakawayVolumeV128RiskCapExceeded";
                 reasons.Add($"{reason}:risk={risk:0.##},max={breakawayMaxRisk:0.##},side={signal.Side}");
             }
@@ -2645,7 +2646,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 ? MainlineVolumeFillerMinEstimatedRr
             : isBreakawayVolumeExpansion
                 ? isBreakawayLongSelective
-                    ? BreakawayLongSelectiveV134MinEstimatedRr
+                    ? BreakawayLongSelectiveV152MinEstimatedRr
                     : BreakawayVolumeV128MinEstimatedRr
             : isObservationLongVolumeExpansion
                 ? ObservationLongVolumeV123MinEstimatedRr
