@@ -1120,12 +1120,20 @@ From `OPF_RESEARCH_1.52`, Actual execution returns to the main profitability-and
 - OC, OC filler, wide-stop OC, Failure Retest, order quantity, daily guards, and base `ActualTargetR=1.5` are unchanged.
 - The validation question for the next broad replay is whether Breakaway expansion increases trade count and total NetR/NetDollars while `BreakawayLongSelectiveV152` and the newly widened Short `BreakawayVolumeV147` rows are non-negative as standalone subgroups.
 
+From `OPF_RESEARCH_1.53`, strategy rules remain unchanged and Actual execution fixes two-contract partial entry fills found during the April 6-9 smoke replay:
+
+- Actual defaults use `ACTUAL_EXEC_1.89`.
+- SL/TP brackets are submitted only after cumulative entry fills reach the requested order quantity, so split `1 + 1` fills receive a full two-contract bracket instead of a one-contract bracket.
+- A partial entry that does not complete within the short fill-aggregation window is canceled and emergency-flattened. Later fills from the aborted entry are flattened instead of being left unprotected.
+- `execution_events.csv` records `ENTRY_PARTIAL_FILL_WAITING` and `ENTRY_PARTIAL_FILL_ABORT` for auditing.
+- No entry paths, quality thresholds, risk gates, target-R rules, order quantity, or v1.52 Breakaway expansion rules are changed.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
 
 1. All snapshots use the same `ResearchSchemaVersion` and `ActualExecutionSettings.Version`.
-2. Core CSV files are present: config snapshot, signals, research outcomes, risk evaluations, score breakdown, execution events, and execution trades.
+2. Core CSV files are present: config snapshot, signals, research outcomes, risk evaluations, execution events, and execution trades. `score_breakdown.csv` is required only for scoring-component research; it is not required when `ResearchLogMode=Compact`.
 3. `ExecutedDecisions = ExecutionTrades = ActualVerifiedUniqueTrades`, with no duplicate Actual-verified rows.
 4. Every Actual exit has `PROTECTION_CLEANUP_DONE`, with no `STALE`, `REJECT`, `CANCEL_FAIL`, or `FAILED` events.
 5. The tested configuration is frozen: MNQ, documented `ActualOrderQuantity`, default `ActualTargetR=1.5` with any documented per-version TP overrides, daily target/loss stops disabled for evidence accumulation, max-trades safety ceiling, and Actual path whitelist.

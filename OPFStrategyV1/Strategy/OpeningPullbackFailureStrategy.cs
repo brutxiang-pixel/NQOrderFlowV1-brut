@@ -53,6 +53,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal BreakawayLongSelectiveV152MinSetupQualityScore = 88m;
     private const decimal BreakawayLongSelectiveV152MaxRiskPoints = 22m;
     private const decimal BreakawayLongSelectiveV152MinEstimatedRr = 1.2m;
+    private const int PartialEntryFinalizeDelayMs = 250;
     private const decimal ObservationLongVolumeV123MinSetupQualityScore = 70m;
     private const decimal ObservationLongVolumeV123MaxRiskPoints = 18m;
     private const decimal ObservationLongVolumeV123MinEstimatedRr = 0.8m;
@@ -2884,6 +2885,27 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 return;
             }
 
+            if (_replayExecution.EntryAbortPending)
+            {
+                var flattenQty = Math.Max(0m, _replayExecution.EntryFilledQty - _replayExecution.EmergencyFlattenSubmittedQty);
+                if (flattenQty > 0m)
+                {
+                    var reason = $"LatePartialEntryFillAfterAbort:filled={_replayExecution.EntryFilledQty:0.########}|covered={_replayExecution.EmergencyFlattenSubmittedQty:0.########}";
+                    _replayExecution.EmergencyFlattenSubmittedQty += flattenQty;
+                    await SubmitEmergencyFlattenAsync(flattenQty, reason, OppositeDirection(trade.Order.Direction));
+                }
+                return;
+            }
+
+            if (_replayExecution.EntryFilledQty + 0.0000001m < _replayExecution.Quantity)
+            {
+                var reason = $"filled={_replayExecution.EntryFilledQty:0.########}|requested={_replayExecution.Quantity:0.########}|unfilled={tradeOrder.Unfilled:0.########}";
+                LogExecutionInfo($"EXEC_ENTRY_PARTIAL_FILL_WAITING trade={tradeId} {reason}");
+                AppendExecutionEvent(_replayExecution, "ENTRY_PARTIAL_FILL_WAITING", "ENTRY", _replayExecution.EntryAvgPrice, _replayExecution.EntryFilledQty, reason);
+                SchedulePartialEntryFinalizeIfNeeded(_replayExecution);
+                return;
+            }
+
             if (!_replayExecution.BracketSubmitted)
                 await SubmitReplayBracketAsync(_replayExecution);
             return;
@@ -3279,6 +3301,50 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(execution, "EXIT_ABORTED_NO_ENTRY", "NO_ENTRY_FILL", execution.CreatedPrice, 0m, "StaleUnfilledEntry");
             MarkProtectionCleanupPending(execution, "StaleNoEntryFill");
             await CleanupProtectionOrdersAsync(execution, "StaleNoEntryFill");
+        });
+    }
+
+    private void SchedulePartialEntryFinalizeIfNeeded(ReplayExecutionState execution)
+    {
+        if (execution.PartialEntryFinalizeScheduled)
+            return;
+
+        execution.PartialEntryFinalizeScheduled = true;
+        _ = FinalizePartialEntryAfterDelayAsync(execution);
+    }
+
+    private async Task FinalizePartialEntryAfterDelayAsync(ReplayExecutionState execution)
+    {
+        await Task.Delay(PartialEntryFinalizeDelayMs);
+        EnqueueExecutionAction("FinalizePartialEntry", async () =>
+        {
+            execution.PartialEntryFinalizeScheduled = false;
+            if (!ReferenceEquals(_replayExecution, execution) ||
+                execution.ExitCompleted ||
+                execution.BracketSubmitted ||
+                execution.EntryAbortPending ||
+                execution.EntryFilledQty <= 0m)
+            {
+                return;
+            }
+
+            if (execution.EntryFilledQty + 0.0000001m >= execution.Quantity)
+            {
+                await SubmitReplayBracketAsync(execution);
+                return;
+            }
+
+            execution.EntryAbortPending = true;
+            var filledQty = execution.EntryFilledQty;
+            var reason = $"PartialEntryFillTimeout:filled={filledQty:0.########}|requested={execution.Quantity:0.########}|delayMs={PartialEntryFinalizeDelayMs}";
+            LogExecutionInfo($"EXEC_ENTRY_PARTIAL_FILL_ABORT trade={execution.TradeId} {reason}");
+            AppendExecutionEvent(execution, "ENTRY_PARTIAL_FILL_ABORT", "ENTRY", execution.EntryAvgPrice, filledQty, reason);
+            await TryCancelExecutionOrderAsync(execution.EntryOrder, "PartialEntryFillAbort");
+
+            execution.BracketQty = filledQty;
+            execution.EmergencyFlattenSubmitted = true;
+            execution.EmergencyFlattenSubmittedQty += filledQty;
+            await SubmitEmergencyFlattenAsync(filledQty, reason);
         });
     }
 
@@ -5241,6 +5307,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public bool ProtectionCleanupDone { get; set; }
         public bool ProtectionCleanupInProgress { get; set; }
         public bool EntryAbortPending { get; set; }
+        public bool PartialEntryFinalizeScheduled { get; set; }
         public int ProtectionCleanupAttempts { get; set; }
         public int LastProtectionCleanupBar { get; set; } = -1;
         public string ProtectionCleanupReason { get; set; } = string.Empty;

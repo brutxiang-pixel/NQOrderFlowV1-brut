@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.52`.
+This document describes the current research files produced by `OPF_RESEARCH_1.53`.
 
 ## Common Context
 
@@ -839,3 +839,8 @@ From `OPF_RESEARCH_1.51`, abnormal entry-fill handling adds a session-day circui
 - `SKIP_DAILY_ABNORMAL_FILL_GUARD`: an otherwise eligible Actual entry was skipped because the same session day already had an abnormal entry fill.
 
 From `OPF_RESEARCH_1.52`, `execution_decisions.csv` can include `BreakawayLongSelectiveV152` for high-quality Breakaway Long Actual executions. The Breakaway volume threshold is lowered to `SetupQualityScore >= 72`, so `BreakawayVolumeV147` rows now identify the newly widened `72 <= score < 80` Breakaway subgroup.
+
+From `OPF_RESEARCH_1.53`, split Actual entry fills are accumulated before SL/TP bracket submission. `execution_events.csv` may include:
+
+- `ENTRY_PARTIAL_FILL_WAITING`: cumulative entry quantity is still below the requested quantity, so bracket submission is waiting for the remaining fill.
+- `ENTRY_PARTIAL_FILL_ABORT`: the remaining entry quantity did not fill within the aggregation window; the strategy cancels the remainder and emergency-flattens the filled quantity.
