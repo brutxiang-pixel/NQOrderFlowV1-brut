@@ -46,13 +46,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal StrictVolumeV122MinSetupQualityScore = 45m;
     private const decimal StrictVolumeV122MaxRiskPoints = 25m;
     private const decimal StrictVolumeV122MinEstimatedRr = 0.5m;
-    private const decimal BreakawayVolumeV128MinSetupQualityScore = 72m;
+    private const decimal BreakawayVolumeV128MinSetupQualityScore = 76m;
     private const decimal BreakawayVolumeV128LongMaxRiskPoints = 25m;
     private const decimal BreakawayVolumeV128ShortMaxRiskPoints = 30m;
     private const decimal BreakawayVolumeV128MinEstimatedRr = 1m;
-    private const decimal BreakawayLongSelectiveV152MinSetupQualityScore = 88m;
-    private const decimal BreakawayLongSelectiveV152MaxRiskPoints = 22m;
-    private const decimal BreakawayLongSelectiveV152MinEstimatedRr = 1.2m;
+    private const decimal BreakawayLongSelectiveV134MinSetupQualityScore = 95m;
+    private const decimal BreakawayLongSelectiveV134MaxRiskPoints = 18m;
+    private const decimal BreakawayLongSelectiveV134MinEstimatedRr = 1.5m;
     private const int PartialEntryFinalizeDelayMs = 250;
     private const decimal ObservationLongVolumeV123MinSetupQualityScore = 70m;
     private const decimal ObservationLongVolumeV123MaxRiskPoints = 18m;
@@ -85,6 +85,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const int StaleUnfilledEntryMaxBars = 2;
     private static readonly TimeSpan ReplayStopGuardStart = new(20, 40, 0);
     private static readonly TimeSpan FridayReplayStopGuardStart = new(16, 40, 0);
+    private const string ReplayStopExitRole = "SESSION_FLATTEN";
     private readonly IZoneDetector _zoneDetector = new FvgZoneDetector(
         minGapPoints: 0.50m,
         maxGapPoints: 12m,
@@ -384,6 +385,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _lastResearchCandle = current;
         UpdateActualExecutionExcursion(current);
         ScheduleStaleUnfilledEntryAbortIfNeeded(current);
+        ScheduleReplayStopExitIfNeeded(current);
         ScheduleOrphanPositionFlattenIfNeeded(current);
         ScheduleProtectionCleanupIfNeeded("ClosedBar");
         var zones = _zoneDetector.Update(current);
@@ -486,7 +488,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         base.OnOrderRegisterFailed(order, message);
         LogExecutionInfo($"EXEC_REGISTER_FAILED role={ParseExecutionRole(order?.Comment)} ext={order?.ExtId} msg={message}");
-        if (IsActiveExecutionOrder(order) && IsExitOrder(order))
+        if (IsActiveExecutionOrder(order) &&
+            (IsExitOrder(order) || string.Equals(ParseExecutionRole(order?.Comment), ReplayStopExitRole, StringComparison.OrdinalIgnoreCase)))
             EnqueueExecutionAction("FlattenOnProtectionRegisterFailed", async () => await SubmitEmergencyFlattenAsync(order?.QuantityToFill ?? 0m, "ProtectionRegisterFailed"));
     }
 
@@ -2129,8 +2132,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal MaxAllowedActualRiskPoints(CandidateSignal signal, string researchPath)
     {
-        if (IsBreakawayLongSelectiveV152Quality(signal, researchPath))
-            return BreakawayLongSelectiveV152MaxRiskPoints;
+        if (IsBreakawayLongSelectiveV134Quality(signal, researchPath))
+            return BreakawayLongSelectiveV134MaxRiskPoints;
         if (IsBreakawayVolumeExpansionV128(signal, researchPath))
             return BreakawayVolumeV128MaxRiskPoints(signal);
         if (IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath))
@@ -2221,8 +2224,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private string[] ActualExecutionPathSkipReasons(CandidateSignal signal, string researchPath)
     {
         if (IsBreakawayPath(researchPath) &&
-            signal.Side == TradeSide.Long &&
-            !IsBreakawayLongSelectiveV152Quality(signal, researchPath))
+            signal.Side == TradeSide.Long)
             return new[] { "BreakawayLongActualDisabledV135" };
 
         if (IsEvidenceFrozenActualPath(researchPath))
@@ -2405,11 +2407,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             signal.SetupQualityScore.TotalScore >= BreakawayVolumeV128MinSetupQualityScore;
     }
 
-    private static bool IsBreakawayLongSelectiveV152Quality(CandidateSignal signal, string researchPath)
+    private static bool IsBreakawayLongSelectiveV134Quality(CandidateSignal signal, string researchPath)
     {
         return IsBreakawayPath(researchPath) &&
             signal.Side == TradeSide.Long &&
-            signal.SetupQualityScore.TotalScore >= BreakawayLongSelectiveV152MinSetupQualityScore;
+            signal.SetupQualityScore.TotalScore >= BreakawayLongSelectiveV134MinSetupQualityScore;
     }
 
     private static bool IsEvidenceFrozenActualPath(string researchPath)
@@ -2445,7 +2447,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private static string BreakawayVolumeV128Tag(CandidateSignal signal, decimal risk)
     {
         if (signal.Side == TradeSide.Long)
-            return "BreakawayLongSelectiveV152";
+            return "BreakawayLongSelectiveV134";
 
         return signal.Side == TradeSide.Short && risk > BreakawayVolumeV128LongMaxRiskPoints
             ? "BreakawayShortWideV128"
@@ -2581,7 +2583,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var isDailyVolumeQualityRescue = IsDailyVolumeQualityRescue(signal, researchPath, risk);
         var isV122VolumeExpansion = IsV122VolumeExpansionAllowed(signal, researchPath);
         var isBreakawayVolumeExpansion = IsBreakawayVolumeExpansionV128(signal, researchPath);
-        var isBreakawayLongSelective = IsBreakawayLongSelectiveV152Quality(signal, researchPath);
+        var isBreakawayLongSelective = IsBreakawayLongSelectiveV134Quality(signal, researchPath);
         var isObservationLongVolumeExpansion = IsObservationLongVolumeExpansionV123(signal, researchPath, risk);
         var isObservationShortVolumeExpansion = IsObservationShortVolumeExpansionV124(signal, researchPath, risk);
         var isUnknownMicroRiskVolumeExpansion = IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath);
@@ -2600,12 +2602,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (isBreakawayVolumeExpansion)
         {
             var breakawayMaxRisk = isBreakawayLongSelective
-                ? BreakawayLongSelectiveV152MaxRiskPoints
+                ? BreakawayLongSelectiveV134MaxRiskPoints
                 : BreakawayVolumeV128MaxRiskPoints(signal);
             if (risk > breakawayMaxRisk)
             {
                 var reason = isBreakawayLongSelective
-                    ? "BreakawayLongSelectiveV152RiskCapExceeded"
+                    ? "BreakawayLongSelectiveV134RiskCapExceeded"
                     : "BreakawayVolumeV128RiskCapExceeded";
                 reasons.Add($"{reason}:risk={risk:0.##},max={breakawayMaxRisk:0.##},side={signal.Side}");
             }
@@ -2659,7 +2661,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 ? MainlineVolumeFillerMinEstimatedRr
             : isBreakawayVolumeExpansion
                 ? isBreakawayLongSelective
-                    ? BreakawayLongSelectiveV152MinEstimatedRr
+                    ? BreakawayLongSelectiveV134MinEstimatedRr
                     : BreakawayVolumeV128MinEstimatedRr
             : isObservationLongVolumeExpansion
                 ? ObservationLongVolumeV123MinEstimatedRr
@@ -2818,10 +2820,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             "SL" => execution.StopOrder,
             "TP" => execution.TargetOrder,
             "FLATTEN" => null,
+            ReplayStopExitRole => null,
             _ => null
         };
 
-        if (role == "FLATTEN")
+        if (role is "FLATTEN" or ReplayStopExitRole)
             return true;
 
         if (expected is null)
@@ -2923,13 +2926,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return;
         }
 
-        if (role is "SL" or "TP" or "FLATTEN")
+        if (role is "SL" or "TP" or "FLATTEN" or ReplayStopExitRole)
         {
             var fillQty = Math.Max(0m, trade.Volume);
             if (_replayExecution.ExitCompleted)
             {
                 LogExecutionInfo($"EXEC_DUPLICATE_EXIT_FILL trade={tradeId} role={role} price={trade.Price:0.########} volume={fillQty:0.########}");
-                var duplicateReason = role == "FLATTEN"
+                var duplicateReason = role is "FLATTEN" or ReplayStopExitRole
                     ? "duplicateFlattenIgnored"
                     : "duplicateProtectiveExit";
                 AppendExecutionEvent(_replayExecution, "DUPLICATE_EXIT_FILL", role, trade.Price, fillQty, duplicateReason);
@@ -3018,7 +3021,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (drift > tolerance)
                 reasons.Add($"Abnormal{exitRole}Fill:drift={drift:0.##},max={tolerance:0.##}");
         }
-        else
+        else if (!string.Equals(exitRole, ReplayStopExitRole, StringComparison.OrdinalIgnoreCase))
         {
             reasons.Add($"AbnormalExitRole:{exitRole}");
         }
@@ -3357,6 +3360,72 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             execution.EmergencyFlattenSubmitted = true;
             execution.EmergencyFlattenSubmittedQty += filledQty;
             await SubmitEmergencyFlattenAsync(filledQty, reason);
+        });
+    }
+
+    private void ScheduleReplayStopExitIfNeeded(OpfCandle candle)
+    {
+        var execution = _replayExecution;
+        if (!EnableReplayOrders ||
+            !IsReplayStopGuardWindow(candle.Time) ||
+            execution is null ||
+            execution.ExitCompleted ||
+            execution.ReplayStopExitPending ||
+            execution.EntryFilledQty <= 0m)
+        {
+            return;
+        }
+
+        execution.ReplayStopExitPending = true;
+        EnqueueExecutionAction("ReplayStopExit", async () =>
+        {
+            if (!ReferenceEquals(_replayExecution, execution) || execution.ExitCompleted)
+                return;
+
+            var reason = $"guard={candle.Time:HH:mm}|remaining={RemainingExecutionQuantity(execution):0.########}";
+            LogExecutionInfo($"EXEC_REPLAY_STOP_EXIT_PENDING trade={execution.TradeId} {reason}");
+            AppendExecutionEvent(execution, "REPLAY_STOP_EXIT_PENDING", ReplayStopExitRole, candle.Close, RemainingExecutionQuantity(execution), reason);
+
+            await TryCancelExecutionOrderAsync(execution.EntryOrder, "ReplayStopExit:Entry");
+            await TryCancelExecutionOrderAsync(execution.StopOrder, "ReplayStopExit:SL");
+            await TryCancelExecutionOrderAsync(execution.TargetOrder, "ReplayStopExit:TP");
+            await Task.Delay(250);
+
+            if (execution.ExitCompleted)
+                return;
+
+            var position = CurrentPosition;
+            if (position == 0m)
+            {
+                execution.ReplayStopExitPending = false;
+                LogExecutionInfo($"EXEC_REPLAY_STOP_POSITION_FLAT trade={execution.TradeId} {reason}");
+                AppendExecutionEvent(execution, "REPLAY_STOP_POSITION_FLAT", ReplayStopExitRole, candle.Close, 0m, reason);
+                return;
+            }
+
+            if (Portfolio is null || Security is null)
+            {
+                execution.ReplayStopExitPending = false;
+                return;
+            }
+
+            var qty = Math.Abs(position);
+            var direction = position > 0m ? OrderDirections.Sell : OrderDirections.Buy;
+            var order = new Order
+            {
+                Portfolio = Portfolio,
+                Security = Security,
+                Type = OrderTypes.Market,
+                Direction = direction,
+                QuantityToFill = qty,
+                TimeInForce = ReplayTimeInForce,
+                Comment = $"OPF|{execution.TradeId}|{ReplayStopExitRole}|{reason}",
+                AutoCancel = false
+            };
+
+            LogExecutionInfo($"EXEC_REPLAY_STOP_FLATTEN_SEND trade={execution.TradeId} dir={direction} qty={qty:0.########} {reason}");
+            AppendExecutionEvent(execution, "REPLAY_STOP_FLATTEN_SEND", ReplayStopExitRole, candle.Close, qty, $"dir={direction}|{reason}");
+            await OpenOrderAsync(order);
         });
     }
 
@@ -5357,6 +5426,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public bool ProtectionCleanupInProgress { get; set; }
         public bool EntryAbortPending { get; set; }
         public bool PartialEntryFinalizeScheduled { get; set; }
+        public bool ReplayStopExitPending { get; set; }
         public int ProtectionCleanupAttempts { get; set; }
         public int LastProtectionCleanupBar { get; set; } = -1;
         public string ProtectionCleanupReason { get; set; } = string.Empty;

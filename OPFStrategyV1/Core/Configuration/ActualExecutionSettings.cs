@@ -36,7 +36,7 @@ public sealed record ActualExecutionSettings(
     public static ActualExecutionSettings Default()
     {
         return new ActualExecutionSettings(
-            Version: "ACTUAL_EXEC_1.90",
+            Version: "ACTUAL_EXEC_1.91",
             EnableActualOrders: true,
             ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|BreakawayRetest|FailureReverse_ObservationInvalidated|FailureReverse_RetestFailed",
             ActualAllowResearchPaths: false,

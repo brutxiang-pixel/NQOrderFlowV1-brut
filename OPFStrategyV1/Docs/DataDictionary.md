@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.54`.
+This document describes the current research files produced by `OPF_RESEARCH_1.55`.
 
 ## Common Context
 
@@ -849,3 +849,11 @@ From `OPF_RESEARCH_1.54`, expected inactive OCO cleanup states use non-failure a
 
 - `OCO_SIBLING_INACTIVE`: the opposite protective order moved to ATAS `Failed` after SL or TP already completed the execution.
 - `CANCEL_ALREADY_INACTIVE`: cleanup attempted to cancel an OCO sibling that ATAS had already removed.
+
+From `OPF_RESEARCH_1.55`, end-of-replay open executions are closed before strategy shutdown through real order callbacks:
+
+- `REPLAY_STOP_EXIT_PENDING`: the stop-guard window found an open Actual execution and started orderly shutdown.
+- `REPLAY_STOP_FLATTEN_SEND`: protective orders were canceled and a market order with role `SESSION_FLATTEN` was submitted for the current account position.
+- `REPLAY_STOP_POSITION_FLAT`: the account became flat during protective-order cancellation, so no additional session-close market order was required.
+- `SESSION_FLATTEN` in `execution_trades.csv` is a normal real-fill exit role with actual PnL/R, not a synthetic `STOPPED` row.
+- Breakaway Long Actual execution is disabled and the Breakaway Short setup-quality threshold is restored to `76`.

@@ -1136,6 +1136,16 @@ From `OPF_RESEARCH_1.54`, strategy and order behavior remain unchanged and execu
 - Register failures, unexpected failed/rejected orders, and cancel failures outside completed-exit OCO cleanup remain failure events.
 - No entry paths, quality thresholds, risk gates, target-R rules, order quantity, or v1.53 partial-fill behavior are changed.
 
+From `OPF_RESEARCH_1.55`, the v1.54 execution-safety baseline combines the full v1.52 profitability rollback with a verified end-of-replay lifecycle fix:
+
+- Actual defaults use `ACTUAL_EXEC_1.91`.
+- Breakaway Long Actual execution is disabled again. The April-June evidence showed `65` v1.52 Breakaway Long trades at `-9.75R` / `-$643.50`.
+- Breakaway Short keeps its v1.45 `2R` target and restores the pre-v1.52 minimum setup-quality threshold from `72` to `76`.
+- The existing replay stop guard still blocks new entries from `20:40` onward, or `16:40` on Friday. If an Actual execution remains open at that point, the strategy cancels the entry and protective orders, then sends a real `SESSION_FLATTEN` market order for the current account position.
+- A `SESSION_FLATTEN` is completed only through an ATAS `MyTrade` fill callback, contributes its real PnL/R, and then performs normal protection cleanup. The old `STOPPED` synthetic path remains only as a failure fallback if proactive shutdown does not complete before `OnStopped`.
+- v1.53 partial-entry protection, v1.54 OCO audit classification, OC filler/risk expansion, Failure paths, two-contract quantity, and all other risk/target rules remain unchanged.
+- The focused validation is March 16 and March 30 plus representative normal days: there should be real `REPLAY_STOP_FLATTEN_SEND` / `SESSION_FLATTEN` fills, `PROTECTION_CLEANUP_DONE`, no `STOPPED`, and no Breakaway Long Actual executions.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
