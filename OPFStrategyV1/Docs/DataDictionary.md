@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.57`.
+This document describes the current research files produced by `OPF_RESEARCH_1.58`.
 
 ## Common Context
 
@@ -861,6 +861,8 @@ From `OPF_RESEARCH_1.55`, end-of-replay open executions are closed before strate
 From `OPF_RESEARCH_1.56`, `ReplayStopExitPending` suppresses protection-loss emergency flatten detection while the strategy intentionally cancels SL/TP orders for a session-close exit. The `SESSION_FLATTEN` submission follows the completed cancellation requests immediately, preventing duplicate exit fills without changing the v1.55 strategy rules.
 
 From `OPF_RESEARCH_1.57`, `ACTUAL_EXEC_1.93` adds a daily-capped Long `ObservationConfirm_WideStop1_5R` expansion for `SetupQualityScore >= 70` and `22 < InitialRiskPoints <= 25`. Executed expansion rows include `OCWideStopLongExpansionV157` in `execution_decisions.csv`, with at most one expansion execution per session day.
+
+From `OPF_RESEARCH_1.58`, `ACTUAL_EXEC_1.94` evaluates that expansion pool against its real fixed `ActualTargetR=1.5` target. Its `EstimatedRewardPoints` equals `InitialRiskPoints * ActualTargetR`, and `RewardModel` is `OCWideStopLongExpansionV158TargetR:1.5`; all v1.57 eligibility and safety gates remain unchanged.
 
 Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
 

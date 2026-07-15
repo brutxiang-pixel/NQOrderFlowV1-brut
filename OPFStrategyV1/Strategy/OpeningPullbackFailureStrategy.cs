@@ -2719,6 +2719,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private RewardEstimate EstimateActualExecutionReward(CandidateSignal signal, string researchPath, decimal entry, decimal risk)
     {
         var targetR = ActualTargetRFor(signal, researchPath, risk);
+        if (IsObservationConfirmWideStopLongExpansionV157(signal, researchPath, risk))
+            return new RewardEstimate(risk * targetR, $"OCWideStopLongExpansionV158TargetR:{targetR:0.##}");
+
         if (IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath))
             return new RewardEstimate(risk * targetR, $"UnknownMicroRiskVolumeV126TargetR:{targetR:0.##}");
 

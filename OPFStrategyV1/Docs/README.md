@@ -1164,6 +1164,12 @@ From `OPF_RESEARCH_1.57`, v1.56 remains the frozen baseline while Actual executi
 - Each split policy models one contract at the existing path target and one runner contract at `2.5R` or `3R`. The runner moves to break-even only from the bar after first reaching `0.75R` or `1R`; these rows never submit or modify real orders.
 - Breakaway, Failure paths, OC filler/risk expansion, two-contract quantity, and all other v1.56 Actual rules remain unchanged.
 
+From `OPF_RESEARCH_1.58`, the v1.57 expansion pool uses its real fixed target for the Actual RR gate:
+
+- Actual defaults use `ACTUAL_EXEC_1.94`.
+- `OCWideStopLongExpansionV157` candidates calculate reward as `risk * ActualTargetR`, currently exactly `1.5R`, with reward model `OCWideStopLongExpansionV158TargetR:1.5`.
+- Score, `22 < risk <= 25`, one-trade daily cap, hard-risk, same-bar, active-trade, daily-limit, real TP/SL, and Compact runner-shadow behavior remain unchanged.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
