@@ -12,7 +12,7 @@ public sealed class ResearchLogger
     private readonly string _directory;
     private readonly Dictionary<string, ConfigSnapshot> _snapshots = new();
     private readonly bool _compact;
-    private readonly object _infoLogSync = new();
+    private readonly object _fileWriteSync = new();
 
     public sealed record ActualOutcome(
         bool ActualVerified,
@@ -53,23 +53,20 @@ public sealed class ResearchLogger
         _snapshots[snapshot.SnapshotId] = snapshot;
         var path = Path.Combine(_directory, $"{snapshot.SnapshotId}_ConfigSnapshot.json");
         var json = JsonSerializer.Serialize(snapshot, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(path, json);
+        WriteText(path, json);
     }
 
     public void AppendSignalHeader(string snapshotId)
     {
         var path = Path.Combine(_directory, $"{snapshotId}_signals.csv");
-        if (File.Exists(path))
-            return;
-
-        File.AppendAllText(path, ContextHeader("SignalID,Time,Bar,Stage,Side,SetupType,ZoneID,ZoneType,ZoneFreshness,RegimeScore,SetupQualityScore,SkipReasons") + Environment.NewLine);
+        EnsureHeader(path, ContextHeader("SignalID,Time,Bar,Stage,Side,SetupType,ZoneID,ZoneType,ZoneFreshness,RegimeScore,SetupQualityScore,SkipReasons"));
     }
 
     public void AppendSignal(CandidateSignal signal)
     {
         var path = Path.Combine(_directory, $"{signal.SnapshotId}_signals.csv");
         EnsureHeader(path, ContextHeader("SignalID,Time,Bar,Stage,Side,SetupType,ZoneID,ZoneType,ZoneFreshness,RegimeScore,SetupQualityScore,SkipReasons"));
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(signal.SnapshotId),
                 Csv(signal.SignalId),
@@ -91,7 +88,7 @@ public sealed class ResearchLogger
     {
         var path = Path.Combine(_directory, $"{snapshotId}_zones.csv");
         EnsureHeader(path, "SnapshotID,Time,Bar,ZoneID,ZoneType,Direction,Low,High,CreatedTime,CreatedBar,Freshness,TouchCount,Mitigated,Source,DetectorVersion");
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 Csv(snapshotId),
                 Csv(time.ToString("O")),
@@ -127,7 +124,7 @@ public sealed class ResearchLogger
     {
         var path = Path.Combine(_directory, $"{snapshotId}_candidate_evaluations.csv");
         EnsureHeader(path, "SnapshotID,Time,Bar,Open,High,Low,Close,Regime,ZoneID,ZoneType,ZoneDirection,ZoneLow,ZoneHigh,ZoneWidth,CreatedBar,ZoneFreshness,TouchCount,Mitigated,Result,Reason,PullbackEpisodeID,PullbackCountInRegime,PullbackStartBar,PullbackStatus");
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 Csv(snapshotId),
                 Csv(time.ToString("O")),
@@ -172,7 +169,7 @@ public sealed class ResearchLogger
     {
         var path = Path.Combine(_directory, $"{snapshotId}_confirmation_evaluations.csv");
         EnsureHeader(path, "SnapshotID,SignalID,Time,Bar,Open,High,Low,Close,ZoneLow,ZoneHigh,ZoneWidth,PrevHigh,PrevLow,Stage,Result,Reason");
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 Csv(snapshotId),
                 Csv(signalId),
@@ -246,7 +243,7 @@ public sealed class ResearchLogger
         var resolvedOutcomeClass = actualOutcome.ActualVerified ? ActualOutcomeClass(actualOutcome.ActualExitRole, actualOutcome.ActualPnLR) : outcomeClass;
         var outcomeSource = actualOutcome.ActualVerified ? "ActualTrade" : "ResearchOHLC";
         EnsureResearchOutcomeHeader(path);
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(snapshotId),
                 Csv(signalId),
@@ -345,7 +342,7 @@ public sealed class ResearchLogger
     {
         var path = Path.Combine(_directory, $"{signal.SnapshotId}_edge_attribution.csv");
         EnsureHeader(path, ContextHeader("SignalID,EventTime,EventBar,EventType,Side,SetupType,ResearchPath,RegimeScore,RegimeBucket,SetupQualityScore,SetupQualityBucket,ZoneID,ZoneType,ZoneFreshness,ZoneTouchCount,RiskPoints,RiskBucket,EstimatedRewardPoints,RewardModel,EstimatedRR,EstimatedRRBucket,TimeBucket,OutcomeClass,ExitReason,ActualVerified,ActualExitRole,ActualPnL_R,ActualPnLDollars,Entry,Stop,SkipReasons"));
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(signal.SnapshotId),
                 Csv(signal.SignalId),
@@ -408,7 +405,7 @@ public sealed class ResearchLogger
 
         foreach (var c in score.Components)
         {
-            File.AppendAllText(path,
+            AppendText(path,
                 string.Join(",",
                     Csv(snapshotId),
                     Csv(time.ToString("O")),
@@ -464,7 +461,7 @@ public sealed class ResearchLogger
         if (!rrPassed)
             skipReasons.Add("EstimatedRRTooLow");
 
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(snapshotId),
                 Csv(signalId),
@@ -497,7 +494,7 @@ public sealed class ResearchLogger
     {
         var path = Path.Combine(_directory, $"{snapshotId}_regime_changes.csv");
         EnsureHeader(path, "SnapshotID,Time,Bar,Regime,BullScore,BearScore");
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",", Csv(snapshotId), Csv(time.ToString("O")), bar, Csv(regime.ToString()), bullScore, bearScore)
             + Environment.NewLine);
     }
@@ -519,7 +516,7 @@ public sealed class ResearchLogger
         var bearPct = Percent(bearTrendBars, totalBars);
         var unknownPct = Percent(unknownBars, totalBars);
 
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 Csv(snapshotId),
                 Csv(date.ToString("yyyy-MM-dd")),
@@ -558,14 +555,14 @@ public sealed class ResearchLogger
                 summary.AvgBearScore));
         }
 
-        File.WriteAllText(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
+        WriteText(path, string.Join(Environment.NewLine, lines) + Environment.NewLine);
     }
 
     public void AppendNoTrade(string snapshotId, string signalId, DateTime time, int bar, string setupStage, IReadOnlyList<string> skipReasons)
     {
         var path = Path.Combine(_directory, $"{snapshotId}_no_trade.csv");
         EnsureHeader(path, ContextHeader("SignalID,Time,Bar,SetupStage,SkipReasons"));
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(snapshotId),
                 Csv(signalId),
@@ -581,8 +578,7 @@ public sealed class ResearchLogger
     public void AppendInfo(string snapshotId, int bar, DateTime time, string message)
     {
         var path = Path.Combine(_directory, $"{snapshotId}_research.log");
-        lock (_infoLogSync)
-            File.AppendAllText(path, $"{time:O} bar={bar} {message}{Environment.NewLine}");
+        AppendText(path, $"{time:O} bar={bar} {message}{Environment.NewLine}");
     }
 
     public void AppendExecutionEvent(
@@ -601,7 +597,7 @@ public sealed class ResearchLogger
     {
         var path = Path.Combine(_directory, $"{snapshotId}_execution_events.csv");
         EnsureHeader(path, ContextHeader("SignalID,TradeID,Time,Bar,Event,Role,Side,ResearchPath,Price,Quantity,Message"));
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(snapshotId),
                 Csv(signalId),
@@ -645,7 +641,7 @@ public sealed class ResearchLogger
         var path = Path.Combine(_directory, $"{snapshotId}_execution_decisions.csv");
         var executionScope = ExecutionScope(decision, reason);
         EnsureHeader(path, ContextHeader("SignalID,Time,Bar,Decision,Reason,ExecutionScope,Side,SetupType,ResearchPath,RegimeScore,SetupQualityScore,StrategyEligible,Entry,Stop,Target,InitialRiskPoints,EstimatedRewardPoints,RewardModel,EstimatedRR,DailyPnlDollars,DailyTradeCount,TradeID"));
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(snapshotId),
                 Csv(signalId),
@@ -720,7 +716,7 @@ public sealed class ResearchLogger
     {
         var path = Path.Combine(_directory, $"{snapshotId}_execution_trades.csv");
         EnsureHeader(path, ContextHeader("SignalID,TradeID,EntryTime,EntryBar,ExitTime,ExitBar,Side,ResearchPath,Quantity,EntryPrice,ExitPrice,StopPrice,TargetPrice,InitialRiskPoints,TargetR,PlannedTargetR,TargetRDrift,PointsR,ExitRole,Points,Dollars,RiskDollars,TargetDollars,ActualMFEPoints,ActualMAEPoints,ActualMFE_R,ActualMAE_R,PlannedRiskPoints,FilledRiskPoints,RiskDriftPoints,DailyPnlAfterDollars,DailyTradeCount,DailyConsecutiveLosses,IsAbnormalExecution,AbnormalReason,ExpectedExitPrice,ExitPriceDriftPoints,RawPoints,RawDollars,RawPointsR"));
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(snapshotId),
                 Csv(signalId),
@@ -784,7 +780,7 @@ public sealed class ResearchLogger
 
         var path = Path.Combine(_directory, $"{snapshotId}_funnel_events.csv");
         EnsureHeader(path, ContextHeader("Time,Bar,Stage,SignalID,ResearchPath,Side,SetupType,Result,Reason,ExecutionScope,TimeBucket"));
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(snapshotId),
                 Csv(time.ToString("O")),
@@ -834,7 +830,7 @@ public sealed class ResearchLogger
         var contracts = hasSnapshot ? snapshot!.ExecutionProfile.FixedContracts : 1;
         var dollars = Math.Round(pnlPoints * pointValue * contracts, 2);
 
-        File.AppendAllText(path,
+        AppendText(path,
             string.Join(",",
                 ContextValues(snapshotId),
                 Csv(signalId),
@@ -864,10 +860,25 @@ public sealed class ResearchLogger
             + Environment.NewLine);
     }
 
-    private static void EnsureHeader(string path, string header)
+    private void EnsureHeader(string path, string header)
     {
-        if (!File.Exists(path))
-            File.AppendAllText(path, header + Environment.NewLine);
+        lock (_fileWriteSync)
+        {
+            if (!File.Exists(path))
+                File.AppendAllText(path, header + Environment.NewLine);
+        }
+    }
+
+    private void AppendText(string path, string contents)
+    {
+        lock (_fileWriteSync)
+            File.AppendAllText(path, contents);
+    }
+
+    private void WriteText(string path, string contents)
+    {
+        lock (_fileWriteSync)
+            File.WriteAllText(path, contents);
     }
 
     private static string ContextHeader(string suffix)

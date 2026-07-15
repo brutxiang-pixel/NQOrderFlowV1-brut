@@ -1177,6 +1177,13 @@ From `OPF_RESEARCH_1.59`, v1.58 behavior is retained while logging and daily-cap
 - The wide-stop Long expansion candidate definition is independent of its one-trade daily availability. Candidates after the cap still report fixed-target reward model `OCWideStopLongExpansionV159TargetR:1.5`, while execution remains blocked by `OCWideStopLongExpansionV157DailyCap`.
 - Entry selection, score/risk thresholds, daily cap, real TP/SL, order quantity, and Runner Shadow policies are unchanged.
 
+From `OPF_RESEARCH_1.60`, all ResearchLogger file writes are serialized through one instance-level lock:
+
+- Actual defaults use `ACTUAL_EXEC_1.96`.
+- Config snapshots, research logs, execution events/trades/decisions, outcomes, risk data, funnel data, regime files, and other research CSV writes cannot overlap within a strategy instance.
+- This closes the remaining callback race where `PROTECTION_CLEANUP_DONE` existed in `research.log` but its `execution_events.csv` row failed with a file-share `IOException`.
+- Strategy entries, expansion rules, targets, stops, daily limits, order quantity, and Runner Shadow policies remain identical to v1.59.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
