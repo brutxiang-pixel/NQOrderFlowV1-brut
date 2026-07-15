@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.60`.
+This document describes the current research files produced by `OPF_RESEARCH_1.61`.
 
 ## Common Context
 
@@ -867,6 +867,8 @@ From `OPF_RESEARCH_1.58`, `ACTUAL_EXEC_1.94` evaluates that expansion pool again
 From `OPF_RESEARCH_1.59`, `ACTUAL_EXEC_1.95` serializes `research.log` writes to prevent callback-time file-share exceptions from being classified as order-cancel failures. Daily-capped wide-stop Long candidates continue to report fixed-target reward data after the first expansion trade, using `OCWideStopLongExpansionV159TargetR:1.5`; the one-trade cap and all execution rules are unchanged.
 
 From `OPF_RESEARCH_1.60`, `ACTUAL_EXEC_1.96` serializes every ResearchLogger text and CSV write through one instance-level lock. This prevents concurrent callbacks from dropping execution-event rows after protection cleanup; no columns, strategy rules, targets, stops, or research policies change.
+
+From `OPF_RESEARCH_1.61`, `ACTUAL_EXEC_1.97` applies `TargetR=2.0` only to base `ObservationConfirm` Long executions whose planned risk is greater than `8` and at most `11` points. Executed rows include `ObservationConfirmLongTarget2RV161` in `execution_decisions.csv`; `execution_trades.csv` records `TargetR=2`, while all entry and safety gates remain unchanged.
 
 Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
 

@@ -77,6 +77,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ObservationConfirmRisk22V132MaxRiskPoints = 22m;
     private const decimal ObservationConfirmRisk22V132MinEstimatedRr = 0.8m;
     private const decimal SelectiveProfitTargetV145R = 2.0m;
+    private const decimal ObservationConfirmLongTarget2RV161MinRiskPoints = 8m;
+    private const decimal ObservationConfirmLongTarget2RV161MaxRiskPoints = 11m;
+    private const decimal ObservationConfirmLongTarget2RV161R = 2m;
     private const decimal EntryFillRiskDriftTolerancePoints = 1m;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
@@ -1939,6 +1942,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var profitTargetTag = SelectiveProfitTargetV145Tag(signal.Side, researchPath);
         if (!string.IsNullOrEmpty(profitTargetTag))
             executeReasons.Add($"{profitTargetTag}:targetR={targetR:0.##},risk={risk:0.##}");
+        var observationLongTargetTag = ObservationConfirmLongTarget2RV161Tag(signal.Side, researchPath, risk);
+        if (!string.IsNullOrEmpty(observationLongTargetTag))
+            executeReasons.Add($"{observationLongTargetTag}:targetR={targetR:0.##},plannedRisk={risk:0.##}");
         if (targetR != ReplayTargetR)
             executeReasons.Add($"ActualTargetOverride:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
         var executeReason = string.Join("|", executeReasons);
@@ -2755,6 +2761,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ActualTargetRFor(TradeSide side, string researchPath, decimal risk)
     {
+        if (!string.IsNullOrEmpty(ObservationConfirmLongTarget2RV161Tag(side, researchPath, risk)))
+            return ObservationConfirmLongTarget2RV161R;
+
         if (!string.IsNullOrEmpty(SelectiveProfitTargetV145Tag(side, researchPath)))
             return SelectiveProfitTargetV145R;
 
@@ -2771,6 +2780,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         return string.Empty;
+    }
+
+    private static string ObservationConfirmLongTarget2RV161Tag(TradeSide side, string researchPath, decimal plannedRisk)
+    {
+        return side == TradeSide.Long &&
+            string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase) &&
+            plannedRisk > ObservationConfirmLongTarget2RV161MinRiskPoints &&
+            plannedRisk <= ObservationConfirmLongTarget2RV161MaxRiskPoints
+                ? "ObservationConfirmLongTarget2RV161"
+                : string.Empty;
     }
 
     private static decimal TargetFromRisk(TradeSide side, decimal entry, decimal risk, decimal targetR)
@@ -3276,7 +3295,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         stop = AlignToTick(stop, _snapshot.InstrumentProfile.TickSize);
         var risk = Math.Abs(entry - stop);
         var oldTargetR = execution.TargetR;
-        execution.TargetR = ActualTargetRFor(execution.Side, execution.ResearchPath, risk);
+        execution.TargetR = ActualTargetRFor(execution.Side, execution.ResearchPath, execution.PlannedRiskPoints);
         var target = execution.Side == TradeSide.Long
             ? entry + risk * execution.TargetR
             : entry - risk * execution.TargetR;

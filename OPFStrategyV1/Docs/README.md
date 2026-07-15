@@ -1184,6 +1184,14 @@ From `OPF_RESEARCH_1.60`, all ResearchLogger file writes are serialized through 
 - This closes the remaining callback race where `PROTECTION_CLEANUP_DONE` existed in `research.log` but its `execution_events.csv` row failed with a file-share `IOException`.
 - Strategy entries, expansion rules, targets, stops, daily limits, order quantity, and Runner Shadow policies remain identical to v1.59.
 
+From `OPF_RESEARCH_1.61`, v1.60 becomes the safety baseline for a material profit-improvement milestone:
+
+- Actual defaults use `ACTUAL_EXEC_1.97`.
+- Base `ObservationConfirm` Long executions with planned risk `8 < risk <= 11` use `TargetR=2.0` and are tagged `ObservationConfirmLongTarget2RV161`.
+- The target selection is based on planned risk and remains stable when the bracket is repriced from the actual entry fill.
+- No entry path, setup-quality threshold, risk cap, daily limit, expansion rule, order quantity, stop placement, Breakaway Short target, or Runner Shadow policy changes.
+- The full replay gate compares against the clean97 baseline: at least `110R`, `$7,800`, PF `1.48`, max drawdown at most `$1,000`, and at least `5.7` trades/day, while retaining positive expansion contribution and evaluating the high-quality Runner Shadow subset.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
