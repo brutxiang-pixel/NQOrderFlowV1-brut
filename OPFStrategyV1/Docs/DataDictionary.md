@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.58`.
+This document describes the current research files produced by `OPF_RESEARCH_1.59`.
 
 ## Common Context
 
@@ -863,6 +863,8 @@ From `OPF_RESEARCH_1.56`, `ReplayStopExitPending` suppresses protection-loss eme
 From `OPF_RESEARCH_1.57`, `ACTUAL_EXEC_1.93` adds a daily-capped Long `ObservationConfirm_WideStop1_5R` expansion for `SetupQualityScore >= 70` and `22 < InitialRiskPoints <= 25`. Executed expansion rows include `OCWideStopLongExpansionV157` in `execution_decisions.csv`, with at most one expansion execution per session day.
 
 From `OPF_RESEARCH_1.58`, `ACTUAL_EXEC_1.94` evaluates that expansion pool against its real fixed `ActualTargetR=1.5` target. Its `EstimatedRewardPoints` equals `InitialRiskPoints * ActualTargetR`, and `RewardModel` is `OCWideStopLongExpansionV158TargetR:1.5`; all v1.57 eligibility and safety gates remain unchanged.
+
+From `OPF_RESEARCH_1.59`, `ACTUAL_EXEC_1.95` serializes `research.log` writes to prevent callback-time file-share exceptions from being classified as order-cancel failures. Daily-capped wide-stop Long candidates continue to report fixed-target reward data after the first expansion trade, using `OCWideStopLongExpansionV159TargetR:1.5`; the one-trade cap and all execution rules are unchanged.
 
 Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
 

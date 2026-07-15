@@ -12,6 +12,7 @@ public sealed class ResearchLogger
     private readonly string _directory;
     private readonly Dictionary<string, ConfigSnapshot> _snapshots = new();
     private readonly bool _compact;
+    private readonly object _infoLogSync = new();
 
     public sealed record ActualOutcome(
         bool ActualVerified,
@@ -580,7 +581,8 @@ public sealed class ResearchLogger
     public void AppendInfo(string snapshotId, int bar, DateTime time, string message)
     {
         var path = Path.Combine(_directory, $"{snapshotId}_research.log");
-        File.AppendAllText(path, $"{time:O} bar={bar} {message}{Environment.NewLine}");
+        lock (_infoLogSync)
+            File.AppendAllText(path, $"{time:O} bar={bar} {message}{Environment.NewLine}");
     }
 
     public void AppendExecutionEvent(

@@ -1170,6 +1170,13 @@ From `OPF_RESEARCH_1.58`, the v1.57 expansion pool uses its real fixed target fo
 - `OCWideStopLongExpansionV157` candidates calculate reward as `risk * ActualTargetR`, currently exactly `1.5R`, with reward model `OCWideStopLongExpansionV158TargetR:1.5`.
 - Score, `22 < risk <= 25`, one-trade daily cap, hard-risk, same-bar, active-trade, daily-limit, real TP/SL, and Compact runner-shadow behavior remain unchanged.
 
+From `OPF_RESEARCH_1.59`, v1.58 behavior is retained while logging and daily-cap evidence are corrected:
+
+- Actual defaults use `ACTUAL_EXEC_1.95`.
+- Writes to each snapshot's `research.log` are serialized so concurrent order callbacks cannot turn a logging file-share exception into `CANCEL_FAIL`.
+- The wide-stop Long expansion candidate definition is independent of its one-trade daily availability. Candidates after the cap still report fixed-target reward model `OCWideStopLongExpansionV159TargetR:1.5`, while execution remains blocked by `OCWideStopLongExpansionV157DailyCap`.
+- Entry selection, score/risk thresholds, daily cap, real TP/SL, order quantity, and Runner Shadow policies are unchanged.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

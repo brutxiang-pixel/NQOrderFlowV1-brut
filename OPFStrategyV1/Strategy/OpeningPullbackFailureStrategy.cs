@@ -2539,12 +2539,17 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             signal.SetupQualityScore.TotalScore >= ObservationConfirmWideStopVolumeV131MinSetupQualityScore(signal);
     }
 
-    private bool IsObservationConfirmWideStopLongExpansionV157(CandidateSignal signal, string researchPath, decimal risk)
+    private static bool IsObservationConfirmWideStopLongExpansionCandidateV157(CandidateSignal signal, string researchPath, decimal risk)
     {
         return IsObservationConfirmWideStopVolumeV131(signal, researchPath) &&
             signal.Side == TradeSide.Long &&
             risk > ObservationConfirmWideStopVolumeV131MaxRiskPoints &&
-            risk <= ObservationConfirmWideStopLongExpansionV157MaxRiskPoints &&
+            risk <= ObservationConfirmWideStopLongExpansionV157MaxRiskPoints;
+    }
+
+    private bool IsObservationConfirmWideStopLongExpansionV157(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        return IsObservationConfirmWideStopLongExpansionCandidateV157(signal, researchPath, risk) &&
             _observationConfirmWideStopLongExpansionTradesToday < ObservationConfirmWideStopLongExpansionV157MaxTradesPerDay;
     }
 
@@ -2617,10 +2622,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (isObservationConfirmWideStopLowRiskQuality && !isObservationConfirmWideStopVolume && risk > ObservationConfirmWideStopLowRiskV132MaxRiskPoints)
             reasons.Add($"OCWideStopLowRiskV132RiskCapExceeded:risk={risk:0.##},max={ObservationConfirmWideStopLowRiskV132MaxRiskPoints:0.##},side={signal.Side}");
         var isWideStopLongExpansionV157 = IsObservationConfirmWideStopLongExpansionV157(signal, researchPath, risk);
-        var isWideStopLongExpansionCandidateV157 = IsObservationConfirmWideStopVolumeV131(signal, researchPath) &&
-            signal.Side == TradeSide.Long &&
-            risk > ObservationConfirmWideStopVolumeV131MaxRiskPoints &&
-            risk <= ObservationConfirmWideStopLongExpansionV157MaxRiskPoints;
+        var isWideStopLongExpansionCandidateV157 = IsObservationConfirmWideStopLongExpansionCandidateV157(signal, researchPath, risk);
         if (isObservationConfirmWideStopVolume &&
             risk > ObservationConfirmWideStopVolumeV131MaxRiskPoints &&
             !isWideStopLongExpansionCandidateV157)
@@ -2719,8 +2721,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private RewardEstimate EstimateActualExecutionReward(CandidateSignal signal, string researchPath, decimal entry, decimal risk)
     {
         var targetR = ActualTargetRFor(signal, researchPath, risk);
-        if (IsObservationConfirmWideStopLongExpansionV157(signal, researchPath, risk))
-            return new RewardEstimate(risk * targetR, $"OCWideStopLongExpansionV158TargetR:{targetR:0.##}");
+        if (IsObservationConfirmWideStopLongExpansionCandidateV157(signal, researchPath, risk))
+            return new RewardEstimate(risk * targetR, $"OCWideStopLongExpansionV159TargetR:{targetR:0.##}");
 
         if (IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath))
             return new RewardEstimate(risk * targetR, $"UnknownMicroRiskVolumeV126TargetR:{targetR:0.##}");
