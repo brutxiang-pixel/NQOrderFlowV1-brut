@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.56`.
+This document describes the current research files produced by `OPF_RESEARCH_1.57`.
 
 ## Common Context
 
@@ -859,3 +859,14 @@ From `OPF_RESEARCH_1.55`, end-of-replay open executions are closed before strate
 - Breakaway Long Actual execution is disabled and the Breakaway Short setup-quality threshold is restored to `76`.
 
 From `OPF_RESEARCH_1.56`, `ReplayStopExitPending` suppresses protection-loss emergency flatten detection while the strategy intentionally cancels SL/TP orders for a session-close exit. The `SESSION_FLATTEN` submission follows the completed cancellation requests immediately, preventing duplicate exit fills without changing the v1.55 strategy rules.
+
+From `OPF_RESEARCH_1.57`, `ACTUAL_EXEC_1.93` adds a daily-capped Long `ObservationConfirm_WideStop1_5R` expansion for `SetupQualityScore >= 70` and `22 < InitialRiskPoints <= 25`. Executed expansion rows include `OCWideStopLongExpansionV157` in `execution_decisions.csv`, with at most one expansion execution per session day.
+
+Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
+
+- `SplitBase_Runner2_5R_BE0_75R`
+- `SplitBase_Runner2_5R_BE1R`
+- `SplitBase_Runner3R_BE0_75R`
+- `SplitBase_Runner3R_BE1R`
+
+`Base` represents one contract exiting at the existing Actual path target. `Runner` represents the second contract targeting `2.5R` or `3R`, with a break-even stop eligible only from the bar after the configured `0.75R` or `1R` trigger. `PnLPoints`, `PnL_R`, and `PnLDollars` represent the combined two-contract average/total result. Actual order quantities, targets, stops, and protection orders are not changed by these shadow rows. Trackers with an early Actual exit continue until the normal 12-bar research-window boundary so the runner policies can observe post-exit price action; Actual verification fields still report the real fill lifecycle.

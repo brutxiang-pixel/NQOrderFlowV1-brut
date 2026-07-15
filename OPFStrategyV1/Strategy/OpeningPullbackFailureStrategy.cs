@@ -68,6 +68,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ObservationConfirmWideStopVolumeV131ShortMinSetupQualityScore = 60m;
     private const decimal ObservationConfirmWideStopVolumeV131MaxRiskPoints = 22m;
     private const decimal ObservationConfirmWideStopVolumeV131MinEstimatedRr = 0.8m;
+    private const decimal ObservationConfirmWideStopLongExpansionV157MaxRiskPoints = 25m;
+    private const int ObservationConfirmWideStopLongExpansionV157MaxTradesPerDay = 1;
     private const decimal ObservationConfirmWideStopLowRiskV132MinSetupQualityScore = 56m;
     private const decimal ObservationConfirmWideStopLowRiskV132MaxRiskPoints = 18m;
     private const decimal ObservationConfirmWideStopLowRiskV132MinEstimatedRr = 0.5m;
@@ -145,6 +147,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private int _replayOtherExitToday;
     private int _observationConfirmFillerTradesToday;
     private int _observationConfirmQualityRescueTradesToday;
+    private int _observationConfirmWideStopLongExpansionTradesToday;
     private int _replayFullLossTradesToday;
     private int _replayConsecutiveLossesToday;
     private decimal _replayDailyPnlDollars;
@@ -1833,7 +1836,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var targetR = ActualTargetRFor(signal, researchPath, risk);
         var target = TargetFromRisk(signal.Side, entry, risk, targetR);
         var tradeId = $"{entryCandle.Time:yyyyMMdd-HHmm}-{signal.Side}-{entryCandle.Bar}";
-        var maxAllowedRiskPoints = MaxAllowedActualRiskPoints(signal, researchPath);
+        var maxAllowedRiskPoints = MaxAllowedActualRiskPoints(signal, researchPath, risk);
         var entryOrder = new Order
         {
             Portfolio = Portfolio,
@@ -1924,6 +1927,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             executeReasons.Add($"ObservationConfirmRisk22V132:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
         if (IsObservationConfirmWideStopVolumeV131(signal, researchPath))
             executeReasons.Add($"{ObservationConfirmWideStopVolumeV131Tag(signal, risk)}:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
+        var isWideStopLongExpansionV157 = IsObservationConfirmWideStopLongExpansionV157(signal, researchPath, risk);
+        if (isWideStopLongExpansionV157)
+            executeReasons.Add($"OCWideStopLongExpansionV157:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},count={_observationConfirmWideStopLongExpansionTradesToday + 1}/{ObservationConfirmWideStopLongExpansionV157MaxTradesPerDay}");
         if (IsObservationConfirmWideStopLowRiskV132(signal, researchPath, risk))
             executeReasons.Add($"OCWideStopLowRiskV132:side={signal.Side},risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
@@ -1943,6 +1949,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             _observationConfirmFillerTradesToday++;
         if (IsDailyVolumeQualityRescue(signal, researchPath, risk))
             _observationConfirmQualityRescueTradesToday++;
+        if (isWideStopLongExpansionV157)
+            _observationConfirmWideStopLongExpansionTradesToday++;
         EnqueueExecutionAction("OpenReplayEntry", async () => await OpenOrderAsync(entryOrder));
     }
 
@@ -2130,7 +2138,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return _actualObservationConfirmMaxRiskPoints;
     }
 
-    private decimal MaxAllowedActualRiskPoints(CandidateSignal signal, string researchPath)
+    private decimal MaxAllowedActualRiskPoints(CandidateSignal signal, string researchPath, decimal risk)
     {
         if (IsBreakawayLongSelectiveV134Quality(signal, researchPath))
             return BreakawayLongSelectiveV134MaxRiskPoints;
@@ -2142,6 +2150,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return ZoneBirthVolumeV122MaxRiskPoints;
         if (IsStrictVolumeExpansionV122(signal, researchPath))
             return StrictVolumeV122MaxRiskPoints;
+        if (IsObservationConfirmWideStopLongExpansionV157(signal, researchPath, risk))
+            return ObservationConfirmWideStopLongExpansionV157MaxRiskPoints;
         if (IsObservationConfirmWideStopLowRiskV132Quality(signal, researchPath))
             return ObservationConfirmWideStopLowRiskV132MaxRiskPoints;
         if (IsObservationConfirmWideStopVolumeV131(signal, researchPath))
@@ -2529,6 +2539,15 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             signal.SetupQualityScore.TotalScore >= ObservationConfirmWideStopVolumeV131MinSetupQualityScore(signal);
     }
 
+    private bool IsObservationConfirmWideStopLongExpansionV157(CandidateSignal signal, string researchPath, decimal risk)
+    {
+        return IsObservationConfirmWideStopVolumeV131(signal, researchPath) &&
+            signal.Side == TradeSide.Long &&
+            risk > ObservationConfirmWideStopVolumeV131MaxRiskPoints &&
+            risk <= ObservationConfirmWideStopLongExpansionV157MaxRiskPoints &&
+            _observationConfirmWideStopLongExpansionTradesToday < ObservationConfirmWideStopLongExpansionV157MaxTradesPerDay;
+    }
+
     private static string ObservationConfirmWideStopVolumeV131Tag(CandidateSignal signal, decimal risk)
     {
         var side = signal.Side == TradeSide.Long ? "Long" : "Short";
@@ -2597,8 +2616,17 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             reasons.Add($"MainlineVolumeFillerRiskCapExceeded:risk={risk:0.##},max={MainlineVolumeFillerMaxRiskPoints:0.##}");
         if (isObservationConfirmWideStopLowRiskQuality && !isObservationConfirmWideStopVolume && risk > ObservationConfirmWideStopLowRiskV132MaxRiskPoints)
             reasons.Add($"OCWideStopLowRiskV132RiskCapExceeded:risk={risk:0.##},max={ObservationConfirmWideStopLowRiskV132MaxRiskPoints:0.##},side={signal.Side}");
-        if (isObservationConfirmWideStopVolume && risk > ObservationConfirmWideStopVolumeV131MaxRiskPoints)
+        var isWideStopLongExpansionV157 = IsObservationConfirmWideStopLongExpansionV157(signal, researchPath, risk);
+        var isWideStopLongExpansionCandidateV157 = IsObservationConfirmWideStopVolumeV131(signal, researchPath) &&
+            signal.Side == TradeSide.Long &&
+            risk > ObservationConfirmWideStopVolumeV131MaxRiskPoints &&
+            risk <= ObservationConfirmWideStopLongExpansionV157MaxRiskPoints;
+        if (isObservationConfirmWideStopVolume &&
+            risk > ObservationConfirmWideStopVolumeV131MaxRiskPoints &&
+            !isWideStopLongExpansionCandidateV157)
             reasons.Add($"ObservationConfirmWideStopVolumeV131RiskCapExceeded:risk={risk:0.##},max={ObservationConfirmWideStopVolumeV131MaxRiskPoints:0.##},side={signal.Side}");
+        if (isWideStopLongExpansionCandidateV157 && !isWideStopLongExpansionV157)
+            reasons.Add($"OCWideStopLongExpansionV157DailyCap:count={_observationConfirmWideStopLongExpansionTradesToday},max={ObservationConfirmWideStopLongExpansionV157MaxTradesPerDay}");
         if (isBreakawayVolumeExpansion)
         {
             var breakawayMaxRisk = isBreakawayLongSelective
@@ -2784,6 +2812,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _replayOtherExitToday = 0;
         _observationConfirmFillerTradesToday = 0;
         _observationConfirmQualityRescueTradesToday = 0;
+        _observationConfirmWideStopLongExpansionTradesToday = 0;
         _replayFullLossTradesToday = 0;
         _replayConsecutiveLossesToday = 0;
         _replayDailyPnlDollars = 0m;
@@ -3918,6 +3947,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
             tracker.Update(_lastResearchCandle);
             var exitBar = _lastResearchCandle.Bar;
+            if (!tracker.IsComplete(exitBar))
+                return;
+
             if (!TryMarkResearchOutcomeWritten(tracker, exitBar))
             {
                 _researchTrackers.RemoveAt(i);
@@ -4596,6 +4628,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed2R", 2m, tracker.First2RBar);
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed2_5R", 2.5m, tracker.First2_5RBar);
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed3R", 3m, tracker.First3RBar);
+        var baseTargetR = ActualTargetRFor(tracker.Signal, tracker.ResearchPath, tracker.InitialRiskPoints);
+        var firstBaseTargetBar = FirstTargetBarFor(tracker, baseTargetR);
+        AppendSplitRunnerPolicyEvaluation(tracker, exitCandle, "SplitBase_Runner2_5R_BE0_75R", baseTargetR, firstBaseTargetBar, 2.5m, tracker.First2_5RBar, tracker.First0_75RBar, tracker.FirstBreakEvenAfter0_75RBar);
+        AppendSplitRunnerPolicyEvaluation(tracker, exitCandle, "SplitBase_Runner2_5R_BE1R", baseTargetR, firstBaseTargetBar, 2.5m, tracker.First2_5RBar, tracker.First1RBar, tracker.FirstBreakEvenAfter1RBar);
+        AppendSplitRunnerPolicyEvaluation(tracker, exitCandle, "SplitBase_Runner3R_BE0_75R", baseTargetR, firstBaseTargetBar, 3m, tracker.First3RBar, tracker.First0_75RBar, tracker.FirstBreakEvenAfter0_75RBar);
+        AppendSplitRunnerPolicyEvaluation(tracker, exitCandle, "SplitBase_Runner3R_BE1R", baseTargetR, firstBaseTargetBar, 3m, tracker.First3RBar, tracker.First1RBar, tracker.FirstBreakEvenAfter1RBar);
         if (_compactResearchLogging)
             return;
 
@@ -4667,7 +4705,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var target = tracker.Signal.Side == TradeSide.Long
             ? tracker.Entry + tracker.InitialRiskPoints * targetR
             : tracker.Entry - tracker.InitialRiskPoints * targetR;
-        var result = ResolveProtectedExtensionPolicy(tracker, exitCandle, targetR, firstTargetBar, lockR, firstProtectStopBar);
+        var result = ResolveProtectedExtensionPolicy(tracker, exitCandle, targetR, firstTargetBar, lockR, tracker.First1_5RBar, firstProtectStopBar);
 
         _researchLogger?.AppendExitPolicyEvaluation(
             _snapshot.SnapshotId,
@@ -4696,6 +4734,71 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             tracker.MaeR);
     }
 
+    private void AppendSplitRunnerPolicyEvaluation(
+        ResearchTracker tracker,
+        OpfCandle exitCandle,
+        string exitPolicy,
+        decimal baseTargetR,
+        int? firstBaseTargetBar,
+        decimal runnerTargetR,
+        int? firstRunnerTargetBar,
+        int? firstTriggerBar,
+        int? firstProtectStopBar)
+    {
+        if (_snapshot is null)
+            return;
+
+        var baseResult = ResolveExitPolicy(tracker, exitCandle, baseTargetR, firstBaseTargetBar);
+        var runnerResult = ResolveProtectedExtensionPolicy(tracker, exitCandle, runnerTargetR, firstRunnerTargetBar, 0m, firstTriggerBar, firstProtectStopBar);
+        var pnlPoints = Math.Round((baseResult.PnlPoints + runnerResult.PnlPoints) / 2m, 4);
+        var pnlR = Math.Round((baseResult.PnlR + runnerResult.PnlR) / 2m, 4);
+        var exitPrice = tracker.Signal.Side == TradeSide.Long
+            ? tracker.Entry + pnlPoints
+            : tracker.Entry - pnlPoints;
+        var runnerTarget = TargetFromRisk(tracker.Signal.Side, tracker.Entry, tracker.InitialRiskPoints, runnerTargetR);
+
+        _researchLogger?.AppendExitPolicyEvaluation(
+            _snapshot.SnapshotId,
+            tracker.Signal.SignalId,
+            tracker.EntryTime,
+            tracker.EntryBar,
+            exitCandle.Time,
+            exitCandle.Bar,
+            tracker.Signal.Side.ToString(),
+            tracker.ResearchPath,
+            exitPolicy,
+            $"Base:{baseResult.ExitReason}|Runner:{runnerResult.ExitReason}",
+            tracker.Entry,
+            tracker.Stop,
+            runnerTarget,
+            exitPrice,
+            tracker.InitialRiskPoints,
+            runnerTargetR,
+            pnlPoints,
+            pnlR,
+            Math.Max(0, exitCandle.Bar - tracker.EntryBar),
+            baseResult.Ambiguous || runnerResult.Ambiguous,
+            tracker.FirstStopBar,
+            firstRunnerTargetBar,
+            tracker.MfeR,
+            tracker.MaeR);
+    }
+
+    private static int? FirstTargetBarFor(ResearchTracker tracker, decimal targetR)
+    {
+        if (targetR == 1m)
+            return tracker.First1RBar;
+        if (targetR == 1.5m)
+            return tracker.First1_5RBar;
+        if (targetR == 2m)
+            return tracker.First2RBar;
+        if (targetR == 2.5m)
+            return tracker.First2_5RBar;
+        if (targetR == 3m)
+            return tracker.First3RBar;
+        return null;
+    }
+
     private static ExitPolicyResult ResolveExitPolicy(ResearchTracker tracker, OpfCandle exitCandle, decimal targetR, int? firstTargetBar)
     {
         var firstStopBar = tracker.FirstStopBar;
@@ -4718,13 +4821,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         decimal targetR,
         int? firstTargetBar,
         decimal lockR,
+        int? firstTriggerBar,
         int? firstProtectStopBar)
     {
         var firstStopBar = tracker.FirstStopBar;
-        var first1_5RBar = tracker.First1_5RBar;
-        if (!first1_5RBar.HasValue)
+        if (!firstTriggerBar.HasValue)
             return firstStopBar.HasValue ? StopExit(tracker, false) : TimeStopExit(tracker, exitCandle, "TimeStop");
-        if (firstStopBar.HasValue && firstStopBar.Value <= first1_5RBar.Value)
+        if (firstStopBar.HasValue && firstStopBar.Value <= firstTriggerBar.Value)
             return StopExit(tracker, false);
 
         var ambiguous = firstProtectStopBar.HasValue && firstTargetBar.HasValue && firstProtectStopBar.Value == firstTargetBar.Value;
@@ -5545,6 +5648,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public decimal MfePoints { get; private set; }
         public decimal MaePoints { get; private set; }
         public int? FirstStopBar { get; private set; }
+        public int? First0_75RBar { get; private set; }
         public int? First1RBar { get; private set; }
         public int? First1_5RBar { get; private set; }
         public int? First2RBar { get; private set; }
@@ -5552,6 +5656,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public int? First3RBar { get; private set; }
         public int? FirstBreakEvenAfter1_5RBar { get; private set; }
         public int? First1RLockAfter1_5RBar { get; private set; }
+        public int? FirstBreakEvenAfter0_75RBar { get; private set; }
+        public int? FirstBreakEvenAfter1RBar { get; private set; }
         public int? TimeTo1RMinutes { get; private set; }
         public int? TimeToMfeMinutes { get; private set; }
         public decimal MaxHeatBefore1R { get; private set; }
@@ -5592,6 +5698,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public void Update(OpfCandle candle)
         {
             var priorMfe = MfePoints;
+            var had0_75RBeforeThisBar = First0_75RBar.HasValue && candle.Bar > First0_75RBar.Value;
+            var had1RBeforeThisBar = First1RBar.HasValue && candle.Bar > First1RBar.Value;
             var had1_5RBeforeThisBar = First1_5RBar.HasValue && candle.Bar > First1_5RBar.Value;
             decimal currentMfe;
             decimal currentMae;
@@ -5602,6 +5710,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 currentMae = Entry - candle.Low;
                 if (candle.Low <= Stop)
                     FirstStopBar ??= candle.Bar;
+                if (had0_75RBeforeThisBar && candle.Low <= Entry)
+                    FirstBreakEvenAfter0_75RBar ??= candle.Bar;
+                if (had1RBeforeThisBar && candle.Low <= Entry)
+                    FirstBreakEvenAfter1RBar ??= candle.Bar;
                 if (had1_5RBeforeThisBar && candle.Low <= Entry)
                     FirstBreakEvenAfter1_5RBar ??= candle.Bar;
                 if (had1_5RBeforeThisBar && candle.Low <= Entry + InitialRiskPoints)
@@ -5613,6 +5725,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 currentMae = candle.High - Entry;
                 if (candle.High >= Stop)
                     FirstStopBar ??= candle.Bar;
+                if (had0_75RBeforeThisBar && candle.High >= Entry)
+                    FirstBreakEvenAfter0_75RBar ??= candle.Bar;
+                if (had1RBeforeThisBar && candle.High >= Entry)
+                    FirstBreakEvenAfter1RBar ??= candle.Bar;
                 if (had1_5RBeforeThisBar && candle.High >= Entry)
                     FirstBreakEvenAfter1_5RBar ??= candle.Bar;
                 if (had1_5RBeforeThisBar && candle.High >= Entry - InitialRiskPoints)
@@ -5624,6 +5740,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
             if (!First1RBar.HasValue)
                 MaxHeatBefore1R = Math.Max(MaxHeatBefore1R, MaePoints);
+
+            if (currentMfe >= 0.75m * InitialRiskPoints)
+                First0_75RBar ??= candle.Bar;
 
             if (currentMfe >= InitialRiskPoints)
             {

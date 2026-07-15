@@ -1154,6 +1154,16 @@ From `OPF_RESEARCH_1.56`, the v1.55 strategy rules remain unchanged and the end-
 - Entry paths, quality thresholds, risk gates, target-R rules, order quantity, and all other v1.55 strategy behavior remain unchanged.
 - Focused validation uses March 16 and March 30: expect two real `SESSION_FLATTEN` exits, normal `PROTECTION_CLEANUP_DONE`, and zero `EMERGENCY_FLATTEN_SEND`, `DUPLICATE_EXIT_FILL`, or `STOPPED` events.
 
+From `OPF_RESEARCH_1.57`, v1.56 remains the frozen baseline while Actual execution adds one cautious high-quality volume pool and Compact research evaluates dynamic two-contract exits without changing real SL/TP orders:
+
+- Actual defaults use `ACTUAL_EXEC_1.93`.
+- Long `ObservationConfirm_WideStop1_5R` rows with `SetupQualityScore >= 70` can extend the v1.31 risk cap from `22` to `25` points. At most one such expansion trade can execute per session day, and executed rows are tagged `OCWideStopLongExpansionV157`.
+- The expansion does not bypass estimated-RR, hard-risk, same-bar ambiguity, active-trade, daily-trade, or execution-safety gates. Its real target remains the existing `1.5R` baseline.
+- Actual research trackers that exit before the 12-bar research window remain active for shadow-only post-exit observation. Actual fills and Actual outcome fields remain unchanged.
+- Compact `exit_policy_evaluations.csv` adds `SplitBase_Runner2_5R_BE0_75R`, `SplitBase_Runner2_5R_BE1R`, `SplitBase_Runner3R_BE0_75R`, and `SplitBase_Runner3R_BE1R`.
+- Each split policy models one contract at the existing path target and one runner contract at `2.5R` or `3R`. The runner moves to break-even only from the bar after first reaching `0.75R` or `1R`; these rows never submit or modify real orders.
+- Breakaway, Failure paths, OC filler/risk expansion, two-contract quantity, and all other v1.56 Actual rules remain unchanged.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
