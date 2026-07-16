@@ -69,7 +69,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ObservationConfirmWideStopVolumeV131MaxRiskPoints = 22m;
     private const decimal ObservationConfirmWideStopVolumeV131MinEstimatedRr = 0.8m;
     private const decimal ObservationConfirmWideStopLongExpansionV157MaxRiskPoints = 25m;
-    private const int ObservationConfirmWideStopLongExpansionV157MaxTradesPerDay = 1;
+    private const int ObservationConfirmWideStopLongExpansionV162MaxTradesPerDay = 2;
     private const decimal ObservationConfirmWideStopLowRiskV132MinSetupQualityScore = 56m;
     private const decimal ObservationConfirmWideStopLowRiskV132MaxRiskPoints = 18m;
     private const decimal ObservationConfirmWideStopLowRiskV132MinEstimatedRr = 0.5m;
@@ -1932,7 +1932,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             executeReasons.Add($"{ObservationConfirmWideStopVolumeV131Tag(signal, risk)}:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
         var isWideStopLongExpansionV157 = IsObservationConfirmWideStopLongExpansionV157(signal, researchPath, risk);
         if (isWideStopLongExpansionV157)
-            executeReasons.Add($"OCWideStopLongExpansionV157:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},count={_observationConfirmWideStopLongExpansionTradesToday + 1}/{ObservationConfirmWideStopLongExpansionV157MaxTradesPerDay}");
+        {
+            executeReasons.Add($"OCWideStopLongExpansionV157:risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},count={_observationConfirmWideStopLongExpansionTradesToday + 1}/{ObservationConfirmWideStopLongExpansionV162MaxTradesPerDay}");
+            if (_observationConfirmWideStopLongExpansionTradesToday >= 1)
+                executeReasons.Add("OCWideStopLongSecondExpansionV162");
+        }
         if (IsObservationConfirmWideStopLowRiskV132(signal, researchPath, risk))
             executeReasons.Add($"OCWideStopLowRiskV132:side={signal.Side},risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
@@ -2556,7 +2560,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private bool IsObservationConfirmWideStopLongExpansionV157(CandidateSignal signal, string researchPath, decimal risk)
     {
         return IsObservationConfirmWideStopLongExpansionCandidateV157(signal, researchPath, risk) &&
-            _observationConfirmWideStopLongExpansionTradesToday < ObservationConfirmWideStopLongExpansionV157MaxTradesPerDay;
+            _observationConfirmWideStopLongExpansionTradesToday < ObservationConfirmWideStopLongExpansionV162MaxTradesPerDay;
     }
 
     private static string ObservationConfirmWideStopVolumeV131Tag(CandidateSignal signal, decimal risk)
@@ -2634,7 +2638,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             !isWideStopLongExpansionCandidateV157)
             reasons.Add($"ObservationConfirmWideStopVolumeV131RiskCapExceeded:risk={risk:0.##},max={ObservationConfirmWideStopVolumeV131MaxRiskPoints:0.##},side={signal.Side}");
         if (isWideStopLongExpansionCandidateV157 && !isWideStopLongExpansionV157)
-            reasons.Add($"OCWideStopLongExpansionV157DailyCap:count={_observationConfirmWideStopLongExpansionTradesToday},max={ObservationConfirmWideStopLongExpansionV157MaxTradesPerDay}");
+            reasons.Add($"OCWideStopLongExpansionV162DailyCap:count={_observationConfirmWideStopLongExpansionTradesToday},max={ObservationConfirmWideStopLongExpansionV162MaxTradesPerDay}");
         if (isBreakawayVolumeExpansion)
         {
             var breakawayMaxRisk = isBreakawayLongSelective
@@ -4645,7 +4649,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (_snapshot is null)
             return;
-        if (_compactResearchLogging && !ShouldWriteCompactExitPolicyPath(tracker.ResearchPath))
+        if (_compactResearchLogging && !ShouldWriteCompactExitPolicyTracker(tracker))
             return;
 
         AppendExitPolicyEvaluation(tracker, exitCandle, "Fixed1_5R", 1.5m, tracker.First1_5RBar);
@@ -4658,23 +4662,40 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         AppendSplitRunnerPolicyEvaluation(tracker, exitCandle, "SplitBase_Runner2_5R_BE1R", baseTargetR, firstBaseTargetBar, 2.5m, tracker.First2_5RBar, tracker.First1RBar, tracker.FirstBreakEvenAfter1RBar);
         AppendSplitRunnerPolicyEvaluation(tracker, exitCandle, "SplitBase_Runner3R_BE0_75R", baseTargetR, firstBaseTargetBar, 3m, tracker.First3RBar, tracker.First0_75RBar, tracker.FirstBreakEvenAfter0_75RBar);
         AppendSplitRunnerPolicyEvaluation(tracker, exitCandle, "SplitBase_Runner3R_BE1R", baseTargetR, firstBaseTargetBar, 3m, tracker.First3RBar, tracker.First1RBar, tracker.FirstBreakEvenAfter1RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE0_75R_Then2_5R", 2.5m, tracker.First2_5RBar, 0m, tracker.First0_75RBar, tracker.FirstBreakEvenAfter0_75RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE1R_Then2_5R", 2.5m, tracker.First2_5RBar, 0m, tracker.First1RBar, tracker.FirstBreakEvenAfter1RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE1R_Then3R", 3m, tracker.First3RBar, 0m, tracker.First1RBar, tracker.FirstBreakEvenAfter1RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1RAfter1_5R_Then2_5R", 2.5m, tracker.First2_5RBar, 1m, tracker.First1_5RBar, tracker.First1RLockAfter1_5RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1RAfter1_5R_Then3R", 3m, tracker.First3RBar, 1m, tracker.First1_5RBar, tracker.First1RLockAfter1_5RBar);
         if (_compactResearchLogging)
             return;
 
-        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE_Then2_5R", 2.5m, tracker.First2_5RBar, 0m, tracker.FirstBreakEvenAfter1_5RBar);
-        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1R_Then2_5R", 2.5m, tracker.First2_5RBar, 1m, tracker.First1RLockAfter1_5RBar);
-        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE_Then3R", 3m, tracker.First3RBar, 0m, tracker.FirstBreakEvenAfter1_5RBar);
-        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1R_Then3R", 3m, tracker.First3RBar, 1m, tracker.First1RLockAfter1_5RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE_Then2_5R", 2.5m, tracker.First2_5RBar, 0m, tracker.First1_5RBar, tracker.FirstBreakEvenAfter1_5RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1R_Then2_5R", 2.5m, tracker.First2_5RBar, 1m, tracker.First1_5RBar, tracker.First1RLockAfter1_5RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "ProtectBE_Then3R", 3m, tracker.First3RBar, 0m, tracker.First1_5RBar, tracker.FirstBreakEvenAfter1_5RBar);
+        AppendProtectedExtensionPolicyEvaluation(tracker, exitCandle, "Protect1R_Then3R", 3m, tracker.First3RBar, 1m, tracker.First1_5RBar, tracker.First1RLockAfter1_5RBar);
     }
 
-    private static bool ShouldWriteCompactExitPolicyPath(string researchPath)
+    private bool ShouldWriteCompactExitPolicyTracker(ResearchTracker tracker)
     {
-        return string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase) ||
+        var researchPath = tracker.ResearchPath;
+        if (string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(researchPath, "ObservationConfirm_WideStop1_5R", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(researchPath, "BreakawayFvg_Qualified", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(researchPath, "FailureReverse_ObservationInvalidated", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(researchPath, "FailureReverse_RetestFailed", StringComparison.OrdinalIgnoreCase);
+            string.Equals(researchPath, "FailureReverse_RetestFailed", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var isV162Candidate =
+            (tracker.Signal.Side == TradeSide.Long && string.Equals(researchPath, "ObservationStrict_Other", StringComparison.OrdinalIgnoreCase)) ||
+            (tracker.Signal.Side == TradeSide.Short && string.Equals(researchPath, "TrendPullbackConfirmed", StringComparison.OrdinalIgnoreCase));
+        return isV162Candidate &&
+            tracker.Signal.SetupQualityScore.TotalScore >= StrictVolumeV122MinSetupQualityScore &&
+            tracker.InitialRiskPoints <= StrictVolumeV122MaxRiskPoints &&
+            EstimatedActualRr(tracker.Signal, researchPath, tracker.Entry, tracker.InitialRiskPoints) >= StrictVolumeV122MinEstimatedRr;
     }
 
     private void AppendExitPolicyEvaluation(ResearchTracker tracker, OpfCandle exitCandle, string exitPolicy, decimal targetR, int? firstTargetBar)
@@ -4711,7 +4732,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             tracker.FirstStopBar,
             firstTargetBar,
             tracker.MfeR,
-            tracker.MaeR);
+            tracker.MaeR,
+            result.ExitBar);
     }
 
     private void AppendProtectedExtensionPolicyEvaluation(
@@ -4721,6 +4743,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         decimal targetR,
         int? firstTargetBar,
         decimal lockR,
+        int? firstTriggerBar,
         int? firstProtectStopBar)
     {
         if (_snapshot is null)
@@ -4729,7 +4752,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var target = tracker.Signal.Side == TradeSide.Long
             ? tracker.Entry + tracker.InitialRiskPoints * targetR
             : tracker.Entry - tracker.InitialRiskPoints * targetR;
-        var result = ResolveProtectedExtensionPolicy(tracker, exitCandle, targetR, firstTargetBar, lockR, tracker.First1_5RBar, firstProtectStopBar);
+        var result = ResolveProtectedExtensionPolicy(tracker, exitCandle, targetR, firstTargetBar, lockR, firstTriggerBar, firstProtectStopBar);
 
         _researchLogger?.AppendExitPolicyEvaluation(
             _snapshot.SnapshotId,
@@ -4755,7 +4778,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             tracker.FirstStopBar,
             firstTargetBar,
             tracker.MfeR,
-            tracker.MaeR);
+            tracker.MaeR,
+            result.ExitBar);
     }
 
     private void AppendSplitRunnerPolicyEvaluation(
@@ -4805,7 +4829,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             tracker.FirstStopBar,
             firstRunnerTargetBar,
             tracker.MfeR,
-            tracker.MaeR);
+            tracker.MaeR,
+            Math.Max(baseResult.ExitBar, runnerResult.ExitBar));
     }
 
     private static int? FirstTargetBarFor(ResearchTracker tracker, decimal targetR)
@@ -4828,15 +4853,15 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var firstStopBar = tracker.FirstStopBar;
         var ambiguous = firstStopBar.HasValue && firstTargetBar.HasValue && firstStopBar.Value == firstTargetBar.Value;
         if (firstTargetBar.HasValue && (!firstStopBar.HasValue || firstTargetBar.Value < firstStopBar.Value))
-            return TargetExit(tracker, targetR, ambiguous);
+            return TargetExit(tracker, targetR, ambiguous, firstTargetBar.Value);
         if (firstStopBar.HasValue && (!firstTargetBar.HasValue || firstStopBar.Value <= firstTargetBar.Value))
-            return StopExit(tracker, ambiguous);
+            return StopExit(tracker, ambiguous, firstStopBar.Value);
 
         var points = tracker.Signal.Side == TradeSide.Long
             ? exitCandle.Close - tracker.Entry
             : tracker.Entry - exitCandle.Close;
         var pnlR = tracker.InitialRiskPoints <= 0m ? 0m : Math.Round(points / tracker.InitialRiskPoints, 4);
-        return new ExitPolicyResult("TimeStop", exitCandle.Close, points, pnlR, false);
+        return new ExitPolicyResult("TimeStop", exitCandle.Close, points, pnlR, false, exitCandle.Bar);
     }
 
     private static ExitPolicyResult ResolveProtectedExtensionPolicy(
@@ -4850,26 +4875,26 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         var firstStopBar = tracker.FirstStopBar;
         if (!firstTriggerBar.HasValue)
-            return firstStopBar.HasValue ? StopExit(tracker, false) : TimeStopExit(tracker, exitCandle, "TimeStop");
+            return firstStopBar.HasValue ? StopExit(tracker, false, firstStopBar.Value) : TimeStopExit(tracker, exitCandle, "TimeStop");
         if (firstStopBar.HasValue && firstStopBar.Value <= firstTriggerBar.Value)
-            return StopExit(tracker, false);
+            return StopExit(tracker, false, firstStopBar.Value);
 
         var ambiguous = firstProtectStopBar.HasValue && firstTargetBar.HasValue && firstProtectStopBar.Value == firstTargetBar.Value;
         if (firstTargetBar.HasValue && (!firstProtectStopBar.HasValue || firstTargetBar.Value < firstProtectStopBar.Value))
-            return TargetExit(tracker, targetR, ambiguous);
+            return TargetExit(tracker, targetR, ambiguous, firstTargetBar.Value);
         if (firstProtectStopBar.HasValue && (!firstTargetBar.HasValue || firstProtectStopBar.Value <= firstTargetBar.Value))
-            return ProtectedStopExit(tracker, lockR, ambiguous);
+            return ProtectedStopExit(tracker, lockR, ambiguous, firstProtectStopBar.Value);
 
-        return TimeStopExit(tracker, exitCandle, "TimeStopAfter1_5R");
+        return TimeStopExit(tracker, exitCandle, "TimeStopAfterProtectionTrigger");
     }
 
-    private static ExitPolicyResult TargetExit(ResearchTracker tracker, decimal targetR, bool ambiguous)
+    private static ExitPolicyResult TargetExit(ResearchTracker tracker, decimal targetR, bool ambiguous, int exitBar)
     {
         var points = tracker.InitialRiskPoints * targetR;
         var exitPrice = tracker.Signal.Side == TradeSide.Long
             ? tracker.Entry + points
             : tracker.Entry - points;
-        return new ExitPolicyResult("Target", exitPrice, points, targetR, ambiguous);
+        return new ExitPolicyResult("Target", exitPrice, points, targetR, ambiguous, exitBar);
     }
 
     private static ExitPolicyResult TimeStopExit(ResearchTracker tracker, OpfCandle exitCandle, string reason)
@@ -4878,23 +4903,23 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             ? exitCandle.Close - tracker.Entry
             : tracker.Entry - exitCandle.Close;
         var pnlR = tracker.InitialRiskPoints <= 0m ? 0m : Math.Round(points / tracker.InitialRiskPoints, 4);
-        return new ExitPolicyResult(reason, exitCandle.Close, points, pnlR, false);
+        return new ExitPolicyResult(reason, exitCandle.Close, points, pnlR, false, exitCandle.Bar);
     }
 
-    private static ExitPolicyResult StopExit(ResearchTracker tracker, bool ambiguous)
+    private static ExitPolicyResult StopExit(ResearchTracker tracker, bool ambiguous, int exitBar)
     {
         var points = -tracker.InitialRiskPoints;
-        return new ExitPolicyResult("Stop", tracker.Stop, points, -1m, ambiguous);
+        return new ExitPolicyResult("Stop", tracker.Stop, points, -1m, ambiguous, exitBar);
     }
 
-    private static ExitPolicyResult ProtectedStopExit(ResearchTracker tracker, decimal lockR, bool ambiguous)
+    private static ExitPolicyResult ProtectedStopExit(ResearchTracker tracker, decimal lockR, bool ambiguous, int exitBar)
     {
         var points = tracker.InitialRiskPoints * lockR;
         var exitPrice = tracker.Signal.Side == TradeSide.Long
             ? tracker.Entry + points
             : tracker.Entry - points;
         var reason = lockR <= 0m ? "ProtectBE" : $"Protect{lockR:0.##}R";
-        return new ExitPolicyResult(reason, exitPrice, points, lockR, ambiguous);
+        return new ExitPolicyResult(reason, exitPrice, points, lockR, ambiguous, exitBar);
     }
 
     private ResearchLogger.ActualOutcome? ActualOutcomeFor(ResearchTracker tracker)
@@ -5481,7 +5506,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         decimal ExitPrice,
         decimal PnlPoints,
         decimal PnlR,
-        bool Ambiguous);
+        bool Ambiguous,
+        int ExitBar);
 
     private sealed class ReplayExecutionState
     {

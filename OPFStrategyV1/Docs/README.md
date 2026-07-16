@@ -1192,6 +1192,17 @@ From `OPF_RESEARCH_1.61`, v1.60 becomes the safety baseline for a material profi
 - No entry path, setup-quality threshold, risk cap, daily limit, expansion rule, order quantity, stop placement, Breakaway Short target, or Runner Shadow policy changes.
 - The full replay gate compares against the clean97 baseline: at least `110R`, `$7,800`, PF `1.48`, max drawdown at most `$1,000`, and at least `5.7` trades/day, while retaining positive expansion contribution and evaluating the high-quality Runner Shadow subset.
 
+From `OPF_RESEARCH_1.62`, v1.61 remains the profit baseline while one broad replay evaluates cautious volume expansion and dynamic exits together:
+
+- Actual defaults use `ACTUAL_EXEC_1.98`.
+- The Long `ObservationConfirm_WideStop1_5R` expansion keeps its existing `SetupQualityScore >= 70` and `22 < risk <= 25` gates, but its session-day cap increases from one to two trades.
+- The second expansion execution is tagged `OCWideStopLongSecondExpansionV162`; candidates after the new cap are skipped with `OCWideStopLongExpansionV162DailyCap`.
+- Compact exit-policy logging adds filtered research-only candidates from `ObservationStrict_Other` Long and `TrendPullbackConfirmed` Short. Both require score `>= 45`, risk `<= 25`, and estimated RR `>= 0.5`; neither path is enabled for Actual execution.
+- Compact exit-policy logging adds full-position protection comparisons: break-even after `0.75R` or `1R`, and a `1R` lock after first reaching `1.5R`, combined with `2.5R` and `3R` targets. These rows never modify real orders.
+- `exit_policy_evaluations.csv` adds `PolicyExitBar`, the bar on which each simulated policy exits. Split policies use the later Base/Runner exit bar.
+- `Analyze-OPFV162VirtualPortfolios.ps1` combines Actual trades and the two research pools chronologically, applies one-active-trade and 12-trade daily limits, rejects ambiguous same-bar outcomes, and reports blocked Actual trades, NetR, NetDollars, PF, and drawdown by exit policy.
+- All other Actual paths, v1.61 selective `2R`, Breakaway Short target, risk gates, order quantity, and execution-safety behavior remain unchanged.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
@@ -1216,6 +1227,12 @@ After replay, summarize research outcomes:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\Scripts\Summarize-OPFResearch.ps1"
+```
+
+For v1.62 expansion and active-trade replacement analysis:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\Scripts\Analyze-OPFV162VirtualPortfolios.ps1"
 ```
 
 The summary groups outcomes by `ResearchPath`, `OutcomeClass`, `StopBasis`, entry date, snapshot, regime changes, entry-date regime quality, and zone metadata. This is the first pass before inspecting individual signals.

@@ -821,10 +821,11 @@ public sealed class ResearchLogger
         int? firstStopBar,
         int? firstTargetBar,
         decimal mfeR,
-        decimal maeR)
+        decimal maeR,
+        int? policyExitBar)
     {
         var path = Path.Combine(_directory, $"{snapshotId}_exit_policy_evaluations.csv");
-        EnsureHeader(path, ContextHeader("SignalID,EntryTime,EntryBar,ExitTime,ExitBar,Side,ResearchPath,ExitPolicy,ExitReason,Entry,Stop,Target,ExitPrice,InitialRiskPoints,TargetR,PnLPoints,PnL_R,PnLDollars,BarsHeld,AmbiguousStopAndTargetSameBar,FirstStopBar,FirstTargetBar,MFE_R,MAE_R"));
+        EnsureHeader(path, ContextHeader("SignalID,EntryTime,EntryBar,ExitTime,ExitBar,Side,ResearchPath,ExitPolicy,ExitReason,Entry,Stop,Target,ExitPrice,InitialRiskPoints,TargetR,PnLPoints,PnL_R,PnLDollars,BarsHeld,AmbiguousStopAndTargetSameBar,FirstStopBar,FirstTargetBar,MFE_R,MAE_R,PolicyExitBar"));
         var hasSnapshot = _snapshots.TryGetValue(snapshotId, out var snapshot);
         var pointValue = hasSnapshot ? snapshot!.InstrumentProfile.PointValue : 0m;
         var contracts = hasSnapshot ? snapshot!.ExecutionProfile.FixedContracts : 1;
@@ -856,7 +857,8 @@ public sealed class ResearchLogger
                 firstStopBar?.ToString() ?? string.Empty,
                 firstTargetBar?.ToString() ?? string.Empty,
                 mfeR,
-                maeR)
+                maeR,
+                policyExitBar?.ToString() ?? string.Empty)
             + Environment.NewLine);
     }
 
