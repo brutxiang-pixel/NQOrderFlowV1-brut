@@ -1268,6 +1268,15 @@ From `OPF_RESEARCH_1.69`, the v1.68 expansion set is retained except for one pre
 - `UnknownRegimeZoneTouch` Short remains eligible under its v1.64 rule. All v1.67/v1.68 sources, thresholds, `2.5R`/`3R` targets, daily capacity, and safety behavior remain unchanged.
 - Removing Unknown Long from the same clean evidence leaves `16` expansion trades across four sources at approximately `+10.06R`, with zero lifecycle anomalies.
 
+From `OPF_RESEARCH_1.70`, the full 112-day v1.69 evidence applies a precise ZoneBirth Short risk-band contraction:
+
+- Actual defaults use `ACTUAL_EXEC_2.06`.
+- `ZoneBirthResearch` Short keeps planned risk `<= 8` and `12 < risk <= 18`; it rejects `8 < risk <= 12` and `18 < risk <= 25` with `ZoneBirthShortV170RiskBandExcluded`.
+- Executed rows include `ZoneBirthShortDualRiskBandV170` and identify `LowRiskLe8` or `MidRiskGt12Le18`.
+- Fill validation uses the matching band ceiling (`8` or `18`) rather than the general aggressive `25` point cap.
+- The conservative v1.69 exclusion projection removes `128` losing trades and retains `164` ZoneBirth trades at approximately `+23.77R`. The full portfolio projects `872` trades, `+187.09R`, `+$12,021`, PF `1.467`, and `$1,076` maximum drawdown before active-trade replacement.
+- All other paths, targets, Wait1 research-only behavior, daily capacity, and execution protections remain unchanged.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

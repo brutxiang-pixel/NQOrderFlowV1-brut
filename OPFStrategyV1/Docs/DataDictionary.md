@@ -887,6 +887,8 @@ From `OPF_RESEARCH_1.68`, `ACTUAL_EXEC_2.04` adds `ZoneBirthResearch` Short and 
 
 From `OPF_RESEARCH_1.69`, `ACTUAL_EXEC_2.05` disables only `UnknownRegimeZoneTouch` Long aggressive execution after its clean combined Smoke evidence fell below the per-source `-4R` floor. Unknown Short and every other v1.67/v1.68 source, target, threshold, log column, and safety rule remain unchanged.
 
+From `OPF_RESEARCH_1.70`, `ACTUAL_EXEC_2.06` restricts ZoneBirth Short to planned risk `<= 8` or `12 < risk <= 18`. Rejected candidates use `ZoneBirthShortV170RiskBandExcluded`; executed candidates use `ZoneBirthShortDualRiskBandV170` with a band-specific tag. Entry-fill validation stores the corresponding `8` or `18` point cap. No CSV columns are added.
+
 Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
 
 - `SplitBase_Runner2_5R_BE0_75R`

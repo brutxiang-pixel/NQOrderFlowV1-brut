@@ -83,6 +83,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal AggressiveExpansionV164MaxRiskPoints = 25m;
     private const decimal AggressiveExpansionV164TargetR = 3m;
     private const decimal DynamicExpansionV168TargetR = 2.5m;
+    private const decimal ZoneBirthShortV170LowRiskMaxPoints = 8m;
+    private const decimal ZoneBirthShortV170MidRiskMinExclusivePoints = 12m;
+    private const decimal ZoneBirthShortV170MidRiskMaxPoints = 18m;
     private const decimal EntryFillRiskDriftTolerancePoints = 1m;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
@@ -2099,6 +2102,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 executeReasons.Add($"BoldExpansionV167:{aggressiveExpansionTag}");
             if (aggressiveExpansionTag.EndsWith("V168", StringComparison.Ordinal) || targetR == DynamicExpansionV168TargetR)
                 executeReasons.Add($"DynamicExpansionV168:{aggressiveExpansionTag},targetR={targetR:0.##}");
+            if (IsZoneBirthShortExpansionV168(signal, researchPath))
+                executeReasons.Add($"ZoneBirthShortDualRiskBandV170:{ZoneBirthShortV170RiskBandTag(risk)},risk={risk:0.##}");
         }
         var wait1Tag = signal.SkipReasons.FirstOrDefault(x => x.StartsWith("AggressiveExpansionWait1V165:", StringComparison.Ordinal));
         if (!string.IsNullOrEmpty(wait1Tag))
@@ -2316,6 +2321,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal MaxAllowedActualRiskPoints(CandidateSignal signal, string researchPath, decimal risk)
     {
+        if (IsZoneBirthShortExpansionV168(signal, researchPath))
+            return risk <= ZoneBirthShortV170LowRiskMaxPoints
+                ? ZoneBirthShortV170LowRiskMaxPoints
+                : ZoneBirthShortV170MidRiskMaxPoints;
         if (TryGetAggressiveExpansionV164Rules(signal.Side, researchPath, out _, out _, out _))
             return AggressiveExpansionV164MaxRiskPoints;
         if (IsBreakawayLongSelectiveV134Quality(signal, researchPath))
@@ -2667,6 +2676,23 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return !string.IsNullOrEmpty(tag);
     }
 
+    private static bool IsZoneBirthShortExpansionV168(CandidateSignal signal, string researchPath)
+    {
+        return signal.Side == TradeSide.Short &&
+            string.Equals(researchPath, "ZoneBirthResearch", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsZoneBirthShortV170RiskAllowed(decimal risk)
+    {
+        return risk <= ZoneBirthShortV170LowRiskMaxPoints ||
+            (risk > ZoneBirthShortV170MidRiskMinExclusivePoints && risk <= ZoneBirthShortV170MidRiskMaxPoints);
+    }
+
+    private static string ZoneBirthShortV170RiskBandTag(decimal risk)
+    {
+        return risk <= ZoneBirthShortV170LowRiskMaxPoints ? "LowRiskLe8" : "MidRiskGt12Le18";
+    }
+
     private static bool IsPositiveExpansionV146(CandidateSignal signal, string researchPath)
     {
         if (string.Equals(researchPath, "BreakawayRetest", StringComparison.OrdinalIgnoreCase))
@@ -2850,6 +2876,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var isObservationConfirmWideStopLowRisk = IsObservationConfirmWideStopLowRiskV132(signal, researchPath, risk);
         var isObservationConfirmRisk22 = IsObservationConfirmRisk22V132(signal, researchPath, risk);
         var isAggressiveExpansionV164 = TryGetAggressiveExpansionV164Rules(signal.Side, researchPath, out _, out var aggressiveMinEstimatedRr, out _);
+        if (IsZoneBirthShortExpansionV168(signal, researchPath) && !IsZoneBirthShortV170RiskAllowed(risk))
+            reasons.Add($"ZoneBirthShortV170RiskBandExcluded:risk={risk:0.##},allowed=<=8|>12<=18");
         if (isAggressiveExpansionV164 && risk > AggressiveExpansionV164MaxRiskPoints)
             reasons.Add($"AggressiveExpansionV164RiskCapExceeded:risk={risk:0.##},max={AggressiveExpansionV164MaxRiskPoints:0.##}");
         if (isDailyVolumeFloor && !isAggressiveExpansionV164 && !isObservationConfirmWideStopVolume && risk > DailyVolumeFloorMaxRiskPoints)
