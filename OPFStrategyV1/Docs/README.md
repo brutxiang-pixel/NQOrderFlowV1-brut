@@ -1277,6 +1277,14 @@ From `OPF_RESEARCH_1.70`, the full 112-day v1.69 evidence applies a precise Zone
 - The conservative v1.69 exclusion projection removes `128` losing trades and retains `164` ZoneBirth trades at approximately `+23.77R`. The full portfolio projects `872` trades, `+187.09R`, `+$12,021`, PF `1.467`, and `$1,076` maximum drawdown before active-trade replacement.
 - All other paths, targets, Wait1 research-only behavior, daily capacity, and execution protections remain unchanged.
 
+From `OPF_RESEARCH_1.71`, `ACTUAL_EXEC_2.07` promotes one selective dynamic-exit policy from the reviewed v1.70 evidence:
+
+- Standard `ObservationConfirm` and `ZoneBirthResearch` Short use a real `2.5R` target. Wide-stop Observation, Breakaway, FailureReverse, and every other path retain their existing targets and stops.
+- Their entry eligibility reward model and same-bar checks remain on the v1.70 rules, so the target change does not deliberately widen the entry pool.
+- After a closed bar first reaches `1.5R` MFE, the strategy modifies the working stop to lock `1R` for the following bar. If that stop is already on the invalid side of the trigger bar close, the modification is skipped and the original stop remains active.
+- Executions include `SelectiveDynamicProtectionV171`; lifecycle events distinguish trigger, modification send, applied, invalid-market skip, no-op, and modification failure.
+- The v1.70 reviewed 112-day evidence produced `934` trades, `+189.46R`, `+$12,107.50`, PF `1.438`, and `$1,356.50` maximum drawdown. On `707` common, fully covered, non-ambiguous trades, the research policy improved `+106.73R` to `+159.73R`, while path analysis was positive for standard ObservationConfirm and ZoneBirth Short but negative for several excluded paths.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
