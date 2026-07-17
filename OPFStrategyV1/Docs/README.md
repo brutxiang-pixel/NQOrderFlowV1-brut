@@ -1203,6 +1203,71 @@ From `OPF_RESEARCH_1.62`, v1.61 remains the profit baseline while one broad repl
 - `Analyze-OPFV162VirtualPortfolios.ps1` combines Actual trades and the two research pools chronologically, applies one-active-trade and 12-trade daily limits, rejects ambiguous same-bar outcomes, and reports blocked Actual trades, NetR, NetDollars, PF, and drawdown by exit policy.
 - All other Actual paths, v1.61 selective `2R`, Breakaway Short target, risk gates, order quantity, and execution-safety behavior remain unchanged.
 
+From `OPF_RESEARCH_1.63`, the v1.62 full replay keeps the research evidence but rolls back its losing Actual cap change and promotes two independently tagged selective expansion pools:
+
+- Actual defaults use `ACTUAL_EXEC_1.99`.
+- The Long `ObservationConfirm_WideStop1_5R` expansion daily cap returns from two trades to one. Candidates after the cap are skipped with `OCWideStopLongExpansionV163DailyCap`.
+- `ObservationStrict_Other` can execute Long only and `TrendPullbackConfirmed` can execute Short only when `SetupQualityScore >= 45`, planned risk is at most `25` points, and nearest-structure estimated RR is at least `0.5`.
+- Both v1.63 pools use a real fixed `3R` target and are tagged `SelectiveExpansionV163`, plus `ObservationStrictOtherLongTarget3RV163` or `TrendPullbackConfirmedShortTarget3RV163`.
+- The `3R` target does not replace the eligibility reward model: the entry gate still uses nearest-structure reward evidence, matching the v1.62 research selection.
+- Base Observation, Breakaway, Failure, v1.61 selective `2R`, order quantity, daily maximum, and all execution-safety rules remain unchanged.
+- Compact exit-policy logging now includes `BreakawayRetest`, closing the single v1.62 coverage gap for that Actual path.
+- `Analyze-OPFV162VirtualPortfolios.ps1` no longer excludes calendar dates by default because a valid session can contain overnight rows whose calendar date is on the permanent session-exclusion list.
+- The v1.62 full evidence projected the v1.63 combination at `729` trades, `+147.42R`, `+$9,404.50`, PF `1.465`, and `$886` maximum drawdown versus the v1.61 baseline of `716` trades, `+127.35R`, `+$8,370`, PF `1.417`, and `$916.50` drawdown.
+
+From `OPF_RESEARCH_1.64`, the rejected five-day v1.63 Smoke is replaced by an eight-source aggressive expansion experiment:
+
+- Actual defaults use `ACTUAL_EXEC_2.00`; the global `ActualMaxTradesPerDay=12` remains the only daily entry ceiling for the new pool.
+- All eight path/side sources use planned risk `<= 25`, nearest-structure RR for eligibility, and a real fixed `3R` bracket. No fixed-3R reward is substituted into the entry RR check.
+- `ObservationStrict_Other` Long, its wide-stop Long variant, and `TrendPullbackConfirmed` Short require score `>= 35` and RR `>= 0.25`.
+- `ObservationStrict_BullFresh_WideStop1_5R` Long requires score `>= 45` and RR `>= 0.5`.
+- `FailureReverse_RetestFailed_WideStop1_5R` Short requires score `>= 35` and RR `>= 0.25`.
+- `FailureReverse_ObservationInvalidated_WideStop1_5R` Long requires score `>= 45` and RR `>= 0.5`; its Short side requires score `>= 35` and RR `>= 0.25`.
+- `UnknownRegimeZoneTouch` Short requires score `>= 45` and RR `>= 0.25`.
+- Executions include `AggressiveExpansionV164` and one source-specific tag. Non-designated directions remain explicitly blocked, and ActiveTrade, same-bar ambiguity, replay-stop, filled-risk drift, order lifecycle, and cleanup protections remain unchanged.
+
+From `OPF_RESEARCH_1.65`, v1.64's profitable but low-volume expansion pool gains a one-bar delayed confirmation path without weakening execution safety:
+
+- Actual defaults use `ACTUAL_EXEC_2.01`; all eight v1.64 source thresholds, fixed `3R` targets, the global 12-trade ceiling, and source-direction restrictions remain unchanged.
+- A qualified aggressive-expansion candidate whose only blocker is an entry-bar stop/target touch is logged as `AggressiveExpansionWait1ScheduledV165` and retried once on the immediately following closed bar.
+- Wait1 requires directional follow-through, recalculates the zone stop or `1.5x` wide stop from the new entry, and reruns strategy, path, risk, nearest-structure RR, same-bar, daily, ActiveTrade, position, and lifecycle checks.
+- Wait1 never schedules a second wait. Executions include `AggressiveExpansionWait1V165`; rejection and expiry events are logged independently.
+- `ObservationConfirm_WideStop1_5R` fill validation now uses the same 22-point V131 cap that admitted the trade. The prior low-risk 18-point check no longer overrides a valid V131 wide-stop execution after a partial fill.
+
+From `OPF_RESEARCH_1.66`, the Wait1 retry uses the confirmation bar itself as the new stop structure:
+
+- Actual defaults use `ACTUAL_EXEC_2.02`; v1.64 source rules and the v1.65 single-retry/follow-through behavior remain unchanged.
+- Long Wait1 uses the confirmation-bar low minus `0.5` point; Short Wait1 uses the confirmation-bar high plus `0.5` point.
+- Wide-stop sources expand that confirmation-bar risk by `1.5x` from the delayed entry instead of carrying the original zone distance forward.
+- The retry still requires risk `<= 25`, source RR, no retry-bar stop/target touch, daily capacity, no ActiveTrade, and all fill/lifecycle protections.
+- Executed retries add `AggressiveExpansionWait1ConfirmBarStopV166`; retry diagnostics use `EXPANSION_WAIT1_RETRY_V166`.
+
+From `OPF_RESEARCH_1.67`, Actual expansion moves away from failed Wait1 execution and adds four broader positive-evidence sources:
+
+- Actual defaults use `ACTUAL_EXEC_2.03`; `AlmostConfirmed` and `ShadowCandidate` are added to the path list.
+- `FailureReverse_ObservationInvalidated` Short, `UnknownRegimeZoneTouch` Long, `ShadowCandidate` Short, and `AlmostConfirmed` Long execute with score `>= 35`, planned risk `<= 25`, eligibility RR `>= 0.25`, and real fixed `3R` targets.
+- These executions retain `AggressiveExpansionV164` family logging and add `BoldExpansionV167` plus a source-specific `V167` tag.
+- Opposite directions remain explicitly disabled. ActiveTrade, same-bar, daily 12-trade, replay-stop, fill drift, and lifecycle protections are unchanged.
+- Wait1 scheduling and outcome tracking remain in research logs, but the delayed candidate no longer submits an Actual order; diagnostics include `EXPANSION_WAIT1_RESEARCH_ONLY_V167`.
+- The selected v1.67 directions produced approximately `734` historical qualified candidates and `+145R` under conservative fixed-3R outcome classification. `StructureConfirmShadow_ConfirmBarStop_Wait1` is not enabled because its historical fixed-3R result was negative.
+
+From `OPF_RESEARCH_1.68`, the bold expansion pool adds capacity and introduces path-specific profit targets:
+
+- Actual defaults use `ACTUAL_EXEC_2.04`; `ZoneBirthResearch` is added to the execution path list.
+- `ZoneBirthResearch` Short and `FailureReverse_ObservationInvalidated` Long execute with score `>= 35`, planned risk `<= 25`, and eligibility RR `>= 0.25`.
+- `ZoneBirthResearch` Short, both `FailureReverse_ObservationInvalidated` directions, and `AlmostConfirmed` Long use real `2.5R` targets. `UnknownRegimeZoneTouch` Long and `ShadowCandidate` Short retain `3R`.
+- Entry eligibility continues to use the existing reward model independently of the actual `2.5R` bracket.
+- Executions add `DynamicExpansionV168` and source-specific `ZoneBirthShortV168` or `FailureObservationInvalidatedLongV168` tags.
+- Historical fixed-target comparison favored `2.5R` for ZoneBirth Short (`+58.5R`), FailureInvalidated Short (`+93R`), FailureInvalidated Long (`+29R`), and AlmostConfirmed Long (`+8R`).
+- Wait1 remains research-only, and all same-bar, ActiveTrade, daily, fill-drift, and lifecycle protections remain unchanged.
+
+From `OPF_RESEARCH_1.69`, the v1.68 expansion set is retained except for one precision contraction:
+
+- Actual defaults use `ACTUAL_EXEC_2.05`.
+- `UnknownRegimeZoneTouch` Long is removed from aggressive Actual execution after the clean four-day combined evidence produced `9` trades and approximately `-4.88R`, breaching the per-source `-4R` floor.
+- `UnknownRegimeZoneTouch` Short remains eligible under its v1.64 rule. All v1.67/v1.68 sources, thresholds, `2.5R`/`3R` targets, daily capacity, and safety behavior remain unchanged.
+- Removing Unknown Long from the same clean evidence leaves `16` expansion trades across four sources at approximately `+10.06R`, with zero lifecycle anomalies.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

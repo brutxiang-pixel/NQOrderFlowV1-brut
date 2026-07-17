@@ -1,6 +1,6 @@
 # OPFStrategyV1 Data Dictionary
 
-This document describes the current research files produced by `OPF_RESEARCH_1.62`.
+This document describes the current research files produced by `OPF_RESEARCH_1.63`.
 
 ## Common Context
 
@@ -872,6 +872,20 @@ From `OPF_RESEARCH_1.60`, `ACTUAL_EXEC_1.96` serializes every ResearchLogger tex
 From `OPF_RESEARCH_1.61`, `ACTUAL_EXEC_1.97` applies `TargetR=2.0` only to base `ObservationConfirm` Long executions whose planned risk is greater than `8` and at most `11` points. Executed rows include `ObservationConfirmLongTarget2RV161` in `execution_decisions.csv`; `execution_trades.csv` records `TargetR=2`, while all entry and safety gates remain unchanged.
 
 From `OPF_RESEARCH_1.62`, `ACTUAL_EXEC_1.98` raises the Long wide-stop expansion daily cap from one to two without changing its score/risk gates. The second execution is tagged `OCWideStopLongSecondExpansionV162`. Compact exit-policy rows also cover qualified `ObservationStrict_Other` Long and `TrendPullbackConfirmed` Short research candidates and add five full-position dynamic-protection policies. `PolicyExitBar` records the simulated policy's actual exit bar so offline portfolio analysis can model active-trade replacement instead of simply adding independent outcomes.
+
+From `OPF_RESEARCH_1.63`, `ACTUAL_EXEC_1.99` restores the Long wide-stop expansion cap to one and promotes qualified `ObservationStrict_Other` Long / `TrendPullbackConfirmed` Short candidates to Actual execution with fixed `3R` targets. Executed rows include `SelectiveExpansionV163` and a path-specific target tag. Eligibility continues to use nearest-structure RR `>= 0.5`, independently of the real `3R` bracket. Compact exit-policy logging also includes `BreakawayRetest`.
+
+From `OPF_RESEARCH_1.64`, `ACTUAL_EXEC_2.00` expands Actual research to eight independently tagged path/side sources. All use planned risk `<= 25` and real fixed `3R` targets, while eligibility continues to use nearest-structure reward evidence. Per-source score/RR thresholds are documented in `README.md`. Executed decisions contain `AggressiveExpansionV164` plus a source-specific tag; no new CSV columns are added. Compact exit-policy logging follows the same eight source rules.
+
+From `OPF_RESEARCH_1.65`, `ACTUAL_EXEC_2.01` adds a single-bar delayed retry for qualified aggressive-expansion candidates blocked only by entry-bar stop/target touches. Scheduling, retry, rejection, and executed Wait1 rows use `AggressiveExpansionWait1ScheduledV165`, `EXPANSION_WAIT1_RETRY_V165`, `EXPANSION_WAIT1_REJECTED`, and `AggressiveExpansionWait1V165`. Stops, risk, RR, and all execution guards are recalculated on the retry bar. Wide-stop V131 fill validation also preserves its admitted 22-point cap instead of falling through to the 18-point low-risk cap. No CSV columns are added.
+
+From `OPF_RESEARCH_1.66`, `ACTUAL_EXEC_2.02` changes only the Wait1 stop model. The delayed bar low/high plus a `0.5` point buffer becomes the base stop; WideStop variants apply `1.5x` to that new confirmation-bar risk. Executed retries include `AggressiveExpansionWait1ConfirmBarStopV166`, and retry diagnostics use `EXPANSION_WAIT1_RETRY_V166`. All v1.65 scheduling, follow-through, risk/RR, same-bar, ActiveTrade, and lifecycle guards remain active.
+
+From `OPF_RESEARCH_1.67`, `ACTUAL_EXEC_2.03` promotes four fixed-3R positive-evidence directions: `FailureReverse_ObservationInvalidated` Short, `UnknownRegimeZoneTouch` Long, `ShadowCandidate` Short, and `AlmostConfirmed` Long. Each uses score `>= 35`, risk `<= 25`, and eligibility RR `>= 0.25`. Execute reasons add `BoldExpansionV167` and a source-specific tag. Wait1 remains logged and tracked through `EXPANSION_WAIT1_RESEARCH_ONLY_V167` but no longer submits Actual orders. No CSV columns are added.
+
+From `OPF_RESEARCH_1.68`, `ACTUAL_EXEC_2.04` adds `ZoneBirthResearch` Short and `FailureReverse_ObservationInvalidated` Long to the aggressive pool with score `>= 35`, risk `<= 25`, and eligibility RR `>= 0.25`. ZoneBirth Short, both base FailureInvalidated directions, and AlmostConfirmed Long use real `2.5R` targets and include `DynamicExpansionV168` in Execute reasons. Unknown Long and Shadow Short retain `3R`. No CSV columns are added.
+
+From `OPF_RESEARCH_1.69`, `ACTUAL_EXEC_2.05` disables only `UnknownRegimeZoneTouch` Long aggressive execution after its clean combined Smoke evidence fell below the per-source `-4R` floor. Unknown Short and every other v1.67/v1.68 source, target, threshold, log column, and safety rule remain unchanged.
 
 Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
 

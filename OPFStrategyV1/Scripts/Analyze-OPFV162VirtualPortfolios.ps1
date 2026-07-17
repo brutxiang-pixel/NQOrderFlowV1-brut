@@ -1,11 +1,6 @@
 param(
     [string]$LogDirectory = (Join-Path $env:APPDATA 'ATAS\StrategyLogs\OPFStrategyV1'),
-    [string[]]$ExcludeDates = @(
-        '2026-01-02','2026-01-12','2026-01-19','2026-01-22','2026-01-28',
-        '2026-02-04','2026-02-09','2026-02-26','2026-03-13',
-        '2026-04-16','2026-04-17','2026-04-23','2026-04-24','2026-04-30',
-        '2026-05-04','2026-05-07'
-    ),
+    [string[]]$ExcludeDates = @(),
     [string]$OutputPath = ''
 )
 
