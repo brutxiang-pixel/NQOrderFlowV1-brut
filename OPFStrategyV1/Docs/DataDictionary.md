@@ -474,12 +474,6 @@ From `OPF_RESEARCH_0.51`, `execution_events.csv` may include:
 - `PROTECTION_CLEANUP_CANCEL_SENT`: the strategy sent cancel requests for still-working known execution orders.
 - `PROTECTION_CLEANUP_DONE`: all known Entry/SL/TP orders are no longer working.
 - `PROTECTION_STALE_AFTER_EXIT`: at least one known Entry/SL/TP order still looked working after a cleanup attempt.
-- `DYNAMIC_PROTECTION_V171_TRIGGERED`: an eligible Actual trade first reached the closed-bar `1.5R` trigger.
-- `DYNAMIC_PROTECTION_V171_MODIFY_SEND`: the strategy requested a working SL change to lock `1R`.
-- `DYNAMIC_PROTECTION_V171_APPLIED`: ATAS accepted or attached the modified SL.
-- `DYNAMIC_PROTECTION_V171_SKIPPED_MARKET_CROSSED`: the trigger bar closed beyond the proposed protected stop, so the original SL was retained.
-- `DYNAMIC_PROTECTION_V171_NOOP`: the existing SL was already at least as protective as the requested level.
-- `DYNAMIC_PROTECTION_V171_MODIFY_FAIL` / `DYNAMIC_PROTECTION_V171_MODIFY_FAILED`: the asynchronous request or ATAS callback reported a failed SL modification.
 
 From `OPF_RESEARCH_0.52`, StrategyEngine writes the mainline Trend Pullback lifecycle more explicitly:
 
@@ -894,8 +888,6 @@ From `OPF_RESEARCH_1.68`, `ACTUAL_EXEC_2.04` adds `ZoneBirthResearch` Short and 
 From `OPF_RESEARCH_1.69`, `ACTUAL_EXEC_2.05` disables only `UnknownRegimeZoneTouch` Long aggressive execution after its clean combined Smoke evidence fell below the per-source `-4R` floor. Unknown Short and every other v1.67/v1.68 source, target, threshold, log column, and safety rule remain unchanged.
 
 From `OPF_RESEARCH_1.70`, `ACTUAL_EXEC_2.06` restricts ZoneBirth Short to planned risk `<= 8` or `12 < risk <= 18`. Rejected candidates use `ZoneBirthShortV170RiskBandExcluded`; executed candidates use `ZoneBirthShortDualRiskBandV170` with a band-specific tag. Entry-fill validation stores the corresponding `8` or `18` point cap. No CSV columns are added.
-
-From `OPF_RESEARCH_1.71`, `ACTUAL_EXEC_2.07` applies `SelectiveDynamicProtectionV171` only to standard `ObservationConfirm` and `ZoneBirthResearch` Short. Their real target is `2.5R`; their v1.70 entry eligibility and same-bar models remain unchanged. A closed-bar `1.5R` trigger requests an SL modification to lock `1R` from the following bar when the stop remains valid relative to the trigger-bar close. No CSV columns are added.
 
 Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
 

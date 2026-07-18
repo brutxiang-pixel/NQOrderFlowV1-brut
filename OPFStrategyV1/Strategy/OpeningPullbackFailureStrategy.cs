@@ -86,9 +86,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ZoneBirthShortV170LowRiskMaxPoints = 8m;
     private const decimal ZoneBirthShortV170MidRiskMinExclusivePoints = 12m;
     private const decimal ZoneBirthShortV170MidRiskMaxPoints = 18m;
-    private const decimal SelectiveDynamicProtectionV171TriggerR = 1.5m;
-    private const decimal SelectiveDynamicProtectionV171LockR = 1m;
-    private const decimal SelectiveDynamicProtectionV171TargetR = 2.5m;
     private const decimal EntryFillRiskDriftTolerancePoints = 1m;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
@@ -400,7 +397,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var current = ToOpfCandle(bar, candle);
         _lastResearchCandle = current;
         UpdateActualExecutionExcursion(current);
-        ScheduleSelectiveDynamicProtectionV171IfNeeded(current);
         ScheduleStaleUnfilledEntryAbortIfNeeded(current);
         ScheduleReplayStopExitIfNeeded(current);
         ScheduleOrphanPositionFlattenIfNeeded(current);
@@ -525,23 +521,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         AppendOrderFailureEvent(order, "CANCEL_FAIL", message);
     }
 
-    protected override void OnOrderModifyFailed(Order order, Order newOrder, string message)
-    {
-        base.OnOrderModifyFailed(order, newOrder, message);
-        var execution = _replayExecution;
-        var failedOrder = newOrder ?? order;
-        if (!EnableReplayOrders || execution is null || !execution.DynamicProtectionV171Pending ||
-            !IsActiveExecutionOrder(failedOrder) ||
-            !string.Equals(ParseExecutionRole(failedOrder.Comment), "SL", StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        execution.DynamicProtectionV171Pending = false;
-        LogExecutionInfo($"EXEC_DYNAMIC_PROTECTION_V171_MODIFY_FAILED trade={execution.TradeId} msg={message}");
-        AppendExecutionEvent(execution, "DYNAMIC_PROTECTION_V171_MODIFY_FAILED", "SL", execution.DynamicProtectionV171PendingStop, execution.BracketQty, message);
-    }
-
     private void AttachReplayOrder(Order? order, string source)
     {
         if (!EnableReplayOrders || order is null || _replayExecution is null)
@@ -554,10 +533,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (role == "ENTRY")
             _replayExecution.EntryOrder = order;
         else if (role == "SL")
-        {
             _replayExecution.StopOrder = order;
-            TryMarkSelectiveDynamicProtectionV171Applied(_replayExecution, order, source);
-        }
         else if (role == "TP")
             _replayExecution.TargetOrder = order;
 
@@ -2129,8 +2105,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (IsZoneBirthShortExpansionV168(signal, researchPath))
                 executeReasons.Add($"ZoneBirthShortDualRiskBandV170:{ZoneBirthShortV170RiskBandTag(risk)},risk={risk:0.##}");
         }
-        if (UsesSelectiveDynamicProtectionV171(signal.Side, researchPath))
-            executeReasons.Add($"SelectiveDynamicProtectionV171:triggerR={SelectiveDynamicProtectionV171TriggerR:0.##},lockR={SelectiveDynamicProtectionV171LockR:0.##},targetR={targetR:0.##}");
         var wait1Tag = signal.SkipReasons.FirstOrDefault(x => x.StartsWith("AggressiveExpansionWait1V165:", StringComparison.Ordinal));
         if (!string.IsNullOrEmpty(wait1Tag))
             executeReasons.Add(wait1Tag);
@@ -2140,7 +2114,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (!string.IsNullOrEmpty(profitTargetTag))
             executeReasons.Add($"{profitTargetTag}:targetR={targetR:0.##},risk={risk:0.##}");
         var observationLongTargetTag = ObservationConfirmLongTarget2RV161Tag(signal.Side, researchPath, risk);
-        if (!UsesStandardObservationConfirmDynamicProtectionV171(signal.Side, researchPath) && !string.IsNullOrEmpty(observationLongTargetTag))
+        if (!string.IsNullOrEmpty(observationLongTargetTag))
             executeReasons.Add($"{observationLongTargetTag}:targetR={targetR:0.##},plannedRisk={risk:0.##}");
         if (targetR != ReplayTargetR)
             executeReasons.Add($"ActualTargetOverride:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
@@ -2719,18 +2693,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return risk <= ZoneBirthShortV170LowRiskMaxPoints ? "LowRiskLe8" : "MidRiskGt12Le18";
     }
 
-    private static bool UsesSelectiveDynamicProtectionV171(TradeSide side, string researchPath)
-    {
-        return UsesStandardObservationConfirmDynamicProtectionV171(side, researchPath) ||
-            (side == TradeSide.Short && string.Equals(researchPath, "ZoneBirthResearch", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static bool UsesStandardObservationConfirmDynamicProtectionV171(TradeSide side, string researchPath)
-    {
-        return (side == TradeSide.Long || side == TradeSide.Short) &&
-            string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool IsPositiveExpansionV146(CandidateSignal signal, string researchPath)
     {
         if (string.Equals(researchPath, "BreakawayRetest", StringComparison.OrdinalIgnoreCase))
@@ -3037,13 +2999,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (IsUnknownMicroRiskVolumeExpansionV126(signal, researchPath))
             return new RewardEstimate(risk * targetR, $"UnknownMicroRiskVolumeV126TargetR:{targetR:0.##}");
 
-        if (UsesStandardObservationConfirmDynamicProtectionV171(signal.Side, researchPath))
-        {
-            if (!string.IsNullOrEmpty(ObservationConfirmLongTarget2RV161Tag(signal.Side, researchPath, risk)))
-                return new RewardEstimate(Math.Round(risk * ObservationConfirmLongTarget2RV161R, 2), $"ActualTargetOverride:{ObservationConfirmLongTarget2RV161R:0.##}");
-            return EstimateReward(signal, researchPath, entry, risk);
-        }
-
         if (targetR != ReplayTargetR)
             return new RewardEstimate(Math.Round(risk * targetR, 2), $"ActualTargetOverride:{targetR:0.##}");
 
@@ -3072,9 +3027,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ActualTargetRFor(TradeSide side, string researchPath, decimal risk)
     {
-        if (UsesSelectiveDynamicProtectionV171(side, researchPath))
-            return SelectiveDynamicProtectionV171TargetR;
-
         if (TryGetAggressiveExpansionV164Rules(side, researchPath, out _, out _, out _))
             return AggressiveExpansionTargetR(side, researchPath);
 
@@ -3132,12 +3084,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         var reasons = new List<string>();
         var entry = entryCandle.Close;
-        var targetR = UsesStandardObservationConfirmDynamicProtectionV171(signal.Side, researchPath)
-            ? !string.IsNullOrEmpty(ObservationConfirmLongTarget2RV161Tag(signal.Side, researchPath, risk))
-                ? ObservationConfirmLongTarget2RV161R
-                : ReplayTargetR
-            : ActualTargetRFor(signal, researchPath, risk);
-        var target = TargetFromRisk(signal.Side, entry, risk, targetR);
+        var target = TargetFromRisk(signal.Side, entry, risk, ActualTargetRFor(signal, researchPath, risk));
 
         if (signal.Side == TradeSide.Long)
         {
@@ -3674,94 +3621,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (NeedsProtectionCleanup(execution))
                 await CleanupProtectionOrdersAsync(execution!, reason);
         });
-    }
-
-    private void ScheduleSelectiveDynamicProtectionV171IfNeeded(OpfCandle candle)
-    {
-        var execution = _replayExecution;
-        if (_snapshot is null || execution is null || execution.ExitCompleted ||
-            execution.DynamicProtectionV171Evaluated || !execution.BracketSubmitted ||
-            execution.EntryFilledQty <= 0m || !IsWorkingExecutionOrder(execution.StopOrder) ||
-            !UsesSelectiveDynamicProtectionV171(execution.Side, execution.ResearchPath) ||
-            execution.ActualMfeR < SelectiveDynamicProtectionV171TriggerR)
-        {
-            return;
-        }
-
-        execution.DynamicProtectionV171Evaluated = true;
-        execution.DynamicProtectionV171TriggerBar = candle.Bar;
-        var entry = execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice;
-        var stop = execution.Side == TradeSide.Long
-            ? entry + execution.InitialRiskPoints * SelectiveDynamicProtectionV171LockR
-            : entry - execution.InitialRiskPoints * SelectiveDynamicProtectionV171LockR;
-        stop = AlignToTick(stop, _snapshot.InstrumentProfile.TickSize);
-        execution.DynamicProtectionV171PendingStop = stop;
-        AppendExecutionEvent(execution, "DYNAMIC_PROTECTION_V171_TRIGGERED", "SL", stop, execution.BracketQty, $"bar={candle.Bar}|mfeR={execution.ActualMfeR:0.####}|triggerR={SelectiveDynamicProtectionV171TriggerR:0.##}|lockR={SelectiveDynamicProtectionV171LockR:0.##}");
-
-        var tick = _snapshot.InstrumentProfile.TickSize;
-        var marketValid = execution.Side == TradeSide.Long
-            ? candle.Close - stop >= tick
-            : stop - candle.Close >= tick;
-        if (!marketValid)
-        {
-            LogExecutionInfo($"EXEC_DYNAMIC_PROTECTION_V171_SKIPPED_MARKET_CROSSED trade={execution.TradeId} close={candle.Close:0.########} stop={stop:0.########}");
-            AppendExecutionEvent(execution, "DYNAMIC_PROTECTION_V171_SKIPPED_MARKET_CROSSED", "SL", stop, execution.BracketQty, $"close={candle.Close:0.########}|tick={tick:0.########}");
-            return;
-        }
-
-        var tighter = execution.Side == TradeSide.Long ? stop > execution.Stop : stop < execution.Stop;
-        if (!tighter)
-        {
-            LogExecutionInfo($"EXEC_DYNAMIC_PROTECTION_V171_NOOP trade={execution.TradeId} current={execution.Stop:0.########} requested={stop:0.########}");
-            AppendExecutionEvent(execution, "DYNAMIC_PROTECTION_V171_NOOP", "SL", stop, execution.BracketQty, $"current={execution.Stop:0.########}");
-            return;
-        }
-
-        execution.DynamicProtectionV171Pending = true;
-        EnqueueExecutionAction("DynamicProtectionV171", async () =>
-        {
-            if (execution.ExitCompleted || !execution.DynamicProtectionV171Pending || !IsWorkingExecutionOrder(execution.StopOrder))
-            {
-                execution.DynamicProtectionV171Pending = false;
-                return;
-            }
-
-            var oldStop = execution.StopOrder!;
-            var newStop = oldStop.Clone();
-            newStop.TriggerPrice = execution.DynamicProtectionV171PendingStop;
-            newStop.TriggerPriceType = ReplayStopTriggerPriceType;
-            LogExecutionInfo($"EXEC_DYNAMIC_PROTECTION_V171_MODIFY_SEND trade={execution.TradeId} old={execution.Stop:0.########} new={newStop.TriggerPrice:0.########} triggerBar={execution.DynamicProtectionV171TriggerBar}");
-            AppendExecutionEvent(execution, "DYNAMIC_PROTECTION_V171_MODIFY_SEND", "SL", newStop.TriggerPrice, execution.BracketQty, $"old={execution.Stop:0.########}|triggerBar={execution.DynamicProtectionV171TriggerBar}");
-            try
-            {
-                await ModifyOrderAsync(oldStop, newStop);
-                TryMarkSelectiveDynamicProtectionV171Applied(execution, newStop, "ModifyOrderAsync");
-            }
-            catch (Exception ex)
-            {
-                execution.DynamicProtectionV171Pending = false;
-                LogExecutionInfo($"EXEC_DYNAMIC_PROTECTION_V171_MODIFY_FAIL trade={execution.TradeId} err={ex.GetType().Name}:{ex.Message}");
-                AppendExecutionEvent(execution, "DYNAMIC_PROTECTION_V171_MODIFY_FAIL", "SL", newStop.TriggerPrice, execution.BracketQty, $"{ex.GetType().Name}:{ex.Message}");
-                throw;
-            }
-        });
-    }
-
-    private void TryMarkSelectiveDynamicProtectionV171Applied(ReplayExecutionState execution, Order order, string source)
-    {
-        if (_snapshot is null || !execution.DynamicProtectionV171Pending || execution.DynamicProtectionV171Applied)
-            return;
-
-        var tolerance = _snapshot.InstrumentProfile.TickSize / 2m;
-        if (Math.Abs(order.TriggerPrice - execution.DynamicProtectionV171PendingStop) > tolerance)
-            return;
-
-        execution.Stop = execution.DynamicProtectionV171PendingStop;
-        execution.StopOrder = order;
-        execution.DynamicProtectionV171Pending = false;
-        execution.DynamicProtectionV171Applied = true;
-        LogExecutionInfo($"EXEC_DYNAMIC_PROTECTION_V171_APPLIED trade={execution.TradeId} stop={execution.Stop:0.########} src={source}");
-        AppendExecutionEvent(execution, "DYNAMIC_PROTECTION_V171_APPLIED", "SL", execution.Stop, execution.BracketQty, $"src={source}|triggerBar={execution.DynamicProtectionV171TriggerBar}");
     }
 
     private void ScheduleStaleUnfilledEntryAbortIfNeeded(OpfCandle candle)
@@ -6009,11 +5868,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public bool EmergencyFlattenSubmitted { get; set; }
         public decimal EmergencyFlattenSubmittedQty { get; set; }
         public bool DuplicateExitFlattenSubmitted { get; set; }
-        public bool DynamicProtectionV171Evaluated { get; set; }
-        public bool DynamicProtectionV171Pending { get; set; }
-        public bool DynamicProtectionV171Applied { get; set; }
-        public int? DynamicProtectionV171TriggerBar { get; set; }
-        public decimal DynamicProtectionV171PendingStop { get; set; }
         public decimal ActualMfePoints { get; private set; }
         public decimal ActualMaePoints { get; private set; }
         public decimal ActualMfeR => InitialRiskPoints <= 0m ? 0m : Math.Round(ActualMfePoints / InitialRiskPoints, 4);
