@@ -1295,14 +1295,24 @@ From `OPF_RESEARCH_1.73`, `ACTUAL_EXEC_2.09` replaces the early-protection rule 
 - If the replay candle close has already crossed to the invalid side of the entry-price break-even stop, the modification is skipped and the original Runner SL remains active.
 - Partial-entry flattening, four-order cleanup, split PnL normalization, duplicate-fill protection, replay stop handling, and every non-ZoneBirth path remain unchanged.
 
+The reviewed v1.73 evidence finished with `113` usable snapshots, `947` trades, approximately `+188.92R / +$11,949.50`, PF `1.430`, and `$1,416` maximum drawdown. It passed its execution-function checks but did not improve the v1.70 profit baseline, so `opf-v1.73-full-backtest-reviewed-not-promoted` preserves it as a non-promoted result.
+
+From `OPF_RESEARCH_1.74`, `ACTUAL_EXEC_2.10` changes abnormal entry-fill handling to match the intended live operating model:
+
+- An entry filled more than the existing tolerance from its planned price is still rejected and immediately flattened.
+- The rejected fill writes `ENTRY_FILL_REJECTED`, `ENTRY_FILL_QUARANTINED_V174`, and `ENTRY_FILL_QUARANTINE_COMPLETE_V174` audit events, but it does not write an `execution_trades.csv` row or Actual-verified outcome.
+- Daily trade/filler counters are rolled back once, so the quarantined order does not consume normal performance volume or appear as a HUD `Other` exit.
+- The old whole-session `DAILY_ABNORMAL_FILL_GUARD_ON` block is removed; after the quarantine flatten and cleanup complete, later eligible signals on the same replay day may execute normally.
+- Every quarantined entry raises an ATAS notification and remains visible on the HUD with the daily abnormal-entry count plus the latest TradeID, planned price, fill price, drift, and filled quantity. Repeated anomalies are handled and notified independently without an automatic daily circuit breaker.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
 
 1. All snapshots use the same `ResearchSchemaVersion` and `ActualExecutionSettings.Version`.
 2. Core CSV files are present: config snapshot, signals, research outcomes, risk evaluations, execution events, and execution trades. `score_breakdown.csv` is required only for scoring-component research; it is not required when `ResearchLogMode=Compact`.
-3. `ExecutedDecisions = ExecutionTrades = ActualVerifiedUniqueTrades`, with no duplicate Actual-verified rows.
-4. Every Actual exit has `PROTECTION_CLEANUP_DONE`, with no `STALE`, `REJECT`, `CANCEL_FAIL`, or `FAILED` events.
+3. `ExecutedDecisions = ExecutionTrades + QuarantinedEntryFills`; normal execution trades equal Actual-verified unique trades, with no duplicate Actual-verified rows.
+4. Every normal or quarantined exit has `PROTECTION_CLEANUP_DONE`, with no unaccounted `STALE`, `CANCEL_FAIL`, or `FAILED` events. An `ENTRY_FILL_REJECTED` row is acceptable only when the matching v1.74 quarantine completes.
 5. The tested configuration is frozen: MNQ, documented `ActualOrderQuantity`, default `ActualTargetR=1.5` with any documented per-version TP overrides, daily target/loss stops disabled for evidence accumulation, max-trades safety ceiling, and Actual path whitelist.
 6. Full-day average Actual trades should stay near 5/day; individual low-trade days are acceptable only when profitability improves and the missed volume is explainable by research/skipped-signal evidence.
 7. Results are explainable through `MFE_R`, `MAE_R`, `ExitEfficiency`, `RunupCapturePct`, and no-trade reasons, even if the batch is not yet strongly profitable.

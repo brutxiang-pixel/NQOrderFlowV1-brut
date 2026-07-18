@@ -968,16 +968,23 @@ if ($executionDecisionRows.Count -gt 0) {
     Write-Host ""
     Write-Host "=== Actual Execution Lifecycle Audit ==="
     $executed = @($executionDecisionRows | Where-Object { $_.Decision -eq 'Execute' })
+    $quarantinedEntryTradeIds = @($executionEventRows |
+        Where-Object { (Field $_ 'Event') -eq 'ENTRY_FILL_QUARANTINE_COMPLETE_V174' } |
+        ForEach-Object { Field $_ 'TradeID' } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique)
     $actualVerifiedRows = @($rows | Where-Object { Is-True (Field $_ 'ActualVerified') })
     $actualVerifiedTradeIds = @($actualVerifiedRows | ForEach-Object { Field $_ 'ActualTradeID' } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
     [pscustomobject]@{
         ExecutedDecisions = $executed.Count
         ExecutionTrades = $executionTradeRows.Count
+        QuarantinedEntryFills = $quarantinedEntryTradeIds.Count
         ActualVerifiedOutcomeRows = $actualVerifiedRows.Count
         ActualVerifiedUniqueTrades = $actualVerifiedTradeIds.Count
         ExecutedMissingTrade = @($executed | Where-Object {
             $id = Field $_ 'TradeID'
-            [string]::IsNullOrWhiteSpace($id) -or -not ($executionTradeRows | Where-Object { $_.TradeID -eq $id })
+            [string]::IsNullOrWhiteSpace($id) -or
+                (-not ($executionTradeRows | Where-Object { $_.TradeID -eq $id }) -and -not ($quarantinedEntryTradeIds -contains $id))
         }).Count
         TradesMissingExecuteDecision = @($executionTradeRows | Where-Object {
             $id = $_.TradeID

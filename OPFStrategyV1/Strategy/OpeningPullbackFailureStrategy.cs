@@ -165,6 +165,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private int _replayConsecutiveLossesToday;
     private decimal _replayDailyPnlDollars;
     private decimal _replayDailyR;
+    private int _replayAbnormalEntryToday;
+    private string _lastAbnormalEntryHudText = "-";
     private string _lastExecutionHudText = "-";
     private readonly Queue<string> _recentExecutionHudItems = new();
     private bool _actualRequireTrendRegime = true;
@@ -184,8 +186,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private bool _isStoppingActualExecution;
     private bool _orphanPositionFlattenPending;
     private int _orphanPositionFlattenLastBar = -1;
-    private DateTime _dailyAbnormalFillGuardDate = DateTime.MinValue;
-    private int _dailyAbnormalFillGuardCount;
     private static PropertyInfo? _vwapProperty;
 
     [Category("OPF Profile")]
@@ -1907,13 +1907,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return;
         }
         ResetReplayExecutionDailyCounter(entryCandle.Time.Date);
-        if (IsDailyAbnormalFillGuardActive(entryCandle.Time.Date))
-        {
-            var reason = $"DailyAbnormalFillGuard:count={_dailyAbnormalFillGuardCount}";
-            AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
-            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_DAILY_ABNORMAL_FILL_GUARD", "-", researchPath, entryCandle.Close, 0m, reason);
-            return;
-        }
         if (!IsReplayExecutionPathEnabled(researchPath))
         {
             AppendExecutionDecision(signal, entryCandle, "Skip", "PathDisabled", researchPath, stop, risk);
@@ -2155,6 +2148,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (targetR != ReplayTargetR)
             executeReasons.Add($"ActualTargetOverride:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
         var executeReason = string.Join("|", executeReasons);
+        _replayExecution.CountedAsObservationFiller = isObservationFiller;
+        _replayExecution.CountedAsQualityRescue = IsDailyVolumeQualityRescue(signal, researchPath, risk);
+        _replayExecution.CountedAsWideStopLongExpansion = isWideStopLongExpansionV157;
         AppendExecutionDecision(signal, entryCandle, "Execute", executeReason, researchPath, stop, risk, tradeId);
         AppendExecutionEvent(signal, tradeId, entryCandle, "ENTRY_SEND", "ENTRY", researchPath, entry, qty, $"stop={stop:0.########}|target={target:0.########}");
         _replayTradesToday++;
@@ -3164,27 +3160,36 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _replayConsecutiveLossesToday = 0;
         _replayDailyPnlDollars = 0m;
         _replayDailyR = 0m;
+        _replayAbnormalEntryToday = 0;
+        _lastAbnormalEntryHudText = "-";
         _lastExecutionHudText = "-";
         _recentExecutionHudItems.Clear();
     }
 
-    private bool IsDailyAbnormalFillGuardActive(DateTime date)
+    private void QuarantineAbnormalEntryV174(ReplayExecutionState execution, string reason)
     {
-        return _dailyAbnormalFillGuardDate == date && _dailyAbnormalFillGuardCount > 0;
-    }
+        if (execution.AbnormalEntryQuarantined)
+            return;
 
-    private void ActivateDailyAbnormalFillGuard(ReplayExecutionState execution, string reason)
-    {
-        var date = execution.CreatedTime.Date;
-        if (_dailyAbnormalFillGuardDate != date)
+        execution.AbnormalEntryQuarantined = true;
+        _replayAbnormalEntryToday++;
+        var drift = Math.Abs(execution.EntryAvgPrice - execution.CreatedPrice);
+        _lastAbnormalEntryHudText = $"{execution.CreatedTime:HH:mm} {execution.TradeId} planned={execution.CreatedPrice:0.##} fill={execution.EntryAvgPrice:0.##} drift={drift:0.##} qty={execution.EntryFilledQty:0.##}";
+        if (!execution.DailyCountersRolledBack && _replayExecutionDate == execution.CreatedTime.Date)
         {
-            _dailyAbnormalFillGuardDate = date;
-            _dailyAbnormalFillGuardCount = 0;
+            _replayTradesToday = Math.Max(0, _replayTradesToday - 1);
+            if (execution.CountedAsObservationFiller)
+                _observationConfirmFillerTradesToday = Math.Max(0, _observationConfirmFillerTradesToday - 1);
+            if (execution.CountedAsQualityRescue)
+                _observationConfirmQualityRescueTradesToday = Math.Max(0, _observationConfirmQualityRescueTradesToday - 1);
+            if (execution.CountedAsWideStopLongExpansion)
+                _observationConfirmWideStopLongExpansionTradesToday = Math.Max(0, _observationConfirmWideStopLongExpansionTradesToday - 1);
+            execution.DailyCountersRolledBack = true;
         }
 
-        _dailyAbnormalFillGuardCount++;
-        LogExecutionInfo($"EXEC_DAILY_ABNORMAL_FILL_GUARD_ON date={date:yyyy-MM-dd} trade={execution.TradeId} count={_dailyAbnormalFillGuardCount} reason={reason}");
-        AppendExecutionEvent(execution, "DAILY_ABNORMAL_FILL_GUARD_ON", "ENTRY", execution.EntryAvgPrice, execution.EntryFilledQty, $"count={_dailyAbnormalFillGuardCount}|{reason}");
+        LogExecutionInfo($"EXEC_ENTRY_FILL_QUARANTINED_V174 trade={execution.TradeId} reason={reason}");
+        AppendExecutionEvent(execution, "ENTRY_FILL_QUARANTINED_V174", "ENTRY", execution.EntryAvgPrice, execution.EntryFilledQty, reason);
+        RaiseShowNotification($"Abnormal entry quarantined: {_lastAbnormalEntryHudText}. Strategy will continue after flatten and cleanup.", "OPFStrategyV1");
     }
 
     private static bool IsExpectedTradeOrder(ReplayExecutionState execution, string role, Order order, out string reason)
@@ -3269,7 +3274,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 var reason = $"EntryFillOutOfRange:fill={_replayExecution.EntryAvgPrice:0.########}|planned={_replayExecution.CreatedPrice:0.########}|drift={entryDrift:0.########}|max={tolerance:0.########}";
                 LogExecutionInfo($"EXEC_ENTRY_FILL_REJECTED trade={tradeId} {reason}");
                 AppendExecutionEvent(_replayExecution, "ENTRY_FILL_REJECTED", "ENTRY", trade.Price, trade.Volume, reason);
-                ActivateDailyAbnormalFillGuard(_replayExecution, reason);
+                QuarantineAbnormalEntryV174(_replayExecution, reason);
                 _replayExecution.EmergencyFlattenSubmitted = true;
                 var flattenQty = Math.Max(0m, _replayExecution.EntryFilledQty - _replayExecution.EmergencyFlattenSubmittedQty);
                 if (flattenQty > 0m)
@@ -3339,7 +3344,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 ScheduleZoneBirthRunnerBreakEvenAfterBaseTargetV173(_replayExecution, trade.Price);
             await TryCancelExecutionOrderAsync(_replayExecution.EntryOrder, "ExitFilledCancelEntry");
 
-            var completeQty = _replayExecution.BracketQty > 0m ? _replayExecution.BracketQty : _replayExecution.Quantity;
+            var completeQty = _replayExecution.AbnormalEntryQuarantined
+                ? _replayExecution.EntryFilledQty
+                : _replayExecution.BracketQty > 0m ? _replayExecution.BracketQty : _replayExecution.Quantity;
             if (_replayExecution.ExitFilledQty + 0.0000001m < completeQty)
                 return;
 
@@ -3364,7 +3371,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 LogExecutionInfo($"EXEC_ABNORMAL trade={tradeId} role={finalRole} reason={validation.Reason} exit={finalExitPrice:0.########} expected={validation.ExpectedExitPrice:0.########} drift={validation.ExitPriceDriftPoints:0.########}");
                 AppendExecutionEvent(_replayExecution, "ABNORMAL_EXECUTION", finalRole, finalExitPrice, _replayExecution.ExitFilledQty, $"{validation.Reason}|expected={validation.ExpectedExitPrice:0.########}|drift={validation.ExitPriceDriftPoints:0.########}");
             }
-            UpdateReplayExecutionDailyResult(_replayExecution.CreatedTime.Date, validation.NormalDollars, dailyRole);
+            if (!_replayExecution.AbnormalEntryQuarantined)
+                UpdateReplayExecutionDailyResult(_replayExecution.CreatedTime.Date, validation.NormalDollars, dailyRole);
             var loggedExitPrice = _replayExecution.ZoneBirthSplitRunnerV172 || IsNormalizedReplayExitFill(validation)
                 ? validation.ExpectedExitPrice
                 : finalExitPrice;
@@ -3373,8 +3381,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             _replayExecution.ExitPrice = loggedExitPrice;
             _replayExecution.ExitRole = finalRole;
 
-            AppendExecutionTrade(_replayExecution, loggedExitPrice, finalRole, validation);
-            TryWriteActualResearchOutcomeOnExit(_replayExecution, finalRole);
+            if (_replayExecution.AbnormalEntryQuarantined)
+            {
+                LogExecutionInfo($"EXEC_ENTRY_FILL_QUARANTINE_COMPLETE_V174 trade={tradeId} exit={finalExitPrice:0.########} filled={_replayExecution.EntryFilledQty:0.########} flattened={_replayExecution.ExitFilledQty:0.########}");
+                AppendExecutionEvent(_replayExecution, "ENTRY_FILL_QUARANTINE_COMPLETE_V174", finalRole, finalExitPrice, _replayExecution.ExitFilledQty, $"filled={_replayExecution.EntryFilledQty:0.########}|flattened={_replayExecution.ExitFilledQty:0.########}");
+            }
+            else
+            {
+                AppendExecutionTrade(_replayExecution, loggedExitPrice, finalRole, validation);
+                TryWriteActualResearchOutcomeOnExit(_replayExecution, finalRole);
+            }
             MarkProtectionCleanupPending(_replayExecution, $"ExitFilled:{finalRole}");
 
             if (_replayExecution.ProtectionCleanupPending)
@@ -5974,11 +5990,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         hud.AppendLine($"Zones: {_activeZoneCount}  Candidates: {_candidateCount}  Confirmed: {_confirmedCount}");
         hud.AppendLine($"Research: active={_researchTrackers.Count} done={_researchOutcomeCount}");
         var cleanupCount = _replayExecution is null ? 0 : CountWorkingProtectionOrders(_replayExecution);
-        var abnormalGuard = IsDailyAbnormalFillGuardActive(candle.Time.Date) ? $" abnormalGuard={_dailyAbnormalFillGuardCount}" : string.Empty;
-        hud.AppendLine($"ActualExec: {(EnableReplayOrders ? "ON" : "OFF")} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} active={IsReplayExecutionActive(_replayExecution)} pos={CurrentPosition:0.##} cleanup={cleanupCount}{abnormalGuard}");
+        hud.AppendLine($"ActualExec: {(EnableReplayOrders ? "ON" : "OFF")} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} active={IsReplayExecutionActive(_replayExecution)} pos={CurrentPosition:0.##} cleanup={cleanupCount}");
         var dailyTarget = _snapshot?.ExecutionProfile.DailyTargetDollars ?? 0m;
         var dailyLoss = _snapshot?.ExecutionProfile.DailyLossLimitDollars ?? 0m;
         hud.AppendLine($"Today: TP={_replayTpToday} SL={_replaySlToday} Other={_replayOtherExitToday} NetR={_replayDailyR:0.00} PnL=${_replayDailyPnlDollars:0.##} target=${dailyTarget:0.##} loss=${dailyLoss:0.##}");
+        if (_replayAbnormalEntryToday > 0)
+            hud.AppendLine($"AbnormalEntry: count={_replayAbnormalEntryToday} last={_lastAbnormalEntryHudText}");
         hud.AppendLine($"ExecLosses: full={_replayFullLossTradesToday} consec={_replayConsecutiveLossesToday}");
         hud.AppendLine($"ActiveOrder: {BuildActiveExecutionHudLine(_replayExecution)}");
         hud.AppendLine($"LastOrder: {_lastExecutionHudText}");
@@ -6299,6 +6316,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public Order? EntryOrder { get; set; }
         public decimal EntryFilledQty { get; set; }
         public decimal EntryAvgPrice { get; set; }
+        public bool AbnormalEntryQuarantined { get; set; }
+        public bool DailyCountersRolledBack { get; set; }
+        public bool CountedAsObservationFiller { get; set; }
+        public bool CountedAsQualityRescue { get; set; }
+        public bool CountedAsWideStopLongExpansion { get; set; }
         public string? OcoGroup { get; set; }
         public Order? StopOrder { get; set; }
         public Order? TargetOrder { get; set; }

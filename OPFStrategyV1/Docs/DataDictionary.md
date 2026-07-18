@@ -485,6 +485,8 @@ From `OPF_RESEARCH_0.51`, `execution_events.csv` may include:
 - `ZONEBIRTH_RUNNER_V173_BE_MODIFY_SEND` / `ZONEBIRTH_RUNNER_V173_BE_APPLIED`: the post-Base-TP Runner break-even request was sent and attached.
 - `ZONEBIRTH_RUNNER_V173_BE_SKIPPED_MARKET_CROSSED`: break-even was invalid relative to the current replay candle close, so the original Runner SL remained active.
 - `ZONEBIRTH_RUNNER_V173_BE_MODIFY_FAIL` / `ZONEBIRTH_RUNNER_V173_MODIFY_FAILED`: the asynchronous request or ATAS callback reported a failed v1.73 Runner SL modification.
+- `ENTRY_FILL_QUARANTINED_V174`: an out-of-range entry fill was isolated, its normal daily counters were rolled back, and only the filled quantity was scheduled for emergency flattening.
+- `ENTRY_FILL_QUARANTINE_COMPLETE_V174`: the quarantined filled quantity was flattened and cleanup could proceed without creating a normal execution-trade row.
 
 From `OPF_RESEARCH_0.52`, StrategyEngine writes the mainline Trend Pullback lifecycle more explicitly:
 
@@ -905,6 +907,8 @@ From `OPF_RESEARCH_1.70`, `ACTUAL_EXEC_2.06` restricts ZoneBirth Short to planne
 From `OPF_RESEARCH_1.72`, `ACTUAL_EXEC_2.08` gives fully filled two-contract ZoneBirth Short executions separate Base and Runner OCO groups. Execution-event roles use `BASE_SL`, `BASE_TP`, `RUNNER_SL`, and `RUNNER_TP`; the final trade role combines both leg results, for example `SPLIT_BASE_SL_RUNNER_BE`. The Runner SL can move to break-even after a closed-bar `1R` trigger. Existing CSV columns are reused; `StopPrice` remains the original structural stop, while Runner modification details are carried by execution events.
 
 From `OPF_RESEARCH_1.73`, `ACTUAL_EXEC_2.09` keeps the v1.72 independent OCO lifecycle but changes the profit logic: Base remains at `2.5R`, Runner targets `4R`, and the Runner SL becomes eligible for break-even only after the Base TP actually fills. The closed-bar `1R` trigger is removed. `TargetPrice`, `TargetR`, and `TargetDollars` continue to describe the Base/legacy target; the Runner `4R` target is recorded by `RUNNER_TP_SENT`, `ZONEBIRTH_SPLIT_V173_READY`, and the final combined split result.
+
+From `OPF_RESEARCH_1.74`, `ACTUAL_EXEC_2.10` quarantines `EntryFillOutOfRange` orders individually instead of activating a whole-session abnormal-fill guard. The emergency flatten remains mandatory, but the quarantined order is omitted from `execution_trades.csv`, Actual verification, daily PnL/R, HUD TP/SL/Other counts, and normal daily capacity. Each quarantine raises an ATAS notification and updates the persistent intraday HUD anomaly line; repeated anomalies do not automatically disable later strategy entries. `Summarize-OPFResearch.ps1` reports `QuarantinedEntryFills` separately and treats a completed quarantine as an accounted executed decision.
 
 Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
 
