@@ -474,6 +474,12 @@ From `OPF_RESEARCH_0.51`, `execution_events.csv` may include:
 - `PROTECTION_CLEANUP_CANCEL_SENT`: the strategy sent cancel requests for still-working known execution orders.
 - `PROTECTION_CLEANUP_DONE`: all known Entry/SL/TP orders are no longer working.
 - `PROTECTION_STALE_AFTER_EXIT`: at least one known Entry/SL/TP order still looked working after a cleanup attempt.
+- `ZONEBIRTH_SPLIT_V172_READY`: both one-contract Base/Runner OCO groups were submitted for a fully filled two-contract ZoneBirth Short entry.
+- `BASE_SL_SENT`, `BASE_TP_SENT`, `RUNNER_SL_SENT`, `RUNNER_TP_SENT`: individual v1.72 protection orders were submitted.
+- `ZONEBIRTH_RUNNER_V172_BE_TRIGGERED`: the split execution first reached the closed-bar `1R` Runner trigger.
+- `ZONEBIRTH_RUNNER_V172_BE_MODIFY_SEND` / `ZONEBIRTH_RUNNER_V172_BE_APPLIED`: the Runner SL break-even request was sent and attached.
+- `ZONEBIRTH_RUNNER_V172_BE_SKIPPED_MARKET_CROSSED`: break-even was invalid relative to the trigger-bar close, so the original Runner SL remained active.
+- `ZONEBIRTH_RUNNER_V172_BE_MODIFY_FAIL` / `ZONEBIRTH_RUNNER_V172_MODIFY_FAILED`: the asynchronous request or ATAS callback reported a failed Runner SL modification.
 
 From `OPF_RESEARCH_0.52`, StrategyEngine writes the mainline Trend Pullback lifecycle more explicitly:
 
@@ -888,6 +894,10 @@ From `OPF_RESEARCH_1.68`, `ACTUAL_EXEC_2.04` adds `ZoneBirthResearch` Short and 
 From `OPF_RESEARCH_1.69`, `ACTUAL_EXEC_2.05` disables only `UnknownRegimeZoneTouch` Long aggressive execution after its clean combined Smoke evidence fell below the per-source `-4R` floor. Unknown Short and every other v1.67/v1.68 source, target, threshold, log column, and safety rule remain unchanged.
 
 From `OPF_RESEARCH_1.70`, `ACTUAL_EXEC_2.06` restricts ZoneBirth Short to planned risk `<= 8` or `12 < risk <= 18`. Rejected candidates use `ZoneBirthShortV170RiskBandExcluded`; executed candidates use `ZoneBirthShortDualRiskBandV170` with a band-specific tag. Entry-fill validation stores the corresponding `8` or `18` point cap. No CSV columns are added.
+
+`OPF_RESEARCH_1.71`, `ACTUAL_EXEC_2.07` is retained only as rejected historical evidence after its 112-day full-position dynamic-protection replay underperformed v1.70.
+
+From `OPF_RESEARCH_1.72`, `ACTUAL_EXEC_2.08` gives fully filled two-contract ZoneBirth Short executions separate Base and Runner OCO groups. Execution-event roles use `BASE_SL`, `BASE_TP`, `RUNNER_SL`, and `RUNNER_TP`; the final trade role combines both leg results, for example `SPLIT_BASE_SL_RUNNER_BE`. The Runner SL can move to break-even after a closed-bar `1R` trigger. Existing CSV columns are reused; `StopPrice` remains the original structural stop, while Runner modification details are carried by execution events.
 
 Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
 

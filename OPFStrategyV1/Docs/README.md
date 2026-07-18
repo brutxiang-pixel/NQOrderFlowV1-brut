@@ -1277,6 +1277,16 @@ From `OPF_RESEARCH_1.70`, the full 112-day v1.69 evidence applies a precise Zone
 - The conservative v1.69 exclusion projection removes `128` losing trades and retains `164` ZoneBirth trades at approximately `+23.77R`. The full portfolio projects `872` trades, `+187.09R`, `+$12,021`, PF `1.467`, and `$1,076` maximum drawdown before active-trade replacement.
 - All other paths, targets, Wait1 research-only behavior, daily capacity, and execution protections remain unchanged.
 
+`OPF_RESEARCH_1.71` promoted full-position `2.5R` extension plus a closed-bar `1.5R -> lock 1R` rule for standard ObservationConfirm and ZoneBirth Short. Its four-day Smoke passed, but the reviewed 112-day replay fell from the v1.70 `+189.46R`, PF `1.438`, and `$1,356.50` drawdown to `+140.35R`, PF `1.336`, and `$1,962` drawdown. The version is preserved by `opf-v1.71-full-backtest-rejected` and is not an active baseline.
+
+From `OPF_RESEARCH_1.72`, `ACTUAL_EXEC_2.08` keeps v1.70 entry and target behavior while promoting a narrower two-leg protection experiment:
+
+- Only fully filled two-contract `ZoneBirthResearch` Short executions use two independent one-contract OCO groups: Base and Runner. Both legs retain the existing ZoneBirth stop and `2.5R` target.
+- After a closed bar first reaches `1R` MFE, only the Runner SL is modified to break-even for the following bar. If break-even is already invalid relative to the trigger-bar close, the modification is skipped and the original Runner SL remains active.
+- Existing partial-entry safety is unchanged: a two-contract entry that remains partially filled after the existing delay is canceled and flattened rather than converted into a one-contract live position. Configurations that deliberately request one contract retain the v1.70 single-bracket behavior.
+- Standard ObservationConfirm and every non-ZoneBirth path retain the v1.70 bracket lifecycle. Split executions report Base/Runner roles and combined outcomes while cleanup covers Entry plus all four protection orders.
+- In `85` normal, non-ambiguous v1.70 ZoneBirth samples covered by both shadow policies, actual results were approximately `+30.56R`; `SplitBase_Runner2_5R_BE1R` projected approximately `+43.79R`. This projection remains subject to real order-modification and ActiveTrade sequencing validation.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
