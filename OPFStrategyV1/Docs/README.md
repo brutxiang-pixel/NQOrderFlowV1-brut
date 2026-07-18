@@ -1287,6 +1287,14 @@ From `OPF_RESEARCH_1.72`, `ACTUAL_EXEC_2.08` keeps v1.70 entry and target behavi
 - Standard ObservationConfirm and every non-ZoneBirth path retain the v1.70 bracket lifecycle. Split executions report Base/Runner roles and combined outcomes while cleanup covers Entry plus all four protection orders.
 - In `85` normal, non-ambiguous v1.70 ZoneBirth samples covered by both shadow policies, actual results were approximately `+30.56R`; `SplitBase_Runner2_5R_BE1R` projected approximately `+43.79R`. This projection remains subject to real order-modification and ActiveTrade sequencing validation.
 
+From `OPF_RESEARCH_1.73`, `ACTUAL_EXEC_2.09` replaces the early-protection rule after the v1.72 four-day Smoke showed that moving the Runner to break-even at `1R` reduced the ZoneBirth subset by approximately `1.88R / $48.50` versus the same v1.70 dates:
+
+- Fully filled two-contract ZoneBirth Short entries retain separate one-contract Base and Runner OCO groups.
+- Base keeps the existing structural SL and `2.5R` TP. Runner keeps the same structural SL and extends its TP to `4R`.
+- Runner break-even is not evaluated from MFE. It becomes eligible only after `BASE_TP` actually fills and the Runner leg is still open.
+- If the replay candle close has already crossed to the invalid side of the entry-price break-even stop, the modification is skipped and the original Runner SL remains active.
+- Partial-entry flattening, four-order cleanup, split PnL normalization, duplicate-fill protection, replay stop handling, and every non-ZoneBirth path remain unchanged.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

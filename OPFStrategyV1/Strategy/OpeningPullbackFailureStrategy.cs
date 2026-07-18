@@ -88,7 +88,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ZoneBirthShortV170MidRiskMaxPoints = 18m;
     private const decimal ZoneBirthSplitRunnerV172TotalQuantity = 2m;
     private const decimal ZoneBirthSplitRunnerV172LegQuantity = 1m;
-    private const decimal ZoneBirthSplitRunnerV172BreakEvenTriggerR = 1m;
+    private const decimal ZoneBirthSplitRunnerV173TargetR = 4m;
     private const decimal EntryFillRiskDriftTolerancePoints = 1m;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
@@ -400,7 +400,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var current = ToOpfCandle(bar, candle);
         _lastResearchCandle = current;
         UpdateActualExecutionExcursion(current);
-        ScheduleZoneBirthRunnerBreakEvenV172IfNeeded(current);
         ScheduleStaleUnfilledEntryAbortIfNeeded(current);
         ScheduleReplayStopExitIfNeeded(current);
         ScheduleOrphanPositionFlattenIfNeeded(current);
@@ -540,8 +539,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         execution.RunnerBreakEvenPending = false;
-        LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V172_MODIFY_FAILED trade={execution.TradeId} msg={message}");
-        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V172_MODIFY_FAILED", "RUNNER_SL", execution.RunnerPendingStop, ZoneBirthSplitRunnerV172LegQuantity, message);
+        LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_MODIFY_FAILED trade={execution.TradeId} msg={message}");
+        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_MODIFY_FAILED", "RUNNER_SL", execution.RunnerPendingStop, ZoneBirthSplitRunnerV172LegQuantity, message);
     }
 
     private void AttachReplayOrder(Order? order, string source)
@@ -566,7 +565,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         else if (role == "RUNNER_SL")
         {
             _replayExecution.RunnerStopOrder = order;
-            TryMarkZoneBirthRunnerBreakEvenV172Applied(_replayExecution, order, source);
+            TryMarkZoneBirthRunnerBreakEvenV173Applied(_replayExecution, order, source);
         }
         else if (role == "RUNNER_TP")
             _replayExecution.RunnerTargetOrder = order;
@@ -2139,7 +2138,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (IsZoneBirthShortExpansionV168(signal, researchPath))
             {
                 executeReasons.Add($"ZoneBirthShortDualRiskBandV170:{ZoneBirthShortV170RiskBandTag(risk)},risk={risk:0.##}");
-                executeReasons.Add($"ZoneBirthSplitRunnerV172:baseQty=1,runnerQty=1,targetR={targetR:0.##},beTriggerR={ZoneBirthSplitRunnerV172BreakEvenTriggerR:0.##}");
+                executeReasons.Add($"ZoneBirthSplitRunnerV173:baseQty=1,runnerQty=1,baseTargetR={targetR:0.##},runnerTargetR={ZoneBirthSplitRunnerV173TargetR:0.##},runnerBeAfter=BaseTP");
             }
         }
         var wait1Tag = signal.SkipReasons.FirstOrDefault(x => x.StartsWith("AggressiveExpansionWait1V165:", StringComparison.Ordinal));
@@ -3336,6 +3335,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             LogExecutionInfo($"EXEC_EXIT_FILLED trade={tradeId} role={role} price={trade.Price:0.########}");
             AppendExecutionEvent(_replayExecution, "EXIT_FILLED", role, trade.Price, trade.Volume, string.Empty);
             _replayExecution.UpdateActualExcursion(trade.Price);
+            if (_replayExecution.ZoneBirthSplitRunnerV172 && role == "BASE_TP")
+                ScheduleZoneBirthRunnerBreakEvenAfterBaseTargetV173(_replayExecution, trade.Price);
             await TryCancelExecutionOrderAsync(_replayExecution.EntryOrder, "ExitFilledCancelEntry");
 
             var completeQty = _replayExecution.BracketQty > 0m ? _replayExecution.BracketQty : _replayExecution.Quantity;
@@ -3588,6 +3589,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private static decimal ExpectedExitPrice(ReplayExecutionState execution, string exitRole)
     {
+        if (exitRole == "RUNNER_TP")
+            return execution.RunnerTarget;
         if (IsTargetExitRole(exitRole))
             return execution.Target;
         if (exitRole is "SL" or "BASE_SL")
@@ -3677,8 +3680,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 return;
             }
 
-            LogExecutionInfo($"EXEC_ZONEBIRTH_SPLIT_V172_FALLBACK trade={execution.TradeId} filledQty={qty:0.########} required={ZoneBirthSplitRunnerV172TotalQuantity:0.########}");
-            AppendExecutionEvent(execution, "ZONEBIRTH_SPLIT_V172_FALLBACK", "-", execution.EntryAvgPrice, qty, $"required={ZoneBirthSplitRunnerV172TotalQuantity:0.########}");
+            LogExecutionInfo($"EXEC_ZONEBIRTH_SPLIT_V173_FALLBACK trade={execution.TradeId} filledQty={qty:0.########} required={ZoneBirthSplitRunnerV172TotalQuantity:0.########}");
+            AppendExecutionEvent(execution, "ZONEBIRTH_SPLIT_V173_FALLBACK", "-", execution.EntryAvgPrice, qty, $"required={ZoneBirthSplitRunnerV172TotalQuantity:0.########}");
         }
 
         execution.OcoGroup = $"OPF-{execution.TradeId}";
@@ -3745,15 +3748,19 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         execution.OcoGroup = $"OPF-{execution.TradeId}-BASE";
         execution.RunnerOcoGroup = $"OPF-{execution.TradeId}-RUNNER";
         execution.RunnerStop = execution.Stop;
+        var entry = execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice;
+        execution.RunnerTarget = AlignToTick(
+            TargetFromRisk(execution.Side, entry, execution.InitialRiskPoints, ZoneBirthSplitRunnerV173TargetR),
+            _snapshot!.InstrumentProfile.TickSize);
         execution.BracketQty = ZoneBirthSplitRunnerV172TotalQuantity;
 
         await SubmitZoneBirthSplitLegV172Async(execution, false);
         await SubmitZoneBirthSplitLegV172Async(execution, true);
 
         execution.BracketSubmitted = true;
-        LogExecutionInfo($"EXEC_ZONEBIRTH_SPLIT_V172_READY trade={execution.TradeId} baseOco={execution.OcoGroup} runnerOco={execution.RunnerOcoGroup} stop={execution.Stop:0.########} target={execution.Target:0.########}");
-        AppendExecutionEvent(execution, "ZONEBIRTH_SPLIT_V172_READY", "-", execution.EntryAvgPrice, execution.BracketQty, $"baseOco={execution.OcoGroup}|runnerOco={execution.RunnerOcoGroup}|stop={execution.Stop:0.########}|target={execution.Target:0.########}");
-        ScheduleProtectionLossCheckIfNeeded("SplitBracketSubmittedV172");
+        LogExecutionInfo($"EXEC_ZONEBIRTH_SPLIT_V173_READY trade={execution.TradeId} baseOco={execution.OcoGroup} runnerOco={execution.RunnerOcoGroup} stop={execution.Stop:0.########} baseTarget={execution.Target:0.########} runnerTarget={execution.RunnerTarget:0.########}");
+        AppendExecutionEvent(execution, "ZONEBIRTH_SPLIT_V173_READY", "-", execution.EntryAvgPrice, execution.BracketQty, $"baseOco={execution.OcoGroup}|runnerOco={execution.RunnerOcoGroup}|stop={execution.Stop:0.########}|baseTarget={execution.Target:0.########}|runnerTarget={execution.RunnerTarget:0.########}");
+        ScheduleProtectionLossCheckIfNeeded("SplitBracketSubmittedV173");
     }
 
     private async Task SubmitZoneBirthSplitLegV172Async(ReplayExecutionState execution, bool runner)
@@ -3763,6 +3770,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var oco = runner ? execution.RunnerOcoGroup : execution.OcoGroup;
         var stopRole = $"{prefix}_SL";
         var targetRole = $"{prefix}_TP";
+        var targetPrice = runner ? execution.RunnerTarget : execution.Target;
         var stop = new Order
         {
             Portfolio = Portfolio,
@@ -3783,7 +3791,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             Security = Security,
             Type = OrderTypes.Limit,
             Direction = exitDirection,
-            Price = execution.Target,
+            Price = targetPrice,
             QuantityToFill = ZoneBirthSplitRunnerV172LegQuantity,
             TimeInForce = ReplayTimeInForce,
             OCOGroup = oco,
@@ -3808,13 +3816,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (IsDoneOrder(stop))
         {
             LogExecutionInfo($"EXEC_{targetRole}_SUPPRESSED trade={execution.TradeId} stopState={stop.State}");
-            AppendExecutionEvent(execution, $"{targetRole}_SUPPRESSED", targetRole, execution.Target, ZoneBirthSplitRunnerV172LegQuantity, $"stopState={stop.State}");
+            AppendExecutionEvent(execution, $"{targetRole}_SUPPRESSED", targetRole, targetPrice, ZoneBirthSplitRunnerV172LegQuantity, $"stopState={stop.State}");
             return;
         }
 
         await OpenOrderAsync(target);
-        LogExecutionInfo($"EXEC_{targetRole}_SENT trade={execution.TradeId} target={execution.Target:0.########} qty={ZoneBirthSplitRunnerV172LegQuantity:0.########}");
-        AppendExecutionEvent(execution, $"{targetRole}_SENT", targetRole, execution.Target, ZoneBirthSplitRunnerV172LegQuantity, oco ?? string.Empty);
+        LogExecutionInfo($"EXEC_{targetRole}_SENT trade={execution.TradeId} target={targetPrice:0.########} qty={ZoneBirthSplitRunnerV172LegQuantity:0.########}");
+        AppendExecutionEvent(execution, $"{targetRole}_SENT", targetRole, targetPrice, ZoneBirthSplitRunnerV172LegQuantity, oco ?? string.Empty);
         if (IsDoneOrder(target))
             await TryCancelExecutionOrderAsync(stop, $"Immediate{targetRole}");
     }
@@ -3899,48 +3907,45 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         });
     }
 
-    private void ScheduleZoneBirthRunnerBreakEvenV172IfNeeded(OpfCandle candle)
+    private void ScheduleZoneBirthRunnerBreakEvenAfterBaseTargetV173(ReplayExecutionState execution, decimal baseTargetFillPrice)
     {
-        var execution = _replayExecution;
-        if (_snapshot is null || execution is null || !execution.ZoneBirthSplitRunnerV172 ||
-            execution.ExitCompleted || execution.RunnerBreakEvenEvaluated || !execution.BracketSubmitted ||
-            execution.RunnerExitFilledQty >= ZoneBirthSplitRunnerV172LegQuantity ||
-            !IsWorkingExecutionOrder(execution.RunnerStopOrder) ||
-            execution.ActualMfeR < ZoneBirthSplitRunnerV172BreakEvenTriggerR)
+        if (_snapshot is null || !execution.ZoneBirthSplitRunnerV172 || execution.ExitCompleted ||
+            execution.RunnerBreakEvenEvaluated || !execution.BracketSubmitted || execution.BaseExitRole != "TP" ||
+            IsZoneBirthRunnerLegExitedV172(execution) || !IsWorkingExecutionOrder(execution.RunnerStopOrder))
         {
             return;
         }
 
         execution.RunnerBreakEvenEvaluated = true;
-        execution.RunnerBreakEvenTriggerBar = candle.Bar;
+        execution.RunnerBreakEvenTriggerBar = _lastResearchCandle?.Bar;
         var entry = execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice;
         var breakEvenStop = AlignToTick(entry, _snapshot.InstrumentProfile.TickSize);
-        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V172_BE_TRIGGERED", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"bar={candle.Bar}|mfeR={execution.ActualMfeR:0.####}|triggerR={ZoneBirthSplitRunnerV172BreakEvenTriggerR:0.##}");
+        var marketPrice = _lastResearchCandle?.Close ?? baseTargetFillPrice;
+        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BASE_TP_TRIGGERED", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"bar={execution.RunnerBreakEvenTriggerBar}|baseTargetFill={baseTargetFillPrice:0.########}|market={marketPrice:0.########}");
 
         var tick = _snapshot.InstrumentProfile.TickSize;
         var marketValid = execution.Side == TradeSide.Long
-            ? candle.Close - breakEvenStop >= tick
-            : breakEvenStop - candle.Close >= tick;
+            ? marketPrice - breakEvenStop >= tick
+            : breakEvenStop - marketPrice >= tick;
         if (!marketValid)
         {
-            LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V172_BE_SKIPPED trade={execution.TradeId} close={candle.Close:0.########} stop={breakEvenStop:0.########}");
-            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V172_BE_SKIPPED_MARKET_CROSSED", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"close={candle.Close:0.########}|tick={tick:0.########}");
+            LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_BE_SKIPPED trade={execution.TradeId} market={marketPrice:0.########} stop={breakEvenStop:0.########}");
+            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_SKIPPED_MARKET_CROSSED", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"market={marketPrice:0.########}|tick={tick:0.########}");
             return;
         }
 
         if (execution.Side == TradeSide.Long ? breakEvenStop <= execution.RunnerStop : breakEvenStop >= execution.RunnerStop)
         {
-            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V172_BE_NOOP", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"current={execution.RunnerStop:0.########}");
+            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_NOOP", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"current={execution.RunnerStop:0.########}");
             return;
         }
 
         execution.RunnerBreakEvenPending = true;
         execution.RunnerPendingStop = breakEvenStop;
-        EnqueueExecutionAction("ZoneBirthRunnerBreakEvenV172", async () =>
+        EnqueueExecutionAction("ZoneBirthRunnerBreakEvenV173", async () =>
         {
             if (execution.ExitCompleted || !execution.RunnerBreakEvenPending ||
-                execution.RunnerExitFilledQty >= ZoneBirthSplitRunnerV172LegQuantity ||
-                !IsWorkingExecutionOrder(execution.RunnerStopOrder))
+                IsZoneBirthRunnerLegExitedV172(execution) || !IsWorkingExecutionOrder(execution.RunnerStopOrder))
             {
                 execution.RunnerBreakEvenPending = false;
                 return;
@@ -3950,24 +3955,24 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             var newStop = oldStop.Clone();
             newStop.TriggerPrice = execution.RunnerPendingStop;
             newStop.TriggerPriceType = ReplayStopTriggerPriceType;
-            LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V172_BE_MODIFY_SEND trade={execution.TradeId} old={oldStop.TriggerPrice:0.########} new={newStop.TriggerPrice:0.########} triggerBar={execution.RunnerBreakEvenTriggerBar}");
-            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V172_BE_MODIFY_SEND", "RUNNER_SL", newStop.TriggerPrice, ZoneBirthSplitRunnerV172LegQuantity, $"old={oldStop.TriggerPrice:0.########}|triggerBar={execution.RunnerBreakEvenTriggerBar}");
+            LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_BE_MODIFY_SEND trade={execution.TradeId} old={oldStop.TriggerPrice:0.########} new={newStop.TriggerPrice:0.########} triggerBar={execution.RunnerBreakEvenTriggerBar}");
+            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_MODIFY_SEND", "RUNNER_SL", newStop.TriggerPrice, ZoneBirthSplitRunnerV172LegQuantity, $"old={oldStop.TriggerPrice:0.########}|triggerBar={execution.RunnerBreakEvenTriggerBar}");
             try
             {
                 await ModifyOrderAsync(oldStop, newStop);
-                TryMarkZoneBirthRunnerBreakEvenV172Applied(execution, newStop, "ModifyOrderAsync");
+                TryMarkZoneBirthRunnerBreakEvenV173Applied(execution, newStop, "ModifyOrderAsync");
             }
             catch (Exception ex)
             {
                 execution.RunnerBreakEvenPending = false;
-                LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V172_BE_MODIFY_FAIL trade={execution.TradeId} err={ex.GetType().Name}:{ex.Message}");
-                AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V172_BE_MODIFY_FAIL", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"{ex.GetType().Name}:{ex.Message}");
+                LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_BE_MODIFY_FAIL trade={execution.TradeId} err={ex.GetType().Name}:{ex.Message}");
+                AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_MODIFY_FAIL", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"{ex.GetType().Name}:{ex.Message}");
                 throw;
             }
         });
     }
 
-    private void TryMarkZoneBirthRunnerBreakEvenV172Applied(ReplayExecutionState execution, Order order, string source)
+    private void TryMarkZoneBirthRunnerBreakEvenV173Applied(ReplayExecutionState execution, Order order, string source)
     {
         if (_snapshot is null || !execution.RunnerBreakEvenPending || execution.RunnerBreakEvenApplied)
             return;
@@ -3978,8 +3983,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         execution.RunnerStopOrder = order;
         execution.RunnerBreakEvenPending = false;
         execution.RunnerBreakEvenApplied = true;
-        LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V172_BE_APPLIED trade={execution.TradeId} stop={execution.RunnerStop:0.########} src={source}");
-        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V172_BE_APPLIED", "RUNNER_SL", execution.RunnerStop, ZoneBirthSplitRunnerV172LegQuantity, $"src={source}|triggerBar={execution.RunnerBreakEvenTriggerBar}");
+        LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_BE_APPLIED trade={execution.TradeId} stop={execution.RunnerStop:0.########} src={source}");
+        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_APPLIED", "RUNNER_SL", execution.RunnerStop, ZoneBirthSplitRunnerV172LegQuantity, $"src={source}|triggerBar={execution.RunnerBreakEvenTriggerBar}");
     }
 
     private void ScheduleStaleUnfilledEntryAbortIfNeeded(OpfCandle candle)
@@ -6314,6 +6319,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public bool SplitIsAbnormal { get; set; }
         public string SplitValidationReason { get; set; } = string.Empty;
         public decimal RunnerStop { get; set; }
+        public decimal RunnerTarget { get; set; }
         public bool RunnerBreakEvenEvaluated { get; set; }
         public bool RunnerBreakEvenPending { get; set; }
         public bool RunnerBreakEvenApplied { get; set; }
