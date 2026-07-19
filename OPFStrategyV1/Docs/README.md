@@ -1305,6 +1305,17 @@ From `OPF_RESEARCH_1.74`, `ACTUAL_EXEC_2.10` changes abnormal entry-fill handlin
 - The old whole-session `DAILY_ABNORMAL_FILL_GUARD_ON` block is removed; after the quarantine flatten and cleanup complete, later eligible signals on the same replay day may execute normally.
 - Every quarantined entry raises an ATAS notification and remains visible on the HUD with the daily abnormal-entry count plus the latest TradeID, planned price, fill price, drift, and filled quantity. Repeated anomalies are handled and notified independently without an automatic daily circuit breaker.
 
+From `OPF_RESEARCH_1.75`, `ACTUAL_EXEC_2.11` is the live-readiness build and does not change signal selection or planned TP/SL rules:
+
+- Startup and reconnect reconciliation use the connector's account position and working OPF orders. Unmanaged state blocks new entries and requires manual intervention instead of automatically flattening an unknown position. Historical Replay explicitly bypasses only the missing/disconnected connector startup block because ATAS Replay can submit simulated Actual orders while `Connector` is unavailable; real-time candles retain the hard connector gate.
+- Disconnects, registration/cancel/modify failures, lost stops, stale cleanup, and unconfirmed stop-time flattening raise ATAS notifications.
+- Emergency flatten submission is idempotent. Every still-open leg must have a working stop; a missing stop triggers one emergency flatten.
+- Strategy shutdown no longer creates a synthetic `STOPPED` fill from the last candle. It waits up to five seconds for the real fill callback and leaves protection working when the account is not confirmed flat.
+- Defaults remain two MNQ contracts and twelve entries per day. Consecutive-loss and full-loss guards remain disabled. `ActualDailyLossLimitDollars=200` blocks new entries at `-$200` realized account net PnL.
+- `ActualCommissionPerContractRoundTrip=1.2` charges each filled contract once per completed round trip. In real time, `live_account_pnl.csv` uses actual normal and quarantine fill impact. Historical Replay uses normalized normal-trade PnL and commission-only quarantine PnL for the daily guard, while preserving the raw Replay value separately because ATAS can replay stale fill prices. Quarantine remains excluded from Alpha statistics.
+- New entries are blocked during `21:30-22:00` China time under U.S. daylight saving time and `22:30-23:00` otherwise.
+- For real-time candles, market-data latency or order latency above two seconds, or five seconds without market data, blocks new entries. Metrics must remain healthy for ten seconds before execution resumes. Historical replay bypasses only this real-time latency test.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
@@ -1313,7 +1324,7 @@ Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke
 2. Core CSV files are present: config snapshot, signals, research outcomes, risk evaluations, execution events, and execution trades. `score_breakdown.csv` is required only for scoring-component research; it is not required when `ResearchLogMode=Compact`.
 3. `ExecutedDecisions = ExecutionTrades + QuarantinedEntryFills`; normal execution trades equal Actual-verified unique trades, with no duplicate Actual-verified rows.
 4. Every normal or quarantined exit has `PROTECTION_CLEANUP_DONE`, with no unaccounted `STALE`, `CANCEL_FAIL`, or `FAILED` events. An `ENTRY_FILL_REJECTED` row is acceptable only when the matching v1.74 quarantine completes.
-5. The tested configuration is frozen: MNQ, documented `ActualOrderQuantity`, default `ActualTargetR=1.5` with any documented per-version TP overrides, daily target/loss stops disabled for evidence accumulation, max-trades safety ceiling, and Actual path whitelist.
+5. The tested configuration is frozen: MNQ, documented `ActualOrderQuantity`, default `ActualTargetR=1.5` with any documented per-version TP overrides, max-trades safety ceiling, and Actual path whitelist. Evidence builds through v1.74 keep daily target/loss disabled; v1.75 uses the documented `$200` net daily-loss gate.
 6. Full-day average Actual trades should stay near 5/day; individual low-trade days are acceptable only when profitability improves and the missed volume is explainable by research/skipped-signal evidence.
 7. Results are explainable through `MFE_R`, `MAE_R`, `ExitEfficiency`, `RunupCapturePct`, and no-trade reasons, even if the batch is not yet strongly profitable.
 

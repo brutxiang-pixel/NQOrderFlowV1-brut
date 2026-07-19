@@ -40,6 +40,8 @@ $executionDecisionFiles = Get-ChildItem -LiteralPath $dir -File -Filter '*_execu
 $executionDecisionRows = @($executionDecisionFiles | ForEach-Object { Import-Csv -LiteralPath $_.FullName })
 $executionTradeFiles = Get-ChildItem -LiteralPath $dir -File -Filter '*_execution_trades.csv'
 $executionTradeRows = @($executionTradeFiles | ForEach-Object { Import-Csv -LiteralPath $_.FullName })
+$liveAccountPnlFiles = Get-ChildItem -LiteralPath $dir -File -Filter '*_live_account_pnl.csv'
+$liveAccountPnlRows = @($liveAccountPnlFiles | ForEach-Object { Import-Csv -LiteralPath $_.FullName })
 $exitPolicyFiles = Get-ChildItem -LiteralPath $dir -File -Filter '*_exit_policy_evaluations.csv'
 $exitPolicyRows = @($exitPolicyFiles | ForEach-Object { Import-Csv -LiteralPath $_.FullName })
 $snapshotFiles = Get-ChildItem -LiteralPath $dir -File -Filter '*_ConfigSnapshot.json'
@@ -134,6 +136,7 @@ $originalCounts = [pscustomobject]@{
     ExecutionEventRows = $executionEventRows.Count
     ExecutionDecisionRows = $executionDecisionRows.Count
     ExecutionTradeRows = $executionTradeRows.Count
+    LiveAccountPnlRows = $liveAccountPnlRows.Count
     ExitPolicyRows = $exitPolicyRows.Count
 }
 
@@ -149,6 +152,7 @@ $scoreBreakdownRows = @(Filter-ExcludedDates $scoreBreakdownRows $ExcludeDates $
 $executionEventRows = @(Filter-ExcludedDates $executionEventRows $ExcludeDates $excludedSnapshotIds)
 $executionDecisionRows = @(Filter-ExcludedDates $executionDecisionRows $ExcludeDates $excludedSnapshotIds)
 $executionTradeRows = @(Filter-ExcludedDates $executionTradeRows $ExcludeDates $excludedSnapshotIds)
+$liveAccountPnlRows = @(Filter-ExcludedDates $liveAccountPnlRows $ExcludeDates $excludedSnapshotIds)
 $exitPolicyRows = @(Filter-ExcludedDates $exitPolicyRows $ExcludeDates $excludedSnapshotIds)
 
 $filteredCounts = [pscustomobject]@{
@@ -164,6 +168,7 @@ $filteredCounts = [pscustomobject]@{
     ExecutionEventRows = $executionEventRows.Count
     ExecutionDecisionRows = $executionDecisionRows.Count
     ExecutionTradeRows = $executionTradeRows.Count
+    LiveAccountPnlRows = $liveAccountPnlRows.Count
     ExitPolicyRows = $exitPolicyRows.Count
 }
 
@@ -842,6 +847,20 @@ if ($executionTradeRows.Count -gt 0) {
     }
 }
 
+if ($liveAccountPnlRows.Count -gt 0) {
+    Write-Host ""
+    Write-Host "=== Live Account PnL (Actual Fills, After Commission) ==="
+    [pscustomobject]@{
+        Trades = $liveAccountPnlRows.Count
+        Normal = @($liveAccountPnlRows | Where-Object { (Field $_ 'Classification') -eq 'Normal' }).Count
+        Quarantine = @($liveAccountPnlRows | Where-Object { (Field $_ 'Classification') -eq 'Quarantine' }).Count
+        GrossDollars = [math]::Round((($liveAccountPnlRows | ForEach-Object { To-Number (Field $_ 'GrossPnLDollars') }) | Measure-Object -Sum).Sum, 2)
+        RawGrossDollars = [math]::Round((($liveAccountPnlRows | ForEach-Object { To-Number (Field $_ 'RawGrossPnLDollars') }) | Measure-Object -Sum).Sum, 2)
+        CommissionDollars = [math]::Round((($liveAccountPnlRows | ForEach-Object { To-Number (Field $_ 'CommissionDollars') }) | Measure-Object -Sum).Sum, 2)
+        NetDollars = [math]::Round((($liveAccountPnlRows | ForEach-Object { To-Number (Field $_ 'NetPnLDollars') }) | Measure-Object -Sum).Sum, 2)
+    } | Format-List
+}
+
 if ($exitPolicyRows.Count -gt 0) {
     Write-Host ""
     Write-Host "=== Exit Policy Evaluation ==="
@@ -1011,6 +1030,7 @@ Write-Host "=== Data Quality ==="
     ExecutionEventRows = $executionEventRows.Count
     ExecutionDecisionRows = $executionDecisionRows.Count
     ExecutionTradeRows = $executionTradeRows.Count
+    LiveAccountPnlRows = $liveAccountPnlRows.Count
     ExitPolicyRows = $exitPolicyRows.Count
     ActualVerifiedOutcomeRows = Count-True $rows 'ActualVerified'
     IntraBarAmbiguousRows = Count-True $rows 'IntraBarAmbiguous'

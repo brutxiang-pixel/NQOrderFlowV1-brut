@@ -910,6 +910,25 @@ From `OPF_RESEARCH_1.73`, `ACTUAL_EXEC_2.09` keeps the v1.72 independent OCO lif
 
 From `OPF_RESEARCH_1.74`, `ACTUAL_EXEC_2.10` quarantines `EntryFillOutOfRange` orders individually instead of activating a whole-session abnormal-fill guard. The emergency flatten remains mandatory, but the quarantined order is omitted from `execution_trades.csv`, Actual verification, daily PnL/R, HUD TP/SL/Other counts, and normal daily capacity. Each quarantine raises an ATAS notification and updates the persistent intraday HUD anomaly line; repeated anomalies do not automatically disable later strategy entries. `Summarize-OPFResearch.ps1` reports `QuarantinedEntryFills` separately and treats a completed quarantine as an accounted executed decision.
 
+From `OPF_RESEARCH_1.75`, `ACTUAL_EXEC_2.11` adds live-readiness reconciliation, connection and order-failure notifications, stop-only protection integrity checks, idempotent emergency flatten submission, confirmed stop-time exits, a `-$200` realized net daily loss gate, U.S. cash-open blackout windows, and real-time latency blocking. `live_account_pnl.csv` is an account-impact ledger and does not replace `execution_trades.csv`.
+
+Historical Replay writes `HISTORICAL_REPLAY_CONNECTOR_BYPASS` when ATAS exposes no connector even though its simulated Actual order path is available. This bypass applies only when candle time is historical; real-time execution remains blocked without a connected connector.
+
+`live_account_pnl.csv` fields:
+
+- `TradeID`, `EntryTime`, `ExitTime`, `Side`, `Classification`
+- `Quantity`, `EntryPrice`, `ExitPrice`
+- `GrossPnLDollars`
+- `CommissionDollars`: `Quantity * ActualCommissionPerContractRoundTrip`
+- `NetPnLDollars`: gross PnL minus commission
+- `DailyNetPnLDollars`: running realized account net PnL used by the live daily-loss gate
+- `RawGrossPnLDollars`: unmodified PnL from callback entry/exit prices, retained for diagnosing stale Replay fills
+- `PnLSource`: `LiveActualFill`, `HistoricalReplayNormalized`, `HistoricalReplayProtectiveFlattenActualFill`, or `HistoricalReplayQuarantineCommissionOnly`
+
+`Classification=Normal` is also present in normal strategy Alpha files. `Classification=Quarantine` records actual account impact for abnormal entry isolation while remaining excluded from normal trade count, R, strategy PnL, HUD TP/SL/Other, and Actual verification.
+
+For Historical Replay, `GrossPnLDollars` uses validated normalized PnL for normal trades. Quarantine gross PnL is zero and only commission affects the daily guard; `RawGrossPnLDollars` still preserves the simulator's stale-price impact. Real-time execution uses raw actual fills for both normal and quarantine account PnL.
+
 Compact `exit_policy_evaluations.csv` also includes four research-only split-runner policies:
 
 - `SplitBase_Runner2_5R_BE0_75R`

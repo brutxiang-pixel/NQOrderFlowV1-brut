@@ -614,6 +614,45 @@ public sealed class ResearchLogger
             + Environment.NewLine);
     }
 
+    public void AppendLiveAccountPnl(
+        string snapshotId,
+        string tradeId,
+        DateTime entryTime,
+        DateTime exitTime,
+        string side,
+        string classification,
+        decimal quantity,
+        decimal entryPrice,
+        decimal exitPrice,
+        decimal grossPnlDollars,
+        decimal commissionDollars,
+        decimal netPnlDollars,
+        decimal dailyNetPnlDollars,
+        decimal rawGrossPnlDollars,
+        string pnlSource)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_live_account_pnl.csv");
+        EnsureHeader(path, ContextHeader("TradeID,EntryTime,ExitTime,Side,Classification,Quantity,EntryPrice,ExitPrice,GrossPnLDollars,CommissionDollars,NetPnLDollars,DailyNetPnLDollars,RawGrossPnLDollars,PnLSource"));
+        AppendText(path,
+            string.Join(",",
+                ContextValues(snapshotId),
+                Csv(tradeId),
+                Csv(entryTime.ToString("O")),
+                Csv(exitTime.ToString("O")),
+                Csv(side),
+                Csv(classification),
+                quantity,
+                entryPrice,
+                exitPrice,
+                grossPnlDollars,
+                commissionDollars,
+                netPnlDollars,
+                dailyNetPnlDollars,
+                rawGrossPnlDollars,
+                Csv(pnlSource))
+            + Environment.NewLine);
+    }
+
     public void AppendExecutionDecision(
         string snapshotId,
         string signalId,
