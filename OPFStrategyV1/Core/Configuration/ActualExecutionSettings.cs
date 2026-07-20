@@ -38,13 +38,13 @@ public sealed record ActualExecutionSettings(
     public static ActualExecutionSettings Default()
     {
         return new ActualExecutionSettings(
-            Version: "ACTUAL_EXEC_2.12",
+            Version: "ACTUAL_EXEC_2.13",
             EnableActualOrders: true,
             ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|BreakawayRetest|AlmostConfirmed|ShadowCandidate|TrendPullbackConfirmed|ObservationStrict_Other|ObservationStrict_Other_WideStop1_5R|ObservationStrict_BullFresh_WideStop1_5R|ZoneBirthResearch|FailureReverse_ObservationInvalidated|FailureReverse_ObservationInvalidated_WideStop1_5R|FailureReverse_RetestFailed|FailureReverse_RetestFailed_WideStop1_5R|UnknownRegimeZoneTouch",
             ActualAllowResearchPaths: false,
             ActualOrderQuantity: 2m,
             ActualTargetR: 1.5m,
-            ActualMaxTradesPerDay: 12,
+            ActualMaxTradesPerDay: 15,
             ActualDailyLossLimitDollars: 300m,
             ActualCommissionPerContractRoundTrip: 1.2m,
             ActualUseFullLossGuard: false,
