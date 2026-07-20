@@ -1316,6 +1316,13 @@ From `OPF_RESEARCH_1.75`, `ACTUAL_EXEC_2.13` is the live-readiness build and doe
 - New entries are blocked during `21:30-22:00` China time under U.S. daylight saving time and `22:30-23:00` otherwise. ATAS candle timestamps are evaluated in the corresponding UTC windows `13:30-14:00` and `14:30-15:00`.
 - For real-time candles, market-data latency or order latency above two seconds, or five seconds without market data, blocks new entries. Metrics must remain healthy for ten seconds before execution resumes. Historical replay bypasses only this real-time latency test.
 
+From `OPF_RESEARCH_1.76`, `ACTUAL_EXEC_2.14` replaces the fixed replay stop window with a Globex trading-day closeout state:
+
+- The trading day is keyed by the MNQ Globex session that reopens at `18:00 ET`; crossing UTC midnight does not reset the fifteen-trade cap, daily loss, PnL/R, TP/SL/Other, or anomaly counters.
+- At `16:50 ET`, ten minutes before the `17:00 ET` Globex halt, new entries are blocked. Any pending entry and protective orders are canceled and a remaining OPF position is closed with a real `SESSION_FLATTEN` market order.
+- The closeout lock remains active through the daily halt and, after Friday close, through the weekend. It clears automatically at the next `18:00 ET` Globex reopen, when the new trading-day counters begin without stopping or restarting the strategy.
+- The Eastern-time conversion is DST-aware: closeout begins at `04:50` China time during U.S. daylight saving time and `05:50` during U.S. standard time.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

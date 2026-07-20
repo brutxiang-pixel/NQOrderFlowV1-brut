@@ -912,6 +912,8 @@ From `OPF_RESEARCH_1.74`, `ACTUAL_EXEC_2.10` quarantines `EntryFillOutOfRange` o
 
 From `OPF_RESEARCH_1.75`, `ACTUAL_EXEC_2.13` adds live-readiness reconciliation, connection and order-failure notifications, stop-only protection integrity checks, idempotent emergency flatten submission, confirmed stop-time exits, a fifteen-normal-trade daily cap, a `-$300` realized net daily loss gate, U.S. cash-open blackout windows, and real-time latency blocking. Quarantined abnormal entries remain excluded from the normal-trade cap. `live_account_pnl.csv` is an account-impact ledger and does not replace `execution_trades.csv`.
 
+From `OPF_RESEARCH_1.76`, `ACTUAL_EXEC_2.14` assigns daily execution counters and account PnL to a DST-aware Globex trading-day key beginning at `18:00 ET`. `SKIP_GLOBEX_CLOSEOUT_LOCK` blocks entries from `16:50 ET` through the daily halt or weekend. `GLOBEX_CLOSEOUT_PENDING`, `GLOBEX_CLOSEOUT_FLATTEN_SEND`, and `GLOBEX_CLOSEOUT_POSITION_FLAT` audit the closeout lifecycle; `GLOBEX_CLOSEOUT_ACCOUNT_FLAT_CALLBACK_PENDING` means the account position reached zero before the serialized fill callback was processed and is not a closeout failure. A filled position exits with the existing `SESSION_FLATTEN` role. The strategy remains running and automatically starts the next trading day at the following Globex reopen.
+
 Historical Replay writes `HISTORICAL_REPLAY_CONNECTOR_BYPASS` when ATAS exposes no connector even though its simulated Actual order path is available. This bypass applies only when candle time is historical; real-time execution remains blocked without a connected connector.
 
 `live_account_pnl.csv` fields:

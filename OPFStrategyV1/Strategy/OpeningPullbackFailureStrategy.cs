@@ -98,8 +98,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal SetupQualityThreshold = 80m;
     private const int MaxPullbackBars = 24;
     private const int StaleUnfilledEntryMaxBars = 2;
-    private static readonly TimeSpan ReplayStopGuardStart = new(20, 40, 0);
-    private static readonly TimeSpan FridayReplayStopGuardStart = new(16, 40, 0);
+    private static readonly TimeSpan GlobexCloseoutStartEastern = new(16, 50, 0);
+    private static readonly TimeSpan GlobexReopenEastern = new(18, 0, 0);
     private static readonly TimeSpan SummerUsOpenBlockStartUtc = new(13, 30, 0);
     private static readonly TimeSpan WinterUsOpenBlockStartUtc = new(14, 30, 0);
     private static readonly TimeSpan UsOpenBlockDuration = TimeSpan.FromMinutes(30);
@@ -343,7 +343,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         SubscribeConnectorEvents();
         ReconcileLiveExecutionState("Started");
-        RestoreLiveDailyNetPnl(DateTime.Now.Date);
+        var restoreTime = _lastResearchCandle?.Time ?? DateTime.UtcNow;
+        RestoreLiveDailyNetPnl(GlobexTradingDayKey(restoreTime));
     }
 
     private string ResolveExecutionProfileName(ActualExecutionSettings settings)
@@ -565,11 +566,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         var current = ToOpfCandle(bar, candle);
         _lastResearchCandle = current;
+        RollGlobexTradingDayIfNeeded(current);
         AllowHistoricalReplayConnectorBypass(current);
         UpdateActualExecutionExcursion(current);
         ScheduleHistoricalReplayAccountFlatReconciliationIfNeeded(current);
         ScheduleStaleUnfilledEntryAbortIfNeeded(current);
-        ScheduleReplayStopExitIfNeeded(current);
+        ScheduleGlobexCloseoutIfNeeded(current);
         ScheduleOrphanPositionFlattenIfNeeded(current);
         ScheduleProtectionCleanupIfNeeded("ClosedBar");
         var zones = _zoneDetector.Update(current);
@@ -801,7 +803,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (_snapshot is null)
             return;
 
-        var date = candle.Time.Date;
+        var date = GlobexTradingDayKey(candle.Time);
         if (!_regimeDailyStatsByDate.TryGetValue(date, out var stats))
         {
             stats = new RegimeDailyStats(date);
@@ -2102,10 +2104,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_STRATEGY_STOPPING", "-", researchPath, entryCandle.Close, 0m, "StrategyStopping");
             return;
         }
-        if (IsReplayStopGuardWindow(entryCandle.Time))
+        if (IsGlobexCloseoutLockWindow(entryCandle.Time, out var globexCloseoutReason))
         {
-            AppendExecutionDecision(signal, entryCandle, "Skip", "ReplayStopGuard", researchPath, stop, risk);
-            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_REPLAY_STOP_GUARD", "-", researchPath, entryCandle.Close, 0m, "ReplayStopGuard");
+            AppendExecutionDecision(signal, entryCandle, "Skip", globexCloseoutReason, researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_GLOBEX_CLOSEOUT_LOCK", "-", researchPath, entryCandle.Close, 0m, globexCloseoutReason);
             return;
         }
         if (IsUsCashOpenBlackout(entryCandle.Time, out var openBlockReason))
@@ -2120,7 +2122,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_LIVE_LATENCY", "-", researchPath, entryCandle.Close, 0m, latencyReason);
             return;
         }
-        ResetReplayExecutionDailyCounter(entryCandle.Time.Date);
+        ResetReplayExecutionDailyCounter(GlobexTradingDayKey(entryCandle.Time));
         if (_liveReadinessBlocked)
         {
             var reason = $"LiveReadinessBlocked:{_liveReadinessBlockReason}";
@@ -3399,6 +3401,19 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _recentExecutionHudItems.Clear();
     }
 
+    private void RollGlobexTradingDayIfNeeded(OpfCandle candle)
+    {
+        var tradingDay = GlobexTradingDayKey(candle.Time);
+        if (_replayExecutionDate == tradingDay)
+            return;
+
+        var previous = _replayExecutionDate;
+        ResetReplayExecutionDailyCounter(tradingDay);
+        var message = $"previous={(previous == DateTime.MinValue ? "-" : previous.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))}|current={tradingDay:yyyy-MM-dd}";
+        LogExecutionInfo($"EXEC_GLOBEX_TRADING_DAY_ROLLOVER {message}");
+        AppendStandaloneExecutionEvent("GLOBEX_TRADING_DAY_ROLLOVER", "-", candle, candle.Close, 0m, message);
+    }
+
     private void QuarantineAbnormalEntryV174(ReplayExecutionState execution, string reason)
     {
         if (execution.AbnormalEntryQuarantined)
@@ -3408,7 +3423,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _replayAbnormalEntryToday++;
         var drift = Math.Abs(execution.EntryAvgPrice - execution.CreatedPrice);
         _lastAbnormalEntryHudText = $"{execution.CreatedTime:HH:mm} {execution.TradeId} planned={execution.CreatedPrice:0.##} fill={execution.EntryAvgPrice:0.##} drift={drift:0.##} qty={execution.EntryFilledQty:0.##}";
-        if (!execution.DailyCountersRolledBack && _replayExecutionDate == execution.CreatedTime.Date)
+        if (!execution.DailyCountersRolledBack && _replayExecutionDate == GlobexTradingDayKey(execution.CreatedTime))
         {
             _replayTradesToday = Math.Max(0, _replayTradesToday - 1);
             if (execution.CountedAsObservationFiller)
@@ -3621,7 +3636,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(execution, "ABNORMAL_EXECUTION", finalRole, finalExitPrice, execution.ExitFilledQty, $"{validation.Reason}|expected={validation.ExpectedExitPrice:0.########}|drift={validation.ExitPriceDriftPoints:0.########}");
         }
         if (!execution.AbnormalEntryQuarantined)
-            UpdateReplayExecutionDailyResult(execution.CreatedTime.Date, validation.NormalDollars, dailyRole);
+            UpdateReplayExecutionDailyResult(GlobexTradingDayKey(execution.CreatedTime), validation.NormalDollars, dailyRole);
         var accountClassification = execution.AbnormalEntryQuarantined ? "Quarantine" : "Normal";
         var replayNormalizedGross = execution.AbnormalEntryQuarantined ? 0m : validation.NormalDollars;
         var useRawReplayGross = !execution.AbnormalEntryQuarantined &&
@@ -3709,7 +3724,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         AppendExecutionEvent(execution, "LIVE_ACCOUNT_PNL", classification, exitPrice, quantity, $"gross={gross:0.##}|rawGross={rawGross:0.##}|source={pnlSource}|commission={commission:0.##}|net={net:0.##}|dailyNet={_liveAccountDailyNetPnlDollars:0.##}");
 
         if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
-            NotifyLiveIssue($"DailyLoss:{execution.CreatedTime:yyyyMMdd}", $"Daily net loss limit reached: {_liveAccountDailyNetPnlDollars:0.##} USD (limit -{_actualDailyLossLimitDollars:0.##}). New Actual entries are blocked for the day.");
+        {
+            var tradingDay = GlobexTradingDayKey(execution.CreatedTime);
+            NotifyLiveIssue($"DailyLoss:{tradingDay:yyyyMMdd}", $"Trading-day net loss limit reached: {_liveAccountDailyNetPnlDollars:0.##} USD (limit -{_actualDailyLossLimitDollars:0.##}). New Actual entries are blocked for {tradingDay:yyyy-MM-dd}.");
+        }
     }
 
     private void RestoreLiveDailyNetPnl(DateTime date)
@@ -3733,7 +3751,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                     var fields = line.Split(',');
                     if (fields.Length < 18 ||
                         !DateTime.TryParse(fields[8].Trim('"'), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var exitTime) ||
-                        exitTime.Date != date ||
+                        GlobexTradingDayKey(exitTime) != date ||
                         !decimal.TryParse(fields[16], NumberStyles.Number, CultureInfo.InvariantCulture, out var net))
                     {
                         continue;
@@ -3749,7 +3767,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             }
 
             _liveAccountDailyNetPnlDollars = Math.Round(_liveAccountDailyNetPnlDollars, 2);
-            LogLiveReadinessInfo($"LIVE_DAILY_NET_RESTORED date={date:yyyy-MM-dd} net={_liveAccountDailyNetPnlDollars:0.##} normalTrades={_replayTradesToday}");
+            LogLiveReadinessInfo($"LIVE_TRADING_DAY_NET_RESTORED tradingDay={date:yyyy-MM-dd} net={_liveAccountDailyNetPnlDollars:0.##} normalTrades={_replayTradesToday}");
             if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
                 NotifyLiveIssue($"DailyLoss:{date:yyyyMMdd}", $"Restored daily net loss is {_liveAccountDailyNetPnlDollars:0.##} USD, at or below the -{_actualDailyLossLimitDollars:0.##} limit. New Actual entries remain blocked.");
         }
@@ -4533,34 +4551,33 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         });
     }
 
-    private void ScheduleReplayStopExitIfNeeded(OpfCandle candle)
+    private void ScheduleGlobexCloseoutIfNeeded(OpfCandle candle)
     {
         var execution = _replayExecution;
         if (!EnableReplayOrders ||
-            !IsReplayStopGuardWindow(candle.Time) ||
+            !IsGlobexCloseoutLockWindow(candle.Time, out var closeoutReason) ||
             execution is null ||
             execution.ExitCompleted ||
-            execution.ReplayStopExitPending ||
-            execution.EntryFilledQty <= 0m)
+            execution.ReplayStopExitPending)
         {
             return;
         }
 
         execution.ReplayStopExitPending = true;
-        EnqueueExecutionAction("ReplayStopExit", async () =>
+        EnqueueExecutionAction("GlobexCloseout", async () =>
         {
             if (!ReferenceEquals(_replayExecution, execution) || execution.ExitCompleted)
                 return;
 
-            var reason = $"guard={candle.Time:HH:mm}|remaining={RemainingExecutionQuantity(execution):0.########}";
-            LogExecutionInfo($"EXEC_REPLAY_STOP_EXIT_PENDING trade={execution.TradeId} {reason}");
-            AppendExecutionEvent(execution, "REPLAY_STOP_EXIT_PENDING", ReplayStopExitRole, candle.Close, RemainingExecutionQuantity(execution), reason);
+            var reason = $"{closeoutReason}|remaining={RemainingExecutionQuantity(execution):0.########}";
+            LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_PENDING trade={execution.TradeId} {reason}");
+            AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_PENDING", ReplayStopExitRole, candle.Close, RemainingExecutionQuantity(execution), reason);
 
-            await TryCancelExecutionOrderAsync(execution.EntryOrder, "ReplayStopExit:Entry");
-            await TryCancelExecutionOrderAsync(execution.StopOrder, "ReplayStopExit:SL");
-            await TryCancelExecutionOrderAsync(execution.TargetOrder, "ReplayStopExit:TP");
-            await TryCancelExecutionOrderAsync(execution.RunnerStopOrder, "ReplayStopExit:RunnerSL");
-            await TryCancelExecutionOrderAsync(execution.RunnerTargetOrder, "ReplayStopExit:RunnerTP");
+            await TryCancelExecutionOrderAsync(execution.EntryOrder, "GlobexCloseout:Entry");
+            await TryCancelExecutionOrderAsync(execution.StopOrder, "GlobexCloseout:SL");
+            await TryCancelExecutionOrderAsync(execution.TargetOrder, "GlobexCloseout:TP");
+            await TryCancelExecutionOrderAsync(execution.RunnerStopOrder, "GlobexCloseout:RunnerSL");
+            await TryCancelExecutionOrderAsync(execution.RunnerTargetOrder, "GlobexCloseout:RunnerTP");
 
             if (execution.ExitCompleted)
                 return;
@@ -4569,8 +4586,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (position == 0m)
             {
                 execution.ReplayStopExitPending = false;
-                LogExecutionInfo($"EXEC_REPLAY_STOP_POSITION_FLAT trade={execution.TradeId} {reason}");
-                AppendExecutionEvent(execution, "REPLAY_STOP_POSITION_FLAT", ReplayStopExitRole, candle.Close, 0m, reason);
+                if (execution.EntryFilledQty <= 0m)
+                {
+                    execution.ExitCompleted = true;
+                    execution.ExitBar = candle.Bar;
+                    execution.ExitPrice = execution.CreatedPrice;
+                    execution.ExitRole = "GLOBEX_CLOSEOUT_NO_FILL";
+                    MarkProtectionCleanupPending(execution, "GlobexCloseoutNoFill");
+                }
+                LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_POSITION_FLAT trade={execution.TradeId} {reason}");
+                AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_POSITION_FLAT", ReplayStopExitRole, candle.Close, 0m, reason);
                 return;
             }
 
@@ -4594,9 +4619,28 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 AutoCancel = false
             };
 
-            LogExecutionInfo($"EXEC_REPLAY_STOP_FLATTEN_SEND trade={execution.TradeId} dir={direction} qty={qty:0.########} {reason}");
-            AppendExecutionEvent(execution, "REPLAY_STOP_FLATTEN_SEND", ReplayStopExitRole, candle.Close, qty, $"dir={direction}|{reason}");
+            LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_FLATTEN_SEND trade={execution.TradeId} dir={direction} qty={qty:0.########} {reason}");
+            AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_FLATTEN_SEND", ReplayStopExitRole, candle.Close, qty, $"dir={direction}|{reason}");
             await OpenOrderAsync(order);
+
+            var confirmDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < confirmDeadline && GetCurrentAccountPosition() != 0m)
+                await Task.Delay(100);
+
+            var remainingPosition = GetCurrentAccountPosition();
+            if (remainingPosition != 0m)
+            {
+                var unconfirmedReason = $"trade={execution.TradeId}|position={remainingPosition:0.########}|exitCallback={execution.ExitCompleted}";
+                LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_UNCONFIRMED {unconfirmedReason}");
+                AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_UNCONFIRMED", ReplayStopExitRole, candle.Close, Math.Abs(remainingPosition), unconfirmedReason);
+                SetLiveReadinessBlocked("GlobexCloseoutUnconfirmed", $"Globex closeout was not confirmed for {execution.TradeId}. Account position={remainingPosition:0.########}. Verify the account and working orders manually.");
+            }
+            else if (!execution.ExitCompleted)
+            {
+                var pendingReason = $"trade={execution.TradeId}|position=0|exitCallback=pending";
+                LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_ACCOUNT_FLAT_CALLBACK_PENDING {pendingReason}");
+                AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_ACCOUNT_FLAT_CALLBACK_PENDING", ReplayStopExitRole, candle.Close, 0m, pendingReason);
+            }
         });
     }
 
@@ -5273,11 +5317,36 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return execution is not null && (!execution.ExitCompleted || execution.ProtectionCleanupPending);
     }
 
-    private static bool IsReplayStopGuardWindow(DateTime time)
+    private static DateTime GlobexTradingDayKey(DateTime time)
     {
-        var t = time.TimeOfDay;
-        return t >= ReplayStopGuardStart ||
-            (time.DayOfWeek == DayOfWeek.Friday && t >= FridayReplayStopGuardStart);
+        var eastern = ToEasternTime(time);
+        return eastern.TimeOfDay >= GlobexReopenEastern
+            ? eastern.Date.AddDays(1)
+            : eastern.Date;
+    }
+
+    private static bool IsGlobexCloseoutLockWindow(DateTime time, out string reason)
+    {
+        var eastern = ToEasternTime(time);
+        var day = eastern.DayOfWeek;
+        var t = eastern.TimeOfDay;
+        var locked = day == DayOfWeek.Saturday ||
+            (day == DayOfWeek.Sunday && t < GlobexReopenEastern) ||
+            (day == DayOfWeek.Friday && t >= GlobexCloseoutStartEastern) ||
+            (day is >= DayOfWeek.Monday and <= DayOfWeek.Thursday &&
+                t >= GlobexCloseoutStartEastern && t < GlobexReopenEastern);
+        reason = locked
+            ? $"GlobexCloseoutLock:Eastern={eastern:ddd HH:mm}|TradingDay={GlobexTradingDayKey(time):yyyy-MM-dd}"
+            : string.Empty;
+        return locked;
+    }
+
+    private static DateTime ToEasternTime(DateTime time)
+    {
+        var utc = time.Kind == DateTimeKind.Utc
+            ? time
+            : DateTime.SpecifyKind(time, DateTimeKind.Utc);
+        return TimeZoneInfo.ConvertTimeFromUtc(utc, EasternTimeZone);
     }
 
     private static bool IsUsCashOpenBlackout(DateTime time, out string reason)
@@ -6600,6 +6669,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         hud.AppendLine($"Zones: {_activeZoneCount}  Candidates: {_candidateCount}  Confirmed: {_confirmedCount}");
         hud.AppendLine($"Research: active={_researchTrackers.Count} done={_researchOutcomeCount}");
         var cleanupCount = _replayExecution is null ? 0 : CountWorkingProtectionOrders(_replayExecution);
+        var tradingDay = GlobexTradingDayKey(candle.Time);
+        var globexLocked = IsGlobexCloseoutLockWindow(candle.Time, out _);
+        hud.AppendLine($"TradingDay: {tradingDay:yyyy-MM-dd}  GlobexGate: {(globexLocked ? "LOCKED" : "OPEN")}");
         hud.AppendLine($"ActualExec: {(EnableReplayOrders ? "ON" : "OFF")} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} active={IsReplayExecutionActive(_replayExecution)} pos={GetCurrentAccountPosition():0.##} cleanup={cleanupCount}");
         var dailyTarget = _snapshot?.ExecutionProfile.DailyTargetDollars ?? 0m;
         hud.AppendLine($"Today: TP={_replayTpToday} SL={_replaySlToday} Other={_replayOtherExitToday} NetR={_replayDailyR:0.00} Gross=${_replayDailyPnlDollars:0.##} AccountNet=${_liveAccountDailyNetPnlDollars:0.##} target=${dailyTarget:0.##} loss=${_actualDailyLossLimitDollars:0.##}");
