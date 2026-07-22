@@ -1438,6 +1438,8 @@ From `OPF_RESEARCH_1.91`, `ACTUAL_EXEC_2.29` adds exact portfolio-candidate shad
 - `Simulate-OPFCounterfactual.ps1` prefers these exact rows for replacement trades and falls back to the older 12-bar exit-policy evidence only for pre-v1.91 archives.
 - The simulator's optional `-TraceCsv` output records every portfolio candidate, its pre/post portfolio state, risk-band decision, block/selection disposition, and Actual/exact-shadow outcome source. It is diagnostic-only and does not change simulation results.
 
+`OPF_RESEARCH_1.92`, `ACTUAL_EXEC_2.30` is a paired-calibration build. It restores only the v1.89 Short `ObservationConfirm_WideStop1_5R` planned-risk gate (`>8` and `<=12`) and the hard `12`-point filled-risk ceiling. Original v1.89 execution/skip tags are retained so Actual replacement chains can be compared with the v1.91 offline simulation. No other Actual rule changes.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

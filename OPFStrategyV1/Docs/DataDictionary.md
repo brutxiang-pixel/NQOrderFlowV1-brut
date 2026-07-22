@@ -948,6 +948,8 @@ From `OPF_RESEARCH_1.90`, `ACTUAL_EXEC_2.28` removes `ObservationConfirmWideStop
 
 From `OPF_RESEARCH_1.91`, `ACTUAL_EXEC_2.29` adds `shadow_trades.csv` without changing Actual eligibility, orders, TP/SL, sizing, or portfolio guards. A shadow candidate begins only after strategy/path/risk/RR/same-bar checks pass and immediately before daily-limit, daily-loss, and ActiveTrade checks. Non-Split candidates use the current `ProtectBE1R_Then3R` lifecycle. ZoneBirth Short uses the Actual `Base 2.5R + Runner 4R`, with Runner break-even eligible after Base TP. Unresolved candidates exit at Globex closeout or strategy stop.
 
+From `OPF_RESEARCH_1.92`, `ACTUAL_EXEC_2.30` restores the v1.89 Short `ObservationConfirm_WideStop1_5R` paired-calibration gate. Planned risk outside `>8` and `<=12` writes `ObservationConfirmWideStopShortRiskBandV189Excluded`; admitted executions write `OCWideStopShortRiskBandV189`. Filled-risk validation uses a hard `12`-point ceiling without the normal drift tolerance. CSV schemas are unchanged.
+
 `shadow_trades.csv` fields:
 
 - identity: `SignalID`, `EntryTime`, `EntryBar`, `Side`, `ResearchPath`
