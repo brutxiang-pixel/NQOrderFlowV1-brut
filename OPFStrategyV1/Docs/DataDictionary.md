@@ -950,6 +950,10 @@ From `OPF_RESEARCH_1.91`, `ACTUAL_EXEC_2.29` adds `shadow_trades.csv` without ch
 
 From `OPF_RESEARCH_1.92`, `ACTUAL_EXEC_2.30` restores the v1.89 Short `ObservationConfirm_WideStop1_5R` paired-calibration gate. Planned risk outside `>8` and `<=12` writes `ObservationConfirmWideStopShortRiskBandV189Excluded`; admitted executions write `OCWideStopShortRiskBandV189`. Filled-risk validation uses a hard `12`-point ceiling without the normal drift tolerance. CSV schemas are unchanged.
 
+From `OPF_RESEARCH_1.93`, `ACTUAL_EXEC_2.31` removes the v1.92 paired-calibration risk band and restores v1.90/v1.91 WideStop Short entry eligibility. `ObservationConfirm_WideStop1_5R` alone moves its working SL to the filled entry price after an observed `+0.75R` move while retaining the `3R` target. Its lifecycle uses `PROTECT_BE075_WIDESTOP_TRIGGERED_V193`, `PROTECT_BE075_WIDESTOP_MODIFY_SEND_V193`, `PROTECT_BE075_WIDESTOP_APPLIED_V193`, and matching failure, stale-order, market-crossed, and no-op events. Exact shadow rows use policy `ProtectBE0_75R_Then3R`. Other non-Split paths retain the v1.86 `1R` trigger, and ZoneBirth split orders are unchanged.
+
+From `OPF_RESEARCH_1.94`, `ACTUAL_EXEC_2.32` restores `ObservationConfirm_WideStop1_5R` to the standard `ProtectBE1R_Then3R` lifecycle after v1.93 failed its portfolio-level Smoke gate. WideStop again uses the existing `PROTECT_BE1R_*_V186` event family and exact shadow policy. The v1.93 `PROTECT_BE075_WIDESTOP_*_V193` names remain historical evidence only; no current v1.94 execution emits them.
+
 `shadow_trades.csv` fields:
 
 - identity: `SignalID`, `EntryTime`, `EntryBar`, `Side`, `ResearchPath`

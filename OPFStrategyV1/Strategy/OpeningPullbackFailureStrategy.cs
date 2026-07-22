@@ -93,8 +93,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal HistoricalDormantTargetOffsetPointsV181 = 500m;
     private const decimal ProtectBreakEvenTriggerRV186 = 1m;
     private const decimal ProtectBreakEvenTargetRV186 = 3m;
-    private const decimal ObservationConfirmWideStopShortV189MinRiskExclusivePoints = 8m;
-    private const decimal ObservationConfirmWideStopShortV189MaxRiskPoints = 12m;
     private const decimal EntryFillRiskDriftTolerancePoints = 1m;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
@@ -2508,8 +2506,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
         if (IsObservationConfirmWideStopLowRiskV132(signal, researchPath, risk))
             executeReasons.Add($"OCWideStopLowRiskV132:side={signal.Side},risk={risk:0.##},score={signal.SetupQualityScore.TotalScore:0.##},rr={EstimatedActualRr(signal, researchPath, entry, risk):0.####},dailyTrades={_replayTradesToday}");
-        if (IsObservationConfirmWideStopShortV189RiskAllowed(signal, researchPath, risk))
-            executeReasons.Add($"OCWideStopShortRiskBandV189:risk={risk:0.##},allowed=>8<=12");
         if (IsFailureRetestWideStopVolumeFiller(researchPath))
             executeReasons.Add($"FailureRetestWideFiller:dailyTrades={_replayTradesToday}/{_actualObservationConfirmFillerUntilDailyTrades}");
         if (IsPositiveExpansionV146(signal, researchPath))
@@ -2789,8 +2785,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal MaxAllowedActualRiskPoints(CandidateSignal signal, string researchPath, decimal risk)
     {
-        if (IsObservationConfirmWideStopShortV189Candidate(signal, researchPath))
-            return ObservationConfirmWideStopShortV189MaxRiskPoints;
         if (IsZoneBirthShortExpansionV168(signal, researchPath))
             return risk <= ZoneBirthShortV170LowRiskMaxPoints
                 ? ZoneBirthShortV170LowRiskMaxPoints
@@ -2987,18 +2981,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private static bool IsObservationConfirmWideStopPath(string researchPath)
     {
         return string.Equals(researchPath, "ObservationConfirm_WideStop1_5R", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsObservationConfirmWideStopShortV189Candidate(CandidateSignal signal, string researchPath)
-    {
-        return signal.Side == TradeSide.Short && IsObservationConfirmWideStopPath(researchPath);
-    }
-
-    private static bool IsObservationConfirmWideStopShortV189RiskAllowed(CandidateSignal signal, string researchPath, decimal risk)
-    {
-        return IsObservationConfirmWideStopShortV189Candidate(signal, researchPath) &&
-            risk > ObservationConfirmWideStopShortV189MinRiskExclusivePoints &&
-            risk <= ObservationConfirmWideStopShortV189MaxRiskPoints;
     }
 
     private static bool IsFailureRetestPath(string researchPath)
@@ -3364,11 +3346,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var isObservationConfirmWideStopLowRisk = IsObservationConfirmWideStopLowRiskV132(signal, researchPath, risk);
         var isObservationConfirmRisk22 = IsObservationConfirmRisk22V132(signal, researchPath, risk);
         var isAggressiveExpansionV164 = TryGetAggressiveExpansionV164Rules(signal.Side, researchPath, out _, out var aggressiveMinEstimatedRr, out _);
-        if (IsObservationConfirmWideStopShortV189Candidate(signal, researchPath) &&
-            !IsObservationConfirmWideStopShortV189RiskAllowed(signal, researchPath, risk))
-        {
-            reasons.Add($"ObservationConfirmWideStopShortRiskBandV189Excluded:risk={risk:0.##},allowed=>8<=12");
-        }
         if (IsZoneBirthShortExpansionV168(signal, researchPath) && !IsZoneBirthShortV170RiskAllowed(risk))
             reasons.Add($"ZoneBirthShortV170RiskBandExcluded:risk={risk:0.##},allowed=<=8|>12<=18");
         if (isAggressiveExpansionV164 && risk > AggressiveExpansionV164MaxRiskPoints)
@@ -4921,9 +4898,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return false;
         if (IsObservationConfirmPath(execution.ResearchPath) && execution.Side == TradeSide.Long)
             return false;
-        if (execution.Side == TradeSide.Short && IsObservationConfirmWideStopPath(execution.ResearchPath))
-            return false;
-
         return execution.PlannedRiskPoints <= execution.MaxAllowedRiskPoints &&
             execution.InitialRiskPoints <= execution.MaxAllowedRiskPoints + EntryFillRiskDriftTolerancePoints;
     }

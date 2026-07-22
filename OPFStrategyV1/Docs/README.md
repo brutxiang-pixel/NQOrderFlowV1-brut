@@ -1440,6 +1440,10 @@ From `OPF_RESEARCH_1.91`, `ACTUAL_EXEC_2.29` adds exact portfolio-candidate shad
 
 `OPF_RESEARCH_1.92`, `ACTUAL_EXEC_2.30` is a paired-calibration build. It restores only the v1.89 Short `ObservationConfirm_WideStop1_5R` planned-risk gate (`>8` and `<=12`) and the hard `12`-point filled-risk ceiling. Original v1.89 execution/skip tags are retained so Actual replacement chains can be compared with the v1.91 offline simulation. No other Actual rule changes.
 
+From `OPF_RESEARCH_1.93`, `ACTUAL_EXEC_2.31` restores the v1.90/v1.91 WideStop Short eligibility and filled-risk behavior, then changes only `ObservationConfirm_WideStop1_5R` protection to `0.75R -> break-even -> 3R`. Other non-Split paths remain `1R -> break-even -> 3R`; ZoneBirth split behavior is unchanged. WideStop lifecycle events use `PROTECT_BE075_WIDESTOP_*_V193`, and exact shadow rows use `ProtectBE0_75R_Then3R`. Entries, initial stops, targets, quantity, daily limits, daily-loss protection, and all unrelated paths are unchanged.
+
+From `OPF_RESEARCH_1.94`, `ACTUAL_EXEC_2.32` rejects the v1.93 strategy change and restores every eligible non-Split path, including `ObservationConfirm_WideStop1_5R`, to `1R -> break-even -> 3R`. The v1.90/v1.91 WideStop eligibility, MFE/MAE correction, exact shadow logging, and all portfolio/risk rules remain unchanged. v1.93 showed a positive direct effect on matched trades but a larger negative ActiveTrade replacement effect, so its `0.75R` lifecycle is retained only as archived evidence.
+
 The paired eight-Snapshot calibration separates outcome-model accuracy from cross-Replay candidate drift:
 
 - `Simulate-OPFCounterfactual.ps1 -ShadowTargetMode Observed` preserves the recorded shadow result. `-ShadowTargetMode Conservative` treats a protected non-Split shadow target as break-even and a ZoneBirth Base+Runner target as Base-only, because Historical Replay cannot establish target-versus-protective-stop ordering inside the same M5 candle for a non-submitted shadow order.
