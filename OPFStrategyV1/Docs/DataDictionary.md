@@ -946,6 +946,18 @@ The full 62-Snapshot Q4 result rejected v1.89 at portfolio level despite the dir
 
 From `OPF_RESEARCH_1.90`, `ACTUAL_EXEC_2.28` removes `ObservationConfirmWideStopShortRiskBandV189Excluded` / `OCWideStopShortRiskBandV189` and restores the v1.87 Short wide-stop eligibility and filled-risk behavior. The v1.89 excursion audit correction remains: calculation prices used by protection update Actual MFE/MAE, and normalized Replay exits update excursion with the normalized strategy exit rather than the stale raw callback price. No CSV columns change.
 
+From `OPF_RESEARCH_1.91`, `ACTUAL_EXEC_2.29` adds `shadow_trades.csv` without changing Actual eligibility, orders, TP/SL, sizing, or portfolio guards. A shadow candidate begins only after strategy/path/risk/RR/same-bar checks pass and immediately before daily-limit, daily-loss, and ActiveTrade checks. Non-Split candidates use the current `ProtectBE1R_Then3R` lifecycle. ZoneBirth Short uses the Actual `Base 2.5R + Runner 4R`, with Runner break-even eligible after Base TP. Unresolved candidates exit at Globex closeout or strategy stop.
+
+`shadow_trades.csv` fields:
+
+- identity: `SignalID`, `EntryTime`, `EntryBar`, `Side`, `ResearchPath`
+- plan: `Entry`, `Stop`, `InitialRiskPoints`, `Policy`
+- resolved lifecycle: `ExitTime`, `ExitBar`, `ExitReason`, `ExitPrice`, `BarsHeld`, `Ambiguous`
+- result: `PnLPoints`, `PnL_R`, `GrossDollars`, `CommissionDollars`, `NetDollars`
+- original portfolio result: `OriginalDecision`, `OriginalReason`, `OriginalTradeID`
+
+These rows are counterfactual evidence only. They never submit, cancel, or modify ATAS orders and do not change Actual counters or account PnL.
+
 Historical Replay writes `HISTORICAL_REPLAY_CONNECTOR_BYPASS` when ATAS exposes no connector even though its simulated Actual order path is available. This bypass applies only when candle time is historical; real-time execution remains blocked without a connected connector.
 
 `live_account_pnl.csv` fields:

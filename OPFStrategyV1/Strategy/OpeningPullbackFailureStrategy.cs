@@ -136,6 +136,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private readonly List<PendingConfirmedRetrace> _pendingConfirmedRetraces = new();
     private readonly List<PendingFailureReverseRetest> _pendingFailureReverseRetests = new();
     private readonly List<ResearchTracker> _researchTrackers = new();
+    private readonly List<ShadowTradeTracker> _shadowTradeTrackers = new();
+    private readonly Dictionary<string, ShadowTradeTracker> _shadowTradeTrackersByKey = new();
     private readonly List<ReplayExecutionState> _recentReplayExecutions = new();
     private readonly Dictionary<string, ActualTradeOutcome> _actualTradeOutcomesBySignalPath = new();
     private readonly HashSet<string> _writtenExecutionTradeIds = new();
@@ -549,6 +551,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         FinalizeActiveExecutionOnStop();
         WriteRegimeDailyStats();
         FlushResearchTrackers("ResearchStopped");
+        FlushShadowTradeTrackers("StrategyStopped");
+        _researchLogger?.FlushShadowTrades();
         UnsubscribeConnectorEvents();
         base.OnStopped();
     }
@@ -624,6 +628,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         EvaluateStructureConfirmShadows(current);
         EvaluateConfirmBarWait1s(current);
         EvaluateAggressiveExpansionWait1s(current);
+        UpdateShadowTradeTrackers(current);
 
         if (regime.Regime == MarketRegime.Unknown)
         {
@@ -2274,13 +2279,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_LIVE_READINESS_BLOCKED", "-", researchPath, entryCandle.Close, 0m, reason);
             return;
         }
-        if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
-        {
-            var reason = $"LiveDailyLoss:net={_liveAccountDailyNetPnlDollars:0.##},limit={_actualDailyLossLimitDollars:0.##}";
-            AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
-            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_LIVE_DAILY_LOSS", "-", researchPath, entryCandle.Close, 0m, reason);
-            return;
-        }
         if (!IsReplayExecutionPathEnabled(researchPath))
         {
             AppendExecutionDecision(signal, entryCandle, "Skip", "PathDisabled", researchPath, stop, risk);
@@ -2329,6 +2327,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
             AppendExecutionDecision(signal, entryCandle, "Skip", string.Join("|", sameBarSkipReasons), researchPath, stop, risk);
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_SAME_BAR_AMBIGUOUS", "-", researchPath, entryCandle.Close, 0m, string.Join("|", sameBarSkipReasons));
+            return;
+        }
+        StartShadowTradeTracking(signal, entryCandle, researchPath, stop, risk);
+        if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
+        {
+            var reason = $"LiveDailyLoss:net={_liveAccountDailyNetPnlDollars:0.##},limit={_actualDailyLossLimitDollars:0.##}";
+            AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_LIVE_DAILY_LOSS", "-", researchPath, entryCandle.Close, 0m, reason);
             return;
         }
         if (ReplayMaxTradesPerDay > 0 && _replayTradesToday >= ReplayMaxTradesPerDay)
@@ -2598,6 +2604,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (_snapshot is null)
             return;
+
+        if (_shadowTradeTrackersByKey.TryGetValue(ShadowTradeKey(signal.SignalId, researchPath, entryCandle.Bar), out var shadow))
+            shadow.SetOriginalDecision(decision, reason, tradeId);
 
         var entry = entryCandle.Close;
         var targetR = ActualTargetRFor(signal, researchPath, risk);
@@ -6569,6 +6578,201 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return reasons;
     }
 
+    private void StartShadowTradeTracking(CandidateSignal signal, OpfCandle entryCandle, string researchPath, decimal stop, decimal risk)
+    {
+        if (_snapshot is null || _researchLogger is null || risk <= 0m)
+            return;
+
+        var key = ShadowTradeKey(signal.SignalId, researchPath, entryCandle.Bar);
+        if (_shadowTradeTrackersByKey.ContainsKey(key))
+            return;
+
+        var tracker = new ShadowTradeTracker(
+            key,
+            new ResearchTracker(signal, entryCandle.Time, entryCandle.Bar, entryCandle.Close, stop, risk, int.MaxValue, researchPath));
+        _shadowTradeTrackers.Add(tracker);
+        _shadowTradeTrackersByKey[key] = tracker;
+    }
+
+    private void UpdateShadowTradeTrackers(OpfCandle candle)
+    {
+        if (_snapshot is null || _shadowTradeTrackers.Count == 0)
+            return;
+
+        for (var i = _shadowTradeTrackers.Count - 1; i >= 0; i--)
+        {
+            var shadow = _shadowTradeTrackers[i];
+            if (candle.Bar <= shadow.Tracker.EntryBar)
+                continue;
+
+            shadow.Tracker.Update(candle);
+            if (TryResolveShadowTrade(shadow.Tracker, candle, false, string.Empty, out var result) ||
+                (IsGlobexCloseoutLockWindow(candle.Time, out _) &&
+                 TryResolveShadowTrade(shadow.Tracker, candle, true, "GlobexCloseout", out result)))
+            {
+                WriteShadowTrade(shadow, candle, result);
+                RemoveShadowTradeTrackerAt(i);
+            }
+        }
+    }
+
+    private void FlushShadowTradeTrackers(string reason)
+    {
+        if (_snapshot is null || _lastResearchCandle is null)
+            return;
+
+        for (var i = _shadowTradeTrackers.Count - 1; i >= 0; i--)
+        {
+            var shadow = _shadowTradeTrackers[i];
+            if (TryResolveShadowTrade(shadow.Tracker, _lastResearchCandle, true, reason, out var result))
+                WriteShadowTrade(shadow, _lastResearchCandle, result);
+            RemoveShadowTradeTrackerAt(i);
+        }
+    }
+
+    private void RemoveShadowTradeTrackerAt(int index)
+    {
+        var shadow = _shadowTradeTrackers[index];
+        _shadowTradeTrackers.RemoveAt(index);
+        _shadowTradeTrackersByKey.Remove(shadow.Key);
+    }
+
+    private bool TryResolveShadowTrade(ResearchTracker tracker, OpfCandle candle, bool forceExit, string forceReason, out ShadowTradeResult result)
+    {
+        if (UsesZoneBirthSplitRunnerV172(tracker.Signal.Side, tracker.ResearchPath))
+        {
+            var baseTargetR = DynamicExpansionV168TargetR;
+            var baseTargetBar = tracker.First2_5RBar;
+            var stopBar = tracker.FirstStopBar;
+            var stopVsBaseAmbiguous = stopBar.HasValue && baseTargetBar.HasValue && stopBar.Value == baseTargetBar.Value;
+            if (stopBar.HasValue && (!baseTargetBar.HasValue || stopBar.Value <= baseTargetBar.Value))
+            {
+                result = ShadowResultFromR(tracker, "ZoneBirthSplit2_5R_4R_BEAfterBase", "Base:Stop|Runner:Stop", -1m, stopBar.Value, stopVsBaseAmbiguous);
+                return true;
+            }
+
+            if (baseTargetBar.HasValue)
+            {
+                var runnerTargetBar = tracker.First4RBar;
+                var runnerBreakEvenBar = tracker.FirstBreakEvenAfter2_5RBar;
+                var runnerAmbiguous = runnerTargetBar.HasValue && runnerBreakEvenBar.HasValue && runnerTargetBar.Value == runnerBreakEvenBar.Value;
+                if (runnerTargetBar.HasValue && (!runnerBreakEvenBar.HasValue || runnerTargetBar.Value < runnerBreakEvenBar.Value))
+                {
+                    result = ShadowResultFromR(tracker, "ZoneBirthSplit2_5R_4R_BEAfterBase", "Base:Target|Runner:Target", (baseTargetR + ZoneBirthSplitRunnerV173TargetR) / 2m, runnerTargetBar.Value, runnerAmbiguous);
+                    return true;
+                }
+                if (runnerBreakEvenBar.HasValue && (!runnerTargetBar.HasValue || runnerBreakEvenBar.Value <= runnerTargetBar.Value))
+                {
+                    result = ShadowResultFromR(tracker, "ZoneBirthSplit2_5R_4R_BEAfterBase", "Base:Target|Runner:ProtectBE", baseTargetR / 2m, runnerBreakEvenBar.Value, runnerAmbiguous);
+                    return true;
+                }
+            }
+        }
+        else
+        {
+            var stopBar = tracker.FirstStopBar;
+            var triggerBar = tracker.First1RBar;
+            var stopVsTriggerAmbiguous = stopBar.HasValue && triggerBar.HasValue && stopBar.Value == triggerBar.Value;
+            if (stopBar.HasValue && (!triggerBar.HasValue || stopBar.Value <= triggerBar.Value))
+            {
+                result = ShadowResultFromR(tracker, "ProtectBE1R_Then3R", "Stop", -1m, stopBar.Value, stopVsTriggerAmbiguous);
+                return true;
+            }
+
+            if (triggerBar.HasValue)
+            {
+                var targetBar = tracker.First3RBar;
+                var breakEvenBar = tracker.FirstBreakEvenAfter1RBar;
+                var protectedAmbiguous = targetBar.HasValue && breakEvenBar.HasValue && targetBar.Value == breakEvenBar.Value;
+                if (targetBar.HasValue && (!breakEvenBar.HasValue || targetBar.Value < breakEvenBar.Value))
+                {
+                    result = ShadowResultFromR(tracker, "ProtectBE1R_Then3R", "Target", ProtectBreakEvenTargetRV186, targetBar.Value, protectedAmbiguous);
+                    return true;
+                }
+                if (breakEvenBar.HasValue && (!targetBar.HasValue || breakEvenBar.Value <= targetBar.Value))
+                {
+                    result = ShadowResultFromR(tracker, "ProtectBE1R_Then3R", "ProtectBE", 0m, breakEvenBar.Value, protectedAmbiguous);
+                    return true;
+                }
+            }
+        }
+
+        if (!forceExit)
+        {
+            result = default;
+            return false;
+        }
+
+        var points = tracker.Signal.Side == TradeSide.Long
+            ? candle.Close - tracker.Entry
+            : tracker.Entry - candle.Close;
+        if (UsesZoneBirthSplitRunnerV172(tracker.Signal.Side, tracker.ResearchPath) && tracker.First2_5RBar.HasValue)
+            points = (tracker.InitialRiskPoints * DynamicExpansionV168TargetR + points) / 2m;
+        var pnlR = tracker.InitialRiskPoints <= 0m ? 0m : Math.Round(points / tracker.InitialRiskPoints, 4);
+        var syntheticExitPrice = tracker.Signal.Side == TradeSide.Long
+            ? tracker.Entry + points
+            : tracker.Entry - points;
+        result = new ShadowTradeResult(
+            UsesZoneBirthSplitRunnerV172(tracker.Signal.Side, tracker.ResearchPath) ? "ZoneBirthSplit2_5R_4R_BEAfterBase" : "ProtectBE1R_Then3R",
+            forceReason,
+            syntheticExitPrice,
+            points,
+            pnlR,
+            candle.Bar,
+            false);
+        return true;
+    }
+
+    private static ShadowTradeResult ShadowResultFromR(ResearchTracker tracker, string policy, string exitReason, decimal pnlR, int exitBar, bool ambiguous)
+    {
+        var points = tracker.InitialRiskPoints * pnlR;
+        var exitPrice = tracker.Signal.Side == TradeSide.Long
+            ? tracker.Entry + points
+            : tracker.Entry - points;
+        return new ShadowTradeResult(policy, exitReason, exitPrice, points, pnlR, exitBar, ambiguous);
+    }
+
+    private void WriteShadowTrade(ShadowTradeTracker shadow, OpfCandle exitCandle, ShadowTradeResult result)
+    {
+        if (_snapshot is null || _researchLogger is null)
+            return;
+
+        var tracker = shadow.Tracker;
+        var quantity = _snapshot.ExecutionProfile.FixedContracts;
+        var gross = Math.Round(result.PnlPoints * _snapshot.InstrumentProfile.PointValue * quantity, 2);
+        var commission = Math.Round(quantity * _actualCommissionPerContractRoundTrip, 2);
+        _researchLogger.AppendShadowTrade(
+            _snapshot.SnapshotId,
+            tracker.Signal.SignalId,
+            tracker.EntryTime,
+            tracker.EntryBar,
+            exitCandle.Time,
+            result.ExitBar,
+            tracker.Signal.Side.ToString(),
+            tracker.ResearchPath,
+            tracker.Entry,
+            tracker.Stop,
+            tracker.InitialRiskPoints,
+            result.Policy,
+            result.ExitReason,
+            result.ExitPrice,
+            result.PnlPoints,
+            result.PnlR,
+            gross,
+            commission,
+            gross - commission,
+            Math.Max(0, result.ExitBar - tracker.EntryBar),
+            result.Ambiguous,
+            shadow.OriginalDecision,
+            shadow.OriginalReason,
+            shadow.OriginalTradeId);
+    }
+
+    private static string ShadowTradeKey(string signalId, string researchPath, int entryBar)
+    {
+        return $"{signalId}|{researchPath}|{entryBar}";
+    }
+
     private void UpdateResearchTrackers(OpfCandle candle)
     {
         if (_snapshot is null || _researchTrackers.Count == 0)
@@ -7874,6 +8078,37 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
     }
 
+    private sealed class ShadowTradeTracker
+    {
+        public ShadowTradeTracker(string key, ResearchTracker tracker)
+        {
+            Key = key;
+            Tracker = tracker;
+        }
+
+        public string Key { get; }
+        public ResearchTracker Tracker { get; }
+        public string OriginalDecision { get; private set; } = string.Empty;
+        public string OriginalReason { get; private set; } = string.Empty;
+        public string OriginalTradeId { get; private set; } = string.Empty;
+
+        public void SetOriginalDecision(string decision, string reason, string tradeId)
+        {
+            OriginalDecision = decision;
+            OriginalReason = reason;
+            OriginalTradeId = tradeId;
+        }
+    }
+
+    private readonly record struct ShadowTradeResult(
+        string Policy,
+        string ExitReason,
+        decimal ExitPrice,
+        decimal PnlPoints,
+        decimal PnlR,
+        int ExitBar,
+        bool Ambiguous);
+
     private sealed class ResearchTracker
     {
         private readonly int _maxBars;
@@ -7914,10 +8149,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public int? First2RBar { get; private set; }
         public int? First2_5RBar { get; private set; }
         public int? First3RBar { get; private set; }
+        public int? First4RBar { get; private set; }
         public int? FirstBreakEvenAfter1_5RBar { get; private set; }
         public int? First1RLockAfter1_5RBar { get; private set; }
         public int? FirstBreakEvenAfter0_75RBar { get; private set; }
         public int? FirstBreakEvenAfter1RBar { get; private set; }
+        public int? FirstBreakEvenAfter2_5RBar { get; private set; }
         public int? TimeTo1RMinutes { get; private set; }
         public int? TimeToMfeMinutes { get; private set; }
         public decimal MaxHeatBefore1R { get; private set; }
@@ -7961,6 +8198,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             var had0_75RBeforeThisBar = First0_75RBar.HasValue && candle.Bar > First0_75RBar.Value;
             var had1RBeforeThisBar = First1RBar.HasValue && candle.Bar > First1RBar.Value;
             var had1_5RBeforeThisBar = First1_5RBar.HasValue && candle.Bar > First1_5RBar.Value;
+            var had2_5RBeforeThisBar = First2_5RBar.HasValue && candle.Bar > First2_5RBar.Value;
             decimal currentMfe;
             decimal currentMae;
 
@@ -7978,6 +8216,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                     FirstBreakEvenAfter1_5RBar ??= candle.Bar;
                 if (had1_5RBeforeThisBar && candle.Low <= Entry + InitialRiskPoints)
                     First1RLockAfter1_5RBar ??= candle.Bar;
+                if (had2_5RBeforeThisBar && candle.Low <= Entry)
+                    FirstBreakEvenAfter2_5RBar ??= candle.Bar;
             }
             else
             {
@@ -7993,6 +8233,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                     FirstBreakEvenAfter1_5RBar ??= candle.Bar;
                 if (had1_5RBeforeThisBar && candle.High >= Entry - InitialRiskPoints)
                     First1RLockAfter1_5RBar ??= candle.Bar;
+                if (had2_5RBeforeThisBar && candle.High >= Entry)
+                    FirstBreakEvenAfter2_5RBar ??= candle.Bar;
             }
 
             MfePoints = Math.Max(MfePoints, currentMfe);
@@ -8021,6 +8263,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
             if (currentMfe >= 3m * InitialRiskPoints)
                 First3RBar ??= candle.Bar;
+
+            if (currentMfe >= 4m * InitialRiskPoints)
+                First4RBar ??= candle.Bar;
 
             if (MfePoints > priorMfe)
                 TimeToMfeMinutes = MinutesFromEntry(candle.Time);

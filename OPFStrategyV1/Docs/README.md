@@ -1428,6 +1428,15 @@ From `OPF_RESEARCH_1.90`, `ACTUAL_EXEC_2.28` restores the original Short `Observ
 - Entries, targets, `1R -> break-even -> 3R` protection, ZoneBirth split behavior, daily limits, and every unrelated path are unchanged.
 - v1.90 is a rollback/audit baseline. Further entry filtering requires portfolio-level analysis that models ActiveTrade replacement before another strategy rule is promoted.
 
+From `OPF_RESEARCH_1.91`, `ACTUAL_EXEC_2.29` adds exact portfolio-candidate shadow outcomes for offline combination simulation:
+
+- Shadow tracking starts only after all static strategy, path, risk, RR, and same-bar checks pass, immediately before the daily and ActiveTrade portfolio gates.
+- Non-Split candidates follow the current `1R -> break-even -> 3R` policy until a deterministic shadow exit.
+- ZoneBirth Short follows `Base 2.5R + Runner 4R`, with Runner break-even after Base TP.
+- Candidates still open at Globex closeout or strategy stop are marked with the corresponding shadow exit.
+- `shadow_trades.csv` records the exact shadow lifecycle and the original Execute/portfolio-block reason. It has no order-side effects and does not alter Actual trading behavior.
+- `Simulate-OPFCounterfactual.ps1` prefers these exact rows for replacement trades and falls back to the older 12-bar exit-policy evidence only for pre-v1.91 archives.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:

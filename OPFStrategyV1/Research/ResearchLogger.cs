@@ -13,6 +13,7 @@ public sealed class ResearchLogger
     private readonly Dictionary<string, ConfigSnapshot> _snapshots = new();
     private readonly bool _compact;
     private readonly object _fileWriteSync = new();
+    private readonly Dictionary<string, List<string>> _bufferedShadowTradeRows = new();
 
     public sealed record ActualOutcome(
         bool ActualVerified,
@@ -799,6 +800,86 @@ public sealed class ResearchLogger
                 rawDollars,
                 rawPointsR)
             + Environment.NewLine);
+    }
+
+    public void AppendShadowTrade(
+        string snapshotId,
+        string signalId,
+        DateTime entryTime,
+        int entryBar,
+        DateTime exitTime,
+        int exitBar,
+        string side,
+        string researchPath,
+        decimal entry,
+        decimal stop,
+        decimal initialRiskPoints,
+        string policy,
+        string exitReason,
+        decimal exitPrice,
+        decimal pnlPoints,
+        decimal pnlR,
+        decimal grossDollars,
+        decimal commissionDollars,
+        decimal netDollars,
+        int barsHeld,
+        bool ambiguous,
+        string originalDecision,
+        string originalReason,
+        string originalTradeId)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_shadow_trades.csv");
+        var row = string.Join(",",
+                ContextValues(snapshotId),
+                Csv(signalId),
+                Csv(entryTime.ToString("O")),
+                entryBar,
+                Csv(exitTime.ToString("O")),
+                exitBar,
+                Csv(side),
+                Csv(researchPath),
+                entry,
+                stop,
+                initialRiskPoints,
+                Csv(policy),
+                Csv(exitReason),
+                exitPrice,
+                pnlPoints,
+                pnlR,
+                grossDollars,
+                commissionDollars,
+                netDollars,
+                barsHeld,
+                ambiguous,
+                Csv(originalDecision),
+                Csv(originalReason),
+                Csv(originalTradeId));
+        lock (_fileWriteSync)
+        {
+            if (!_bufferedShadowTradeRows.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                _bufferedShadowTradeRows[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
+    public void FlushShadowTrades()
+    {
+        Dictionary<string, string[]> buffered;
+        lock (_fileWriteSync)
+        {
+            buffered = _bufferedShadowTradeRows.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            _bufferedShadowTradeRows.Clear();
+        }
+
+        var header = ContextHeader("SignalID,EntryTime,EntryBar,ExitTime,ExitBar,Side,ResearchPath,Entry,Stop,InitialRiskPoints,Policy,ExitReason,ExitPrice,PnLPoints,PnL_R,GrossDollars,CommissionDollars,NetDollars,BarsHeld,Ambiguous,OriginalDecision,OriginalReason,OriginalTradeID");
+        foreach (var item in buffered)
+        {
+            EnsureHeader(item.Key, header);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
     }
 
     public void AppendFunnelEvent(

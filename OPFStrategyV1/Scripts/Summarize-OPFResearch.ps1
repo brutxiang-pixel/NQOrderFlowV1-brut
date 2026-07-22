@@ -44,6 +44,8 @@ $liveAccountPnlFiles = Get-ChildItem -LiteralPath $dir -File -Filter '*_live_acc
 $liveAccountPnlRows = @($liveAccountPnlFiles | ForEach-Object { Import-Csv -LiteralPath $_.FullName })
 $exitPolicyFiles = Get-ChildItem -LiteralPath $dir -File -Filter '*_exit_policy_evaluations.csv'
 $exitPolicyRows = @($exitPolicyFiles | ForEach-Object { Import-Csv -LiteralPath $_.FullName })
+$shadowTradeFiles = Get-ChildItem -LiteralPath $dir -File -Filter '*_shadow_trades.csv'
+$shadowTradeRows = @($shadowTradeFiles | ForEach-Object { Import-Csv -LiteralPath $_.FullName })
 $snapshotFiles = Get-ChildItem -LiteralPath $dir -File -Filter '*_ConfigSnapshot.json'
 $snapshots = @($snapshotFiles | ForEach-Object {
     $json = Get-Content -LiteralPath $_.FullName -Raw | ConvertFrom-Json
@@ -138,6 +140,7 @@ $originalCounts = [pscustomobject]@{
     ExecutionTradeRows = $executionTradeRows.Count
     LiveAccountPnlRows = $liveAccountPnlRows.Count
     ExitPolicyRows = $exitPolicyRows.Count
+    ShadowTradeRows = $shadowTradeRows.Count
 }
 
 $rows = @(Filter-ExcludedDates $rows $ExcludeDates $excludedSnapshotIds)
@@ -154,6 +157,7 @@ $executionDecisionRows = @(Filter-ExcludedDates $executionDecisionRows $ExcludeD
 $executionTradeRows = @(Filter-ExcludedDates $executionTradeRows $ExcludeDates $excludedSnapshotIds)
 $liveAccountPnlRows = @(Filter-ExcludedDates $liveAccountPnlRows $ExcludeDates $excludedSnapshotIds)
 $exitPolicyRows = @(Filter-ExcludedDates $exitPolicyRows $ExcludeDates $excludedSnapshotIds)
+$shadowTradeRows = @(Filter-ExcludedDates $shadowTradeRows $ExcludeDates $excludedSnapshotIds)
 
 $filteredCounts = [pscustomobject]@{
     ResearchOutcomeRows = $rows.Count
@@ -170,6 +174,7 @@ $filteredCounts = [pscustomobject]@{
     ExecutionTradeRows = $executionTradeRows.Count
     LiveAccountPnlRows = $liveAccountPnlRows.Count
     ExitPolicyRows = $exitPolicyRows.Count
+    ShadowTradeRows = $shadowTradeRows.Count
 }
 
 function To-Number($value) {
@@ -1060,6 +1065,36 @@ if ($executionDecisionRows.Count -gt 0) {
 }
 
 Write-Host ""
+Write-Host "=== Exact Shadow Trade Audit ==="
+if ($shadowTradeRows.Count -eq 0) {
+    Write-Host "No shadow trade rows. OPF_RESEARCH_1.91 or later is required."
+}
+else {
+    [pscustomobject]@{
+        ShadowTrades = $shadowTradeRows.Count
+        UniqueCandidates = @($shadowTradeRows | ForEach-Object { "$(Field $_ 'SnapshotID')|$(Field $_ 'SignalID')|$(Field $_ 'ResearchPath')|$(Field $_ 'EntryBar')" } | Select-Object -Unique).Count
+        ExecuteCandidates = @($shadowTradeRows | Where-Object { (Field $_ 'OriginalDecision') -eq 'Execute' }).Count
+        ActiveTradeBlocked = @($shadowTradeRows | Where-Object { (Field $_ 'OriginalReason') -like 'ActiveTrade:*' }).Count
+        DailyGuardBlocked = @($shadowTradeRows | Where-Object { (Field $_ 'OriginalReason') -match '^(DailyTradeLimit:|LiveDailyLoss:|DailyLoss:|DailyTarget:)' }).Count
+        Ambiguous = Count-True $shadowTradeRows 'Ambiguous'
+        NetDollars = [math]::Round((($shadowTradeRows | Measure-Object -Property NetDollars -Sum).Sum), 2)
+    } | Format-List
+
+    $shadowTradeRows |
+        Group-Object Policy, ExitReason |
+        ForEach-Object {
+            [pscustomobject]@{
+                Policy = Field $_.Group[0] 'Policy'
+                ExitReason = Field $_.Group[0] 'ExitReason'
+                Trades = $_.Count
+                NetDollars = [math]::Round((($_.Group | Measure-Object -Property NetDollars -Sum).Sum), 2)
+            }
+        } |
+        Sort-Object Policy, ExitReason |
+        Format-Table -AutoSize
+}
+
+Write-Host ""
 Write-Host "=== Data Quality ==="
 [pscustomobject]@{
     OutcomeRows = $rows.Count
@@ -1074,6 +1109,7 @@ Write-Host "=== Data Quality ==="
     ExecutionTradeRows = $executionTradeRows.Count
     LiveAccountPnlRows = $liveAccountPnlRows.Count
     ExitPolicyRows = $exitPolicyRows.Count
+    ShadowTradeRows = $shadowTradeRows.Count
     ActualVerifiedOutcomeRows = Count-True $rows 'ActualVerified'
     IntraBarAmbiguousRows = Count-True $rows 'IntraBarAmbiguous'
     RegimeDailyRows = $regimeDailyRows.Count

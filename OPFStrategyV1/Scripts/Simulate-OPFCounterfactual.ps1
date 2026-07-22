@@ -65,6 +65,7 @@ function Is-V189RiskBandAllowed($Row) {
 $decisions = Read-OpfCsv '*_execution_decisions.csv'
 $trades = Read-OpfCsv '*_execution_trades.csv'
 $policies = Read-OpfCsv '*_exit_policy_evaluations.csv'
+$shadowTrades = Read-OpfCsv '*_shadow_trades.csv'
 
 if ($decisions.Count -eq 0 -or $trades.Count -eq 0 -or $policies.Count -eq 0) {
     throw 'Evidence must contain execution_decisions, execution_trades, and exit_policy_evaluations CSV files.'
@@ -84,6 +85,14 @@ foreach ($policy in $policies) {
     $key = '{0}|{1}|{2}|{3}|{4}' -f $policy.SnapshotID, $policy.SignalID, $policy.ResearchPath, $policy.EntryBar, $policy.ExitPolicy
     if (-not $policyByKey.ContainsKey($key)) {
         $policyByKey[$key] = $policy
+    }
+}
+
+$shadowByKey = @{}
+foreach ($shadow in $shadowTrades) {
+    $key = '{0}|{1}|{2}|{3}' -f $shadow.SnapshotID, $shadow.SignalID, $shadow.ResearchPath, $shadow.EntryBar
+    if (-not $shadowByKey.ContainsKey($key)) {
+        $shadowByKey[$key] = $shadow
     }
 }
 
@@ -157,23 +166,33 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
             $exitTime = DateTime-Value $trade.ExitTime
         }
         else {
-            $policyName = if ($candidate.ResearchPath -eq 'ZoneBirthResearch') {
-                'SplitBase_Runner3R_BE1R'
+            $shadowKey = '{0}|{1}|{2}|{3}' -f $candidate.SnapshotID, $candidate.SignalID, $candidate.ResearchPath, $candidate.Bar
+            if ($shadowByKey.ContainsKey($shadowKey)) {
+                $shadow = $shadowByKey[$shadowKey]
+                $source = 'ShadowTrade'
+                $exitReason = $shadow.ExitReason
+                $gross = Decimal-Value $shadow.GrossDollars
+                $exitTime = DateTime-Value $shadow.ExitTime
             }
             else {
-                'ProtectBE1R_Then3R'
-            }
-            $key = Policy-Key $candidate $policyName
-            if (-not $policyByKey.ContainsKey($key)) {
-                $missingOutcomes++
-                continue
-            }
+                $policyName = if ($candidate.ResearchPath -eq 'ZoneBirthResearch') {
+                    'SplitBase_Runner3R_BE1R'
+                }
+                else {
+                    'ProtectBE1R_Then3R'
+                }
+                $key = Policy-Key $candidate $policyName
+                if (-not $policyByKey.ContainsKey($key)) {
+                    $missingOutcomes++
+                    continue
+                }
 
-            $policy = $policyByKey[$key]
-            $exitReason = $policy.ExitReason
-            $gross = Decimal-Value $policy.PnLDollars
-            $barDelta = [math]::Max(1, [int]$policy.PolicyExitBar - [int]$candidate.Bar)
-            $exitTime = $entryTime.AddMinutes(5 * $barDelta)
+                $policy = $policyByKey[$key]
+                $exitReason = $policy.ExitReason
+                $gross = Decimal-Value $policy.PnLDollars
+                $barDelta = [math]::Max(1, [int]$policy.PolicyExitBar - [int]$candidate.Bar)
+                $exitTime = $entryTime.AddMinutes(5 * $barDelta)
+            }
         }
 
         $net = $gross - [decimal]2.4
@@ -219,7 +238,8 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
     SimulatedTrades = $results.Count
     SimulatedGrossDollars = [math]::Round((Decimal-Value $simulatedGross), 2)
     SimulatedNetDollars = [math]::Round((Decimal-Value $simulatedNet), 2)
-    ShadowTrades = @($results | Where-Object Source -eq 'ShadowPolicy').Count
+    ShadowTrades = @($results | Where-Object { $_.Source -in @('ShadowTrade', 'ShadowPolicy') }).Count
+    ExactShadowTrades = @($results | Where-Object Source -eq 'ShadowTrade').Count
     FilteredByRiskBand = $filteredByRiskBand
     BlockedByActiveTrade = $blockedByActiveTrade
     BlockedByDailyLimit = $blockedByDailyLimit
