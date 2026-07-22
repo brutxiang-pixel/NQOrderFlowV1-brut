@@ -4,6 +4,9 @@ param(
 
     [switch]$UseV189ShortWideStopRiskBand,
 
+    [ValidateSet('Observed', 'Conservative')]
+    [string]$ShadowTargetMode = 'Observed',
+
     [string]$OutputCsv,
 
     [string]$TraceCsv
@@ -122,6 +125,7 @@ $filteredByRiskBand = 0
 $blockedByActiveTrade = 0
 $blockedByDailyLimit = 0
 $blockedByDailyLoss = 0
+$conservativeShadowAdjustments = 0
 
 function Add-TraceRow($Candidate, [bool]$HasActualTrade, [bool]$DivergedBefore, [datetime]$ActiveBefore, [int]$TradesBefore, [decimal]$NetBefore, [bool]$RiskBandAllowed, [string]$Disposition, [string]$OutcomeSource, [string]$ExitReason, $ExitTime, [decimal]$Gross, [decimal]$Net, [bool]$DivergedAfter, [datetime]$ActiveAfter, [int]$TradesAfter, [decimal]$NetAfter) {
     if ([string]::IsNullOrWhiteSpace($TraceCsv)) {
@@ -221,6 +225,18 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
                 $exitReason = $shadow.ExitReason
                 $gross = Decimal-Value $shadow.GrossDollars
                 $exitTime = DateTime-Value $shadow.ExitTime
+                if ($ShadowTargetMode -eq 'Conservative' -and $shadow.ExitReason -eq 'Target') {
+                    if ($shadow.Policy -eq 'ProtectBE1R_Then3R') {
+                        $gross = [decimal]0
+                        $exitReason = 'TargetOrProtectBE:ConservativeProtectBE'
+                        $conservativeShadowAdjustments++
+                    }
+                    elseif ($shadow.Policy -eq 'ZoneBirthSplit2_5R_4R_BEAfterBase') {
+                        $gross = (Decimal-Value $shadow.InitialRiskPoints) * [decimal]5
+                        $exitReason = 'BaseTarget|RunnerTargetOrProtectBE:ConservativeBaseOnly'
+                        $conservativeShadowAdjustments++
+                    }
+                }
             }
             else {
                 $policyName = if ($candidate.ResearchPath -eq 'ZoneBirthResearch') {
@@ -284,6 +300,7 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
 [pscustomobject]@{
     EvidenceDirectory = (Resolve-Path -LiteralPath $EvidenceDirectory).Path
     Mode = if ($UseV189ShortWideStopRiskBand) { 'V189ShortWideStopRiskBand' } else { 'Baseline' }
+    ShadowTargetMode = $ShadowTargetMode
     CandidateRows = $candidateByKey.Count
     ActualTrades = $tradeById.Count
     ActualGrossDollars = [math]::Round((Decimal-Value $actualGross), 2)
@@ -298,6 +315,7 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
     BlockedByDailyLimit = $blockedByDailyLimit
     BlockedByDailyLoss = $blockedByDailyLoss
     MissingOutcomes = $missingOutcomes
+    ConservativeShadowAdjustments = $conservativeShadowAdjustments
     OutputCsv = $OutputCsv
     TraceRows = $traceRows.Count
     TraceCsv = $TraceCsv

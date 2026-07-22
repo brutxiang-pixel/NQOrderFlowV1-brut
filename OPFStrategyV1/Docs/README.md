@@ -1440,6 +1440,13 @@ From `OPF_RESEARCH_1.91`, `ACTUAL_EXEC_2.29` adds exact portfolio-candidate shad
 
 `OPF_RESEARCH_1.92`, `ACTUAL_EXEC_2.30` is a paired-calibration build. It restores only the v1.89 Short `ObservationConfirm_WideStop1_5R` planned-risk gate (`>8` and `<=12`) and the hard `12`-point filled-risk ceiling. Original v1.89 execution/skip tags are retained so Actual replacement chains can be compared with the v1.91 offline simulation. No other Actual rule changes.
 
+The paired eight-Snapshot calibration separates outcome-model accuracy from cross-Replay candidate drift:
+
+- `Simulate-OPFCounterfactual.ps1 -ShadowTargetMode Observed` preserves the recorded shadow result. `-ShadowTargetMode Conservative` treats a protected non-Split shadow target as break-even and a ZoneBirth Base+Runner target as Base-only, because Historical Replay cannot establish target-versus-protective-stop ordering inside the same M5 candle for a non-submitted shadow order.
+- `Compare-OPFCounterfactualCalibration.ps1` matches simulated and Actual trades by entry time, signal, and research path. It reports matched Actual-source fill error, matched shadow outcome bounds, and unmatched candidate-flow PnL separately.
+- The v1.91-to-v1.92 pair produced `91` observed-mode simulated trades versus `94` Actual trades, a `3.19%` count error. Among `64` matched Actual-source trades, Net differed by only `$5.00` (`0.35%`). The `13` matched shadow replacements produced an Actual Net of `$383.30`, inside the conservative/observed range of `-$292.72` to `$572.84`.
+- Exact total-profit calibration still fails: `14` simulation-only trades contributed `-$286.10`, while `17` Actual-only trades contributed `+$43.70`, a `$329.80` candidate-drift effect. The simulator is approved for conditional direction/volume screening, not for exact cross-Replay profit forecasts or strategy promotion without a final ATAS replay.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
