@@ -4,7 +4,9 @@ param(
 
     [switch]$UseV189ShortWideStopRiskBand,
 
-    [string]$OutputCsv
+    [string]$OutputCsv,
+
+    [string]$TraceCsv
 )
 
 # Phase A calibration scaffold. Baseline mode must reproduce archived Actual trades exactly.
@@ -114,11 +116,47 @@ foreach ($decision in $decisions) {
 }
 
 $results = [Collections.Generic.List[object]]::new()
+$traceRows = [Collections.Generic.List[object]]::new()
 $missingOutcomes = 0
 $filteredByRiskBand = 0
 $blockedByActiveTrade = 0
 $blockedByDailyLimit = 0
 $blockedByDailyLoss = 0
+
+function Add-TraceRow($Candidate, [bool]$HasActualTrade, [bool]$DivergedBefore, [datetime]$ActiveBefore, [int]$TradesBefore, [decimal]$NetBefore, [bool]$RiskBandAllowed, [string]$Disposition, [string]$OutcomeSource, [string]$ExitReason, $ExitTime, [decimal]$Gross, [decimal]$Net, [bool]$DivergedAfter, [datetime]$ActiveAfter, [int]$TradesAfter, [decimal]$NetAfter) {
+    if ([string]::IsNullOrWhiteSpace($TraceCsv)) {
+        return
+    }
+
+    $traceRows.Add([pscustomobject]@{
+        SnapshotID = $Candidate.SnapshotID
+        Time = $Candidate.Time
+        Bar = $Candidate.Bar
+        SignalID = $Candidate.SignalID
+        TradeID = $Candidate.TradeID
+        Side = $Candidate.Side
+        ResearchPath = $Candidate.ResearchPath
+        InitialRiskPoints = Decimal-Value $Candidate.InitialRiskPoints
+        OriginalDecision = $Candidate.Decision
+        OriginalReason = $Candidate.Reason
+        HasActualTrade = $HasActualTrade
+        PortfolioDivergedBefore = $DivergedBefore
+        ActiveUntilBefore = if ($ActiveBefore -eq [datetime]::MinValue) { '' } else { $ActiveBefore.ToString('O') }
+        DailyTradesBefore = $TradesBefore
+        DailyNetBefore = [math]::Round($NetBefore, 2)
+        RiskBandAllowed = $RiskBandAllowed
+        Disposition = $Disposition
+        OutcomeSource = $OutcomeSource
+        ExitReason = $ExitReason
+        ExitTime = if ($null -eq $ExitTime) { '' } else { ([datetime]$ExitTime).ToString('O') }
+        GrossDollars = [math]::Round($Gross, 2)
+        NetDollars = [math]::Round($Net, 2)
+        PortfolioDivergedAfter = $DivergedAfter
+        ActiveUntilAfter = if ($ActiveAfter -eq [datetime]::MinValue) { '' } else { $ActiveAfter.ToString('O') }
+        DailyTradesAfter = $TradesAfter
+        DailyNetAfter = [math]::Round($NetAfter, 2)
+    })
+}
 
 foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | Sort-Object Name)) {
     $activeUntil = [datetime]::MinValue
@@ -128,28 +166,38 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
 
     foreach ($candidate in @($snapshotGroup.Group | Sort-Object @{ Expression = { DateTime-Value $_.Time } }, @{ Expression = { [int]$_.Bar } })) {
         $hasActualTrade = -not [string]::IsNullOrWhiteSpace($candidate.TradeID) -and $tradeById.ContainsKey($candidate.TradeID)
+        $divergedBefore = $portfolioDiverged
+        $activeBefore = $activeUntil
+        $tradesBefore = $dailyTrades
+        $netBefore = $dailyNet
+        $riskBandAllowed = Is-V189RiskBandAllowed $candidate
         if (-not $portfolioDiverged -and -not $hasActualTrade) {
+            Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'IgnoredBeforeDivergence' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
         }
 
         $entryTime = DateTime-Value $candidate.Time
         if ($activeUntil -ne [datetime]::MinValue -and $entryTime -le $activeUntil) {
             $blockedByActiveTrade++
+            Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'BlockedByActiveTrade' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
         }
         if ($dailyTrades -ge 15) {
             $blockedByDailyLimit++
+            Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'BlockedByDailyLimit' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
         }
         if ($dailyNet -le [decimal]-300) {
             $blockedByDailyLoss++
+            Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'BlockedByDailyLoss' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
         }
-        if (-not (Is-V189RiskBandAllowed $candidate)) {
+        if (-not $riskBandAllowed) {
             $filteredByRiskBand++
             if ($hasActualTrade) {
                 $portfolioDiverged = $true
             }
+            Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'FilteredByRiskBand' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
         }
 
@@ -184,6 +232,7 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
                 $key = Policy-Key $candidate $policyName
                 if (-not $policyByKey.ContainsKey($key)) {
                     $missingOutcomes++
+                    Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'MissingOutcome' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
                     continue
                 }
 
@@ -199,6 +248,7 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
         $dailyTrades++
         $dailyNet += $net
         $activeUntil = $exitTime
+        Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'Selected' $source $exitReason $exitTime $gross $net $portfolioDiverged $activeUntil $dailyTrades $dailyNet
 
         $results.Add([pscustomobject]@{
             SnapshotID = $candidate.SnapshotID
@@ -221,6 +271,9 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
 
 if (-not [string]::IsNullOrWhiteSpace($OutputCsv)) {
     $results | Export-Csv -LiteralPath $OutputCsv -NoTypeInformation -Encoding utf8
+}
+if (-not [string]::IsNullOrWhiteSpace($TraceCsv)) {
+    $traceRows | Export-Csv -LiteralPath $TraceCsv -NoTypeInformation -Encoding utf8
 }
 
 $actualGross = ($tradeById.Values | Measure-Object -Property Dollars -Sum).Sum
@@ -246,4 +299,6 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
     BlockedByDailyLoss = $blockedByDailyLoss
     MissingOutcomes = $missingOutcomes
     OutputCsv = $OutputCsv
+    TraceRows = $traceRows.Count
+    TraceCsv = $TraceCsv
 } | Format-List

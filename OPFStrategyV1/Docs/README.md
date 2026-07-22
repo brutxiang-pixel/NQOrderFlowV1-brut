@@ -1436,6 +1436,7 @@ From `OPF_RESEARCH_1.91`, `ACTUAL_EXEC_2.29` adds exact portfolio-candidate shad
 - Candidates still open at Globex closeout or strategy stop are marked with the corresponding shadow exit.
 - `shadow_trades.csv` records the exact shadow lifecycle and the original Execute/portfolio-block reason. It has no order-side effects and does not alter Actual trading behavior.
 - `Simulate-OPFCounterfactual.ps1` prefers these exact rows for replacement trades and falls back to the older 12-bar exit-policy evidence only for pre-v1.91 archives.
+- The simulator's optional `-TraceCsv` output records every portfolio candidate, its pre/post portfolio state, risk-band decision, block/selection disposition, and Actual/exact-shadow outcome source. It is diagnostic-only and does not change simulation results.
 
 ## Full Backtest Readiness Gate
 
