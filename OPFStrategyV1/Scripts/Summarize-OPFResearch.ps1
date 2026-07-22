@@ -992,24 +992,66 @@ if ($executionDecisionRows.Count -gt 0) {
         ForEach-Object { Field $_ 'TradeID' } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
         Select-Object -Unique)
+    $quarantinedProtectiveTradeIds = @($executionEventRows |
+        Where-Object { (Field $_ 'Event') -in @('PROTECTIVE_FILL_QUARANTINED_V177', 'PROTECTION_SETUP_QUARANTINED_V178') } |
+        ForEach-Object { Field $_ 'TradeID' } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique)
+    $abortedEntryTradeIds = @($executionEventRows |
+        Where-Object { (Field $_ 'Event') -eq 'ENTRY_SUBMISSION_ABORTED_V178' } |
+        ForEach-Object { Field $_ 'TradeID' } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique)
+    $abnormalSafetyFlattenTradeIds = @($executionEventRows |
+        Where-Object { (Field $_ 'Event') -eq 'ABNORMAL_SAFETY_FLATTEN_COMPLETE_V182' } |
+        ForEach-Object { Field $_ 'TradeID' } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique)
+    $historicalAdapterTradeIds = @($executionEventRows |
+        Where-Object { (Field $_ 'Event') -eq 'HISTORICAL_ADAPTER_ENTRY_V179' } |
+        ForEach-Object { Field $_ 'TradeID' } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique)
+    $historicalNormalizedEntryTradeIds = @($executionEventRows |
+        Where-Object { (Field $_ 'Event') -eq 'HISTORICAL_FAVORABLE_ENTRY_NORMALIZED_V180' } |
+        ForEach-Object { Field $_ 'TradeID' } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique)
+    $historicalDormantTargetTradeIds = @($executionEventRows |
+        Where-Object { (Field $_ 'Event') -eq 'HISTORICAL_DORMANT_TP_SENT_V181' } |
+        ForEach-Object { Field $_ 'TradeID' } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique)
+    $normalExecutionTradeRows = @($executionTradeRows | Where-Object { -not (Is-True (Field $_ 'IsAbnormalExecution')) })
     $actualVerifiedRows = @($rows | Where-Object { Is-True (Field $_ 'ActualVerified') })
     $actualVerifiedTradeIds = @($actualVerifiedRows | ForEach-Object { Field $_ 'ActualTradeID' } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
     [pscustomobject]@{
         ExecutedDecisions = $executed.Count
         ExecutionTrades = $executionTradeRows.Count
+        NormalExecutionTrades = $normalExecutionTradeRows.Count
         QuarantinedEntryFills = $quarantinedEntryTradeIds.Count
+        QuarantinedProtectiveFills = $quarantinedProtectiveTradeIds.Count
+        AbortedEntrySubmissions = $abortedEntryTradeIds.Count
+        AbnormalSafetyFlattens = $abnormalSafetyFlattenTradeIds.Count
+        HistoricalAdapterTrades = $historicalAdapterTradeIds.Count
+        HistoricalNormalizedFavorableEntries = $historicalNormalizedEntryTradeIds.Count
+        HistoricalDormantTargetTrades = $historicalDormantTargetTradeIds.Count
+        HistoricalDormantTargetActivationFailures = @($executionEventRows | Where-Object { (Field $_ 'Event') -eq 'HISTORICAL_DORMANT_TP_ACTIVATE_FAILED_V181' }).Count
         ActualVerifiedOutcomeRows = $actualVerifiedRows.Count
         ActualVerifiedUniqueTrades = $actualVerifiedTradeIds.Count
         ExecutedMissingTrade = @($executed | Where-Object {
             $id = Field $_ 'TradeID'
             [string]::IsNullOrWhiteSpace($id) -or
-                (-not ($executionTradeRows | Where-Object { $_.TradeID -eq $id }) -and -not ($quarantinedEntryTradeIds -contains $id))
+                (-not ($executionTradeRows | Where-Object { $_.TradeID -eq $id }) -and
+                    -not ($quarantinedEntryTradeIds -contains $id) -and
+                    -not ($abortedEntryTradeIds -contains $id) -and
+                    -not ($abnormalSafetyFlattenTradeIds -contains $id))
         }).Count
         TradesMissingExecuteDecision = @($executionTradeRows | Where-Object {
             $id = $_.TradeID
             [string]::IsNullOrWhiteSpace($id) -or -not ($executed | Where-Object { (Field $_ 'TradeID') -eq $id })
         }).Count
-        TradesMissingActualVerifiedOutcome = @($executionTradeRows | Where-Object {
+        TradesMissingActualVerifiedOutcome = @($normalExecutionTradeRows | Where-Object {
             $id = $_.TradeID
             [string]::IsNullOrWhiteSpace($id) -or -not ($actualVerifiedTradeIds -contains $id)
         }).Count

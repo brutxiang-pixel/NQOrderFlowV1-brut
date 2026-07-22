@@ -1323,13 +1323,118 @@ From `OPF_RESEARCH_1.76`, `ACTUAL_EXEC_2.14` replaces the fixed replay stop wind
 - The closeout lock remains active through the daily halt and, after Friday close, through the weekend. It clears automatically at the next `18:00 ET` Globex reopen, when the new trading-day counters begin without stopping or restarting the strategy.
 - The Eastern-time conversion is DST-aware: closeout begins at `04:50` China time during U.S. daylight saving time and `05:50` during U.S. standard time.
 
+From `OPF_RESEARCH_1.77`, `ACTUAL_EXEC_2.15` hardens protective-fill validation without changing signal selection or planned brackets:
+
+- Historical Replay TP/SL fills with excessive price drift are normalized only after the strategy has observed the expected protective price since bracket submission.
+- An excessive-drift protective fill whose expected price was never observed writes `PROTECTIVE_FILL_QUARANTINED_V177` and `ABNORMAL_EXECUTION`. The trade remains auditable but contributes zero normal PnL/R and does not consume normal daily trade capacity or HUD TP/SL/Other counts.
+- Real-time fills are never rewritten by the Replay normalization branch. Their raw account impact remains authoritative.
+- A quarantined Replay protective fill raises an ATAS notification, completes order cleanup, and does not automatically block later eligible signals.
+
+From `OPF_RESEARCH_1.78`, `ACTUAL_EXEC_2.16` prevents orders from being submitted into a desynchronized execution quote channel:
+
+- Immediately before a market entry, both `BestBid` and `BestAsk` must be present, non-crossed, and within the existing execution tolerance of the strategy's latest calculated market price. The queued order must also remain on its original calculation bar and within tolerance of the planned entry.
+- A failed entry preflight writes `ENTRY_SUBMISSION_ABORTED_V178`, rolls back normal daily capacity, submits no order, raises an ATAS notification, and leaves later signals eligible.
+- After an entry fill, the same quote and bar-freshness checks run before any SL/TP bracket is submitted. A failure writes `PROTECTION_SETUP_QUARANTINED_V178`, excludes the execution from normal statistics, and submits the existing emergency flatten rather than placing protection into an inconsistent quote channel.
+- Successful checks write `ENTRY_QUOTE_PREFLIGHT_OK_V178` and `PROTECTION_QUOTE_PREFLIGHT_OK_V178` with the reference price, Bid, Ask, and bar lag for direct replay/live comparison.
+
+From `OPF_RESEARCH_1.79`, `ACTUAL_EXEC_2.17` separates Historical Replay execution from the ATAS order-matching engine while leaving real-time/live order submission unchanged:
+
+- Historical candles use a strategy execution adapter and do not call `OpenOrderAsync` for entry, TP, SL, or closeout. Entries fill at the planned strategy price and write `HISTORICAL_ADAPTER_ENTRY_V179` plus `HISTORICAL_ADAPTER_PROTECTION_ACTIVE_V179`.
+- Ordinary TP/SL exits are driven by post-entry candle High/Low. If both levels are touched in one candle, the adapter records `IntraBarAmbiguousAdverseFirstV179` and uses SL.
+- Two-contract ZoneBirth Short keeps its Base `2.5R` / Runner `4R` structure. Base TP activates Runner break-even; if Runner TP and its active stop are both touched in one candle, the stop/BE wins conservatively.
+- Adapter exits write `HISTORICAL_ADAPTER_EXIT_FILL_V179` and reuse the existing execution-trade, daily-loss, commission, HUD, cleanup, and Actual-verification pipelines. Globex closeout and strategy stop use the current candle close with `SESSION_FLATTEN`.
+- Real-time and live-account candles continue to use the v1.78 quote preflight followed by actual Market/OCO/SL/TP orders. The adapter is never used within ten minutes of current time.
+
+From `OPF_RESEARCH_1.80`, `ACTUAL_EXEC_2.18` returns Historical Replay to real ATAS account orders and fixes the two known favorable-price Replay anomalies without changing live execution:
+
+- Historical Replay again submits real ATAS Market entries and real Stop/Limit exits through `OpenOrderAsync`; account positions, `OnNewMyTrade`, `OnOrderChanged`, OCO groups, cleanup, notifications, and reconciliation remain active.
+- A Historical Replay entry filled outside tolerance in the favorable direction is retained instead of emergency-flattened. Strategy accounting and bracket geometry use the planned entry, while `HISTORICAL_FAVORABLE_ENTRY_NORMALIZED_V180` preserves the raw ATAS fill for audit. Adverse out-of-range entries still use the v1.74 quarantine and emergency flatten.
+- Historical Replay SL orders are submitted immediately after entry. TP orders are created with the same OCO group but remain unsubmitted until post-entry market observations reach the planned target. `HISTORICAL_TARGET_DEFERRED_V180` and `HISTORICAL_DEFERRED_TARGET_SENT_V180` audit this lifecycle.
+- ZoneBirth Base and Runner stops are both active immediately. Their real TP orders are submitted independently when the corresponding `2.5R` or `4R` target is observed. Base TP still drives the existing real Runner break-even modification callback.
+- Real-time/live execution continues to submit the complete SL/TP OCO immediately after entry; favorable live fills are not normalized and all existing live safety rules remain authoritative.
+
+From `OPF_RESEARCH_1.81`, `ACTUAL_EXEC_2.19` keeps real ATAS Historical Replay orders while restoring a complete two-sided OCO immediately after entry:
+
+- Historical SL remains at the real planned stop. Historical TP is submitted immediately as a real Limit order in the same OCO group, but starts at a dormant price `500` points beyond the intended target so the known favorable fixed-price Replay matcher cannot execute it prematurely.
+- The intended target remains in strategy state and chart rendering. When post-entry market observations reach it, `ModifyOrderAsync` moves the existing working dormant TP to the intended price; the resulting order-state and fill callbacks stay on the real ATAS lifecycle.
+- `HISTORICAL_DORMANT_TP_SENT_V181`, `HISTORICAL_DORMANT_TP_ACTIVATE_V181`, and `HISTORICAL_DORMANT_TP_ACTIVATED_V181` audit submission and modification. `HISTORICAL_DORMANT_TP_ACTIVATE_FAILED_V181` raises an ATAS notification and leaves the dormant order working for retry.
+- ZoneBirth Base and Runner each receive their own immediate real SL/dormant-TP OCO pair. Base and Runner dormant targets activate independently at `2.5R` and `4R`; Base TP still drives the existing real Runner break-even modification.
+- Real-time/live TP orders continue to use the intended target immediately and never use the dormant-price mechanism.
+
+From `OPF_RESEARCH_1.82`, `ACTUAL_EXEC_2.20` isolates abnormal safety flatten executions without changing entries, targets, stops, expansion rules, or live OCO submission:
+
+- Partial-entry aborts remain active until the entry order reaches a terminal state and cumulative flatten fills cover every filled entry contract. A late second entry fill is aggregated into the same abnormal lifecycle instead of being discarded as a duplicate exit.
+- Entry-risk rejection and partial-entry abort flatten results are excluded from `execution_trades.csv`, normal TP/SL/Other counts, normal PnL/R, Actual verification, and the fifteen-normal-trade daily capacity.
+- Their realized account effect and commission remain in `live_account_pnl.csv` with classification `Abnormal`, so account reconciliation and the daily-loss boundary still include money actually gained or lost.
+- `ABNORMAL_SAFETY_FLATTEN_ISOLATED_V182` and `ABNORMAL_SAFETY_FLATTEN_COMPLETE_V182` provide lifecycle evidence and raise an ATAS notification. Normal strategy execution can continue after the position is flat and cleanup completes.
+
+From `OPF_RESEARCH_1.83`, `ACTUAL_EXEC_2.21` fixes the dormant-target replacement callback race without changing trading rules:
+
+- When `ModifyOrderAsync` replaces a dormant TP and assigns a new `ExtId`, a later terminal callback from the old dormant order can no longer overwrite the activated TP reference.
+- `HISTORICAL_DORMANT_TP_STALE_ORDER_IGNORED_V183` records the stale/current identifiers, prices, intended target, and callback source.
+- Activated Base and Runner TP fills remain eligible for their normal `MYTRADE`, combined split result, AccountNet, and protection-cleanup lifecycle. Signal eligibility, target geometry, stops, OCO groups, and live order timing are unchanged.
+
+From `OPF_RESEARCH_1.84`, `ACTUAL_EXEC_2.22` normalizes invalid Historical Replay Globex-close market fills without changing live execution or trading rules:
+
+- `GLOBEX_CLOSEOUT_FLATTEN_SEND` stores the closeout candle price as the Replay reference before the market order is submitted.
+- A Historical Replay `SESSION_FLATTEN` fill whose drift exceeds the existing execution tolerance uses that reference for normal PnL/R, AccountNet, and `execution_trades.csv`; the raw fill remains available in the raw audit fields and `NormalizedReplayExitFill` reason. `HISTORICAL_SESSION_FLATTEN_FILL_NORMALIZED_V184` records the correction.
+- The same rule covers ordinary positions and both legs of a ZoneBirth split position. Small in-tolerance drift remains raw.
+- Real-time/live `SESSION_FLATTEN` fills are never rewritten and remain authoritative for account PnL.
+
+From `OPF_RESEARCH_1.85`, `ACTUAL_EXEC_2.23` adds the Q4 direction gate without changing signal research or unrelated paths:
+
+- An ordinary `ObservationConfirm` Long candidate remains in research logs but cannot submit an Actual entry. It writes `SKIP_OBSERVATION_CONFIRM_LONG_DIRECTION_V185` with reason `ObservationConfirmLongDirectionGateV185`.
+- Ordinary `ObservationConfirm` Short remains enabled.
+- `ObservationConfirm_WideStop1_5R` remains enabled in both directions, including its existing Long expansion rules.
+- Daily capacity, daily loss, target/stop geometry, OCO behavior, and every other execution path are unchanged.
+
+From `OPF_RESEARCH_1.86`, `ACTUAL_EXEC_2.24` promotes the `ProtectBE1R_Then3R` counterfactual into the real order lifecycle for eligible non-Split trades:
+
+- The initial real SL is submitted at the existing strategy stop and the real intended TP is placed at `3R`.
+- After post-entry market observations reach `+1R`, `ModifyOrderAsync` moves the working SL to the filled entry price. Trigger, send, and applied states are written as `PROTECT_BE1R_TRIGGERED_V186`, `PROTECT_BE1R_MODIFY_SEND_V186`, and `PROTECT_BE1R_APPLIED_V186`.
+- A modify failure leaves the original protective stop authoritative, writes `PROTECT_BE1R_MODIFY_FAILED_V186`, and notifies the operator.
+- A late callback from the replaced stop cannot overwrite the active break-even stop reference; it writes `PROTECT_BE1R_STALE_ORDER_IGNORED_V186`.
+- ZoneBirth Short with two contracts keeps its existing Base/Runner targets and Base-TP-triggered Runner break-even. The v1.85 ordinary `ObservationConfirm` Long direction gate remains active.
+
+From `OPF_RESEARCH_1.87`, `ACTUAL_EXEC_2.25` fixes the full-Q4 break-even exit callback race and retry gap:
+
+- A terminal protective order first writes `PROTECTIVE_EXIT_CALLBACK_PENDING_V187`. The strategy gives its serialized `MyTrade` callback two seconds to complete without occupying the execution queue lock.
+- `PROTECTIVE_EXIT_CALLBACK_RESOLVED_V187` confirms the normal fill callback. During this grace state, protection-loss detection and readiness reconciliation do not submit a second flatten.
+- If the account is still open and has no required working stop after the grace window, `PROTECTIVE_EXIT_CALLBACK_TIMEOUT_V187` notifies the operator and uses the existing emergency flatten path.
+- A `PROTECT_BE1R_SKIPPED_MARKET_CROSSED_V186` no longer disables protection for the rest of the trade. It suppresses duplicate attempts only on that bar and retries on a later bar when the stop is market-valid.
+
+From `OPF_RESEARCH_1.88`, `ACTUAL_EXEC_2.26` changes only the profit protection for Long `ObservationConfirm_WideStop1_5R` executions:
+
+- Entry eligibility, initial structural SL, daily capacity, and the real `3R` target remain unchanged.
+- The Long wide-stop path no longer moves its SL to break-even at `1R`. After observed MFE reaches `1.5R`, it moves the real SL to `+1R` and keeps the `3R` target.
+- Events use `PROTECT_1R_AFTER_1_5R_*_V188`; every other eligible non-Split path retains the v1.86 `1R -> break-even -> 3R` lifecycle.
+- The ordinary `ObservationConfirm` Long direction gate remains active, and Breakaway, ordinary ObservationConfirm Short, ZoneBirth, and all entry filters are unchanged.
+
+`OPF_RESEARCH_1.88` passed its six-day order-lifecycle Smoke but failed the strategy comparison. The four Q4 test days declined from approximately `+$26.50` under the v1.87 evidence to `-$146.40`, so the `1.5R -> lock 1R` Long wide-stop change is not promoted.
+
+From `OPF_RESEARCH_1.89`, `ACTUAL_EXEC_2.27` restores the v1.87 Long wide-stop `1R -> break-even -> 3R` behavior and applies one precision contraction to Short `ObservationConfirm_WideStop1_5R`:
+
+- Short wide-stop candidates execute only when planned risk is greater than `8` and at most `12` points. Excluded rows use `ObservationConfirmWideStopShortRiskBandV189Excluded`; admitted rows use `OCWideStopShortRiskBandV189`.
+- The retained band was approximately flat in the reconstructed Q4 evidence and positive in the reviewed 2026 evidence; the removed bands were approximately `-$408` in Q4 and `-$253` in 2026 before active-trade replacement.
+- Filled-risk validation caps admitted Short wide-stop trades at `12` points. No ordinary ObservationConfirm, Breakaway, ZoneBirth, Long wide-stop entry, target, or daily-cap rule changes.
+- Actual excursion tracking now observes the same live calculation prices used by protection triggers. Historical Replay exits update MFE/MAE with the normalized strategy exit rather than a stale raw ATAS fill, preventing normalized SL/TP callbacks from polluting excursion evidence.
+
+The complete 62-Snapshot Q4 replay rejected v1.89 as a strategy change. Short wide-stop performance improved by approximately `$269`, but ActiveTrade replacement added `92` different trades with approximately `-$724`, and AccountNet declined from the v1.87 reconstructed `-$4,119` to approximately `-$4,721`.
+
+From `OPF_RESEARCH_1.90`, `ACTUAL_EXEC_2.28` restores the original Short `ObservationConfirm_WideStop1_5R` eligibility and filled-risk limits from v1.87:
+
+- The v1.89 `>8 and <=12` Short wide-stop risk band and its execution/skip tags are removed.
+- The v1.89 Actual MFE/MAE fixes remain: live calculation prices used by protection logic update excursion evidence, and normalized Replay exits do not inject stale raw fill prices into MFE/MAE.
+- Entries, targets, `1R -> break-even -> 3R` protection, ZoneBirth split behavior, daily limits, and every unrelated path are unchanged.
+- v1.90 is a rollback/audit baseline. Further entry filtering requires portfolio-level analysis that models ActiveTrade replacement before another strategy rule is promoted.
+
 ## Full Backtest Readiness Gate
 
 Before moving from smoke replay to broad backtest/tuning, the latest 3-day smoke batch should satisfy:
 
 1. All snapshots use the same `ResearchSchemaVersion` and `ActualExecutionSettings.Version`.
 2. Core CSV files are present: config snapshot, signals, research outcomes, risk evaluations, execution events, and execution trades. `score_breakdown.csv` is required only for scoring-component research; it is not required when `ResearchLogMode=Compact`.
-3. `ExecutedDecisions = ExecutionTrades + QuarantinedEntryFills`; normal execution trades equal Actual-verified unique trades, with no duplicate Actual-verified rows.
+3. `ExecutedDecisions = ExecutionTrades + QuarantinedEntryFills + AbortedEntrySubmissions + AbnormalSafetyFlattens`; normal execution trades equal Actual-verified unique trades, with no duplicate Actual-verified rows.
 4. Every normal or quarantined exit has `PROTECTION_CLEANUP_DONE`, with no unaccounted `STALE`, `CANCEL_FAIL`, or `FAILED` events. An `ENTRY_FILL_REJECTED` row is acceptable only when the matching v1.74 quarantine completes.
 5. The tested configuration is frozen: MNQ, documented `ActualOrderQuantity`, default `ActualTargetR=1.5` with any documented per-version TP overrides, max-trades safety ceiling, and Actual path whitelist. Evidence builds through v1.74 keep daily target/loss disabled; v1.75 uses the documented `$200` net daily-loss gate.
 6. Full-day average Actual trades should stay near 5/day; individual low-trade days are acceptable only when profitability improves and the missed volume is explainable by research/skipped-signal evidence.
