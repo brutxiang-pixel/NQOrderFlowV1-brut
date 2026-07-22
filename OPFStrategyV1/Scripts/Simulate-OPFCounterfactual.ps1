@@ -7,6 +7,10 @@ param(
     [ValidateSet('Observed', 'Conservative')]
     [string]$ShadowTargetMode = 'Observed',
 
+    [switch]$UseProtectBE075Trigger,
+
+    [string]$ProtectBE075Paths = '',
+
     [string]$OutputCsv,
 
     [string]$TraceCsv
@@ -16,6 +20,11 @@ param(
 # Counterfactual output is not strategy evidence until it also passes the documented v1.87 -> v1.89 net-change calibration.
 
 $ErrorActionPreference = 'Stop'
+
+$protectBE075PathSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($path in @($ProtectBE075Paths -split '\|' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+    [void]$protectBE075PathSet.Add($path.Trim())
+}
 
 if (-not (Test-Path -LiteralPath $EvidenceDirectory)) {
     throw "Evidence directory not found: $EvidenceDirectory"
@@ -126,6 +135,7 @@ $blockedByActiveTrade = 0
 $blockedByDailyLimit = 0
 $blockedByDailyLoss = 0
 $conservativeShadowAdjustments = 0
+$earlyBreakEvenAdjustments = 0
 
 function Add-TraceRow($Candidate, [bool]$HasActualTrade, [bool]$DivergedBefore, [datetime]$ActiveBefore, [int]$TradesBefore, [decimal]$NetBefore, [bool]$RiskBandAllowed, [string]$Disposition, [string]$OutcomeSource, [string]$ExitReason, $ExitTime, [decimal]$Gross, [decimal]$Net, [bool]$DivergedAfter, [datetime]$ActiveAfter, [int]$TradesAfter, [decimal]$NetAfter) {
     if ([string]::IsNullOrWhiteSpace($TraceCsv)) {
@@ -260,6 +270,23 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
             }
         }
 
+        if ($UseProtectBE075Trigger -and
+            ($protectBE075PathSet.Count -eq 0 -or $protectBE075PathSet.Contains($candidate.ResearchPath))) {
+            $earlyBreakEvenKey = Policy-Key $candidate 'ProtectBE0_75R_Then2_5R'
+            if ($policyByKey.ContainsKey($earlyBreakEvenKey)) {
+                $earlyBreakEven = $policyByKey[$earlyBreakEvenKey]
+                if ($earlyBreakEven.ExitReason -eq 'ProtectBE') {
+                    $source = 'EarlyBE075Policy'
+                    $exitReason = 'ProtectBE0_75R_Then3R'
+                    $gross = [decimal]0
+                    $barDelta = [math]::Max(1, [int]$earlyBreakEven.PolicyExitBar - [int]$candidate.Bar)
+                    $exitTime = $entryTime.AddMinutes(5 * $barDelta)
+                    $portfolioDiverged = $true
+                    $earlyBreakEvenAdjustments++
+                }
+            }
+        }
+
         $net = $gross - [decimal]2.4
         $dailyTrades++
         $dailyNet += $net
@@ -301,6 +328,8 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
     EvidenceDirectory = (Resolve-Path -LiteralPath $EvidenceDirectory).Path
     Mode = if ($UseV189ShortWideStopRiskBand) { 'V189ShortWideStopRiskBand' } else { 'Baseline' }
     ShadowTargetMode = $ShadowTargetMode
+    ProtectBE075Trigger = [bool]$UseProtectBE075Trigger
+    ProtectBE075Paths = if ($protectBE075PathSet.Count -eq 0) { '*' } else { $ProtectBE075Paths }
     CandidateRows = $candidateByKey.Count
     ActualTrades = $tradeById.Count
     ActualGrossDollars = [math]::Round((Decimal-Value $actualGross), 2)
@@ -316,6 +345,7 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
     BlockedByDailyLoss = $blockedByDailyLoss
     MissingOutcomes = $missingOutcomes
     ConservativeShadowAdjustments = $conservativeShadowAdjustments
+    EarlyBreakEvenAdjustments = $earlyBreakEvenAdjustments
     OutputCsv = $OutputCsv
     TraceRows = $traceRows.Count
     TraceCsv = $TraceCsv
