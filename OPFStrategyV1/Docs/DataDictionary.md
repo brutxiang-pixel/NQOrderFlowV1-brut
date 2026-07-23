@@ -954,6 +954,18 @@ From `OPF_RESEARCH_1.93`, `ACTUAL_EXEC_2.31` removes the v1.92 paired-calibratio
 
 From `OPF_RESEARCH_1.94`, `ACTUAL_EXEC_2.32` restores `ObservationConfirm_WideStop1_5R` to the standard `ProtectBE1R_Then3R` lifecycle after v1.93 failed its portfolio-level Smoke gate. WideStop again uses the existing `PROTECT_BE1R_*_V186` event family and exact shadow policy. The v1.93 `PROTECT_BE075_WIDESTOP_*_V193` names remain historical evidence only; no current v1.94 execution emits them.
 
+From `OPF_RESEARCH_1.97`, the strategy embeds the frozen `OPF_KNN_SHADOW_1.97` gzip model and captures the immutable feature input for each existing execution decision. Historical Replay does not score or write KNN rows inside the decision callback: after Actual execution has stopped, the buffered inputs are scored in observation and conservative modes and the CSV is written in one batch. This is research-only Shadow deployment: the result does not admit, reject, delay, resize, or otherwise modify an Actual order, exit, protection rule, daily counter, or risk gate. Model loading records the embedded asset version and SHA256; a load or scoring failure is logged but leaves Actual behavior unchanged.
+
+`knn_shadow_decisions.csv` fields:
+
+- identity: `SignalID`, `Time`, `Bar`, `Side`, `ResearchPath`
+- model identity: `ModelVersion`, `ModelSHA256`
+- observation result: `ObservedPolicy`, `ObservedScoreR`, `ObservedGatePassed`, `ObservedReferenceCount`
+- conservative result: `ConservativePolicy`, `ConservativeScoreR`, `ConservativeGatePassed`, `ConservativeReferenceCount`
+- diagnostics: `UnavailableReason`, `NumericFeatures`, `CategoricalFeatures`
+
+`NumericFeatures` is a semicolon-delimited `name=value` payload containing the frozen 25-feature order. `CategoricalFeatures` uses the same format for the frozen 18-feature order. `Verify-OPFKnnShadowParity.py` recomputes both policies and scores from the embedded-model export and fails when model identity, policy, score, gate, or reference count differs from the C# row.
+
 `shadow_trades.csv` fields:
 
 - identity: `SignalID`, `EntryTime`, `EntryBar`, `Side`, `ResearchPath`

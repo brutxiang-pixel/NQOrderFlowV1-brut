@@ -1444,6 +1444,16 @@ From `OPF_RESEARCH_1.93`, `ACTUAL_EXEC_2.31` restores the v1.90/v1.91 WideStop S
 
 From `OPF_RESEARCH_1.94`, `ACTUAL_EXEC_2.32` rejects the v1.93 strategy change and restores every eligible non-Split path, including `ObservationConfirm_WideStop1_5R`, to `1R -> break-even -> 3R`. The v1.90/v1.91 WideStop eligibility, MFE/MAE correction, exact shadow logging, and all portfolio/risk rules remain unchanged. v1.93 showed a positive direct effect on matched trades but a larger negative ActiveTrade replacement effect, so its `0.75R` lifecycle is retained only as archived evidence.
 
+From `OPF_RESEARCH_1.97`, the frozen v1.96 offline KNN baseline is embedded as `OPF_KNN_SHADOW_1.97`. Each execution decision captures only its immutable 25 numeric and 18 categorical inputs in memory. After Actual execution has stopped, the strategy batch-scores those inputs and writes `knn_shadow_decisions.csv` with the observation and conservative policy, expected R, gate result, neighbor count, model SHA256, and exact inputs. This keeps KNN model scans and file I/O out of Historical Replay order callbacks. The stage is deliberately Shadow-only: it does not change Actual eligibility, order submission, TP/SL, quantity, portfolio guards, or account statistics.
+
+Python/C# parity is checked after the representative Snapshot batch with:
+
+```powershell
+python OPFStrategyV1\Scripts\Verify-OPFKnnShadowParity.py --model OPFStrategyV1\Models\opf_v197_knn_shadow_model.json.gz --logs "$env:APPDATA\ATAS\StrategyLogs\OPFStrategyV1"
+```
+
+Shadow deployment is accepted only when all rows have zero parity mismatches and the ordinary execution lifecycle remains clean. A successful parity batch does not promote KNN decisions into Actual execution; a separate strategy proposal and Replay gate are required for that change.
+
 The paired eight-Snapshot calibration separates outcome-model accuracy from cross-Replay candidate drift:
 
 - `Simulate-OPFCounterfactual.ps1 -ShadowTargetMode Observed` preserves the recorded shadow result. `-ShadowTargetMode Conservative` treats a protected non-Split shadow target as break-even and a ZoneBirth Base+Runner target as Base-only, because Historical Replay cannot establish target-versus-protective-stop ordering inside the same M5 candle for a non-submitted shadow order.

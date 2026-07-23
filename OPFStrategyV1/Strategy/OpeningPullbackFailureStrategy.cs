@@ -153,9 +153,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private int _bullPullbackCountInRegime;
     private int _bearPullbackCountInRegime;
     private ResearchLogger? _researchLogger;
+    private KnnShadowModel? _knnShadowModel;
+    private readonly object _knnShadowInputSync = new();
+    private readonly List<KnnShadowInput> _knnShadowInputs = new();
     private ConfigSnapshot? _snapshot;
     private readonly Dictionary<DateTime, RegimeDailyStats> _regimeDailyStatsByDate = new();
     private MarketRegime? _lastRegime;
+    private decimal _lastRegimeChangeBullScore;
+    private decimal _lastRegimeChangeBearScore;
     private readonly object _renderLock = new();
     private string _hudText = "OPF v0.1\nWaiting for data...";
     private string _lastRegimeChangeText = "-";
@@ -329,6 +334,24 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 0,
                 DateTime.UtcNow,
                 $"ACTUAL_EXEC_CONFIG status={actualExecutionConfigStatus} path={actualExecutionConfigPath}");
+
+            try
+            {
+                _knnShadowModel = KnnShadowModel.LoadEmbedded();
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    $"KNN_SHADOW_MODEL_LOADED version={_knnShadowModel.ModelVersion} sha256={_knnShadowModel.Sha256}");
+            }
+            catch (Exception ex)
+            {
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    $"KNN_SHADOW_MODEL_LOAD_FAILED type={ex.GetType().Name} message={ex.Message}");
+            }
 
             if (profileSelection.UsedInstrumentFallback)
             {
@@ -553,6 +576,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         FlushResearchTrackers("ResearchStopped");
         FlushShadowTradeTrackers("StrategyStopped");
         _researchLogger?.FlushShadowTrades();
+        FlushKnnShadowInputs();
+        _researchLogger?.FlushKnnShadowDecisions();
         UnsubscribeConnectorEvents();
         base.OnStopped();
     }
@@ -613,6 +638,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 regime.Regime,
                 regime.BullTrendScore.TotalScore,
                 regime.BearTrendScore.TotalScore);
+            _lastRegimeChangeBullScore = regime.BullTrendScore.TotalScore;
+            _lastRegimeChangeBearScore = regime.BearTrendScore.TotalScore;
             _lastRegime = regime.Regime;
         }
 
@@ -2614,6 +2641,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var reward = EstimateActualExecutionReward(signal, researchPath, entry, risk);
         var estimatedRr = reward.Points <= 0m || risk <= 0m ? 0m : Math.Round(reward.Points / risk, 4);
 
+        BufferKnnShadowInput(signal, entryCandle, decision, researchPath, risk, estimatedRr, tradeId);
+
         _researchLogger?.AppendExecutionDecision(
             _snapshot.SnapshotId,
             signal.SignalId,
@@ -2638,6 +2667,268 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             _replayTradesToday,
             tradeId);
     }
+
+    private void BufferKnnShadowInput(
+        CandidateSignal signal,
+        OpfCandle entryCandle,
+        string executionDecision,
+        string researchPath,
+        decimal risk,
+        decimal estimatedRr,
+        string tradeId)
+    {
+        if (_knnShadowModel is null || _researchLogger is null || _snapshot is null)
+            return;
+
+        try
+        {
+            var features = BuildKnnShadowFeatures(signal, entryCandle, executionDecision, researchPath, risk, estimatedRr, tradeId);
+            var input = new KnnShadowInput(
+                _snapshot.SnapshotId,
+                signal.SignalId,
+                entryCandle.Time,
+                entryCandle.Bar,
+                signal.Side.ToString(),
+                researchPath,
+                features.Numeric,
+                features.Categorical);
+            lock (_knnShadowInputSync)
+                _knnShadowInputs.Add(input);
+        }
+        catch (Exception ex)
+        {
+            _researchLogger.AppendInfo(
+                _snapshot.SnapshotId,
+                entryCandle.Bar,
+                entryCandle.Time,
+                $"KNN_SHADOW_SCORE_FAILED signal={signal.SignalId} path={researchPath} type={ex.GetType().Name} message={ex.Message}");
+        }
+    }
+
+    private void FlushKnnShadowInputs()
+    {
+        if (_knnShadowModel is null || _researchLogger is null || _snapshot is null)
+            return;
+
+        KnnShadowInput[] inputs;
+        lock (_knnShadowInputSync)
+        {
+            inputs = _knnShadowInputs.ToArray();
+            _knnShadowInputs.Clear();
+        }
+
+        foreach (var input in inputs)
+        {
+            try
+            {
+                var decision = _knnShadowModel.Score(input.Side, input.ResearchPath, input.Numeric, input.Categorical);
+                _researchLogger.AppendKnnShadowDecision(
+                    input.SnapshotId,
+                    input.SignalId,
+                    input.Time,
+                    input.Bar,
+                    input.Side,
+                    input.ResearchPath,
+                    decision,
+                    _knnShadowModel.NumericFeatures,
+                    input.Numeric,
+                    _knnShadowModel.CategoricalFeatures,
+                    input.Categorical);
+            }
+            catch (Exception ex)
+            {
+                _researchLogger.AppendInfo(
+                    input.SnapshotId,
+                    input.Bar,
+                    input.Time,
+                    $"KNN_SHADOW_SCORE_FAILED signal={input.SignalId} path={input.ResearchPath} type={ex.GetType().Name} message={ex.Message}");
+            }
+        }
+    }
+
+    private KnnShadowFeatures BuildKnnShadowFeatures(
+        CandidateSignal signal,
+        OpfCandle candle,
+        string executionDecision,
+        string researchPath,
+        decimal risk,
+        decimal estimatedRr,
+        string tradeId)
+    {
+        var range = Math.Max(0m, candle.High - candle.Low);
+        var bodyRatio = range <= 0m ? 0m : Math.Abs(candle.Close - candle.Open) / range;
+        var closeLocation = range <= 0m ? 0.5m : (candle.Close - candle.Low) / range;
+        var bullScore = _lastRegimeChangeBullScore;
+        var bearScore = _lastRegimeChangeBearScore;
+        var trendStrength = Math.Max(bullScore, bearScore);
+        var alignment = signal.Side == TradeSide.Long ? bullScore - bearScore : bearScore - bullScore;
+        var confirmAvailable = signal.SignalId.EndsWith("-OC", StringComparison.Ordinal)
+            || signal.SignalId.EndsWith("-OC-STR", StringComparison.Ordinal);
+        var confirmReason = confirmAvailable
+            ? signal.SkipReasons.LastOrDefault(IsConfirmationReason) ?? "Unknown"
+            : "Unknown";
+        var confirmRange = confirmAvailable ? range : 0m;
+        var confirmBodyRatio = confirmAvailable ? bodyRatio : 0m;
+        var confirmCloseLocation = confirmAvailable ? closeLocation : 0.5m;
+        var confirmAlignment = confirmAvailable
+            ? signal.Side == TradeSide.Long ? candle.Close - candle.Open : candle.Open - candle.Close
+            : 0m;
+        var confirmPrevBreak = confirmAvailable && _previousCandle is not null
+            ? signal.Side == TradeSide.Long
+                ? candle.Close - _previousCandle.High
+                : _previousCandle.Low - candle.Close
+            : 0m;
+        var confirmZoneReclaim = confirmAvailable && signal.Zone is not null
+            ? signal.Side == TradeSide.Long
+                ? candle.Close - signal.Zone.High
+                : signal.Zone.Low - candle.Close
+            : 0m;
+        var hour = candle.Time.Hour + candle.Time.Minute / 60d;
+        var radians = 2d * Math.PI * hour / 24d;
+        var pullbackCount = signal.Side == TradeSide.Long
+            ? _activeBullPullback?.CountInRegime ?? 0
+            : _activeBearPullback?.CountInRegime ?? 0;
+
+        var numeric = new[]
+        {
+            (double)signal.RegimeScore.TotalScore,
+            (double)signal.SetupQualityScore.TotalScore,
+            (double)risk,
+            (double)estimatedRr,
+            (double)CalculateAtr14(candle),
+            (double)(signal.Zone is null ? 0m : signal.Zone.High - signal.Zone.Low),
+            signal.Zone?.TouchCount ?? 0,
+            pullbackCount,
+            (double)range,
+            (double)bodyRatio,
+            (double)closeLocation,
+            signal.Zone is null ? 0 : Math.Max(0, candle.Bar - signal.Zone.CreatedBar),
+            (double)bullScore,
+            (double)bearScore,
+            (double)trendStrength,
+            (double)alignment,
+            (double)confirmRange,
+            (double)confirmBodyRatio,
+            (double)confirmCloseLocation,
+            (double)confirmAlignment,
+            (double)confirmPrevBreak,
+            (double)confirmZoneReclaim,
+            Math.Sin(radians),
+            Math.Cos(radians),
+            ((int)candle.Time.DayOfWeek + 6) % 7
+        };
+
+        var featureSkipReasons = executionDecision == "Execute"
+            ? signal.SkipReasons.Concat(new[] { "ReplayExecuted", researchPath, tradeId })
+            : signal.SkipReasons;
+        var normalizedSkipReasons = featureSkipReasons
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(NormalizeKnnSkipReason)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(x => x, StringComparer.Ordinal)
+            .ToArray();
+        var categorical = new[]
+        {
+            candle.Time.Month >= 10 ? "Q4" : "H1",
+            KnnSession(candle.Time.Hour),
+            EmptyAsUnknown(signal.Zone?.ZoneType),
+            EmptyAsUnknown(signal.Zone?.Freshness),
+            KnnRegimeBucket(signal.RegimeScore.TotalScore, signal.RegimeScore.Threshold),
+            KnnSetupQualityBucket(signal.SetupQualityScore.TotalScore),
+            KnnRiskBucket(risk),
+            KnnRrBucket(estimatedRr),
+            KnnTimeBucket(candle.Time),
+            normalizedSkipReasons.Length == 0 ? "None" : string.Join("+", normalizedSkipReasons),
+            HasKnnToken(normalizedSkipReasons, "ZoneBirthResearch").ToString(),
+            HasKnnToken(normalizedSkipReasons, "ObservationConfirmResearch").ToString(),
+            HasKnnToken(normalizedSkipReasons, "ObservationConfirmStrictResearch").ToString(),
+            HasKnnToken(normalizedSkipReasons, "FailureReverseResearch").ToString(),
+            HasKnnToken(normalizedSkipReasons, "FailureRetestFailedTriggered").ToString(),
+            HasKnnToken(normalizedSkipReasons, "BreakawayQualified").ToString(),
+            confirmAvailable.ToString(),
+            confirmReason
+        };
+        return new KnnShadowFeatures(numeric, categorical);
+    }
+
+    private static bool IsConfirmationReason(string value)
+    {
+        return value is "ReclaimZoneHigh" or "ReclaimZoneLow" or "BreakPrevHigh" or "BreakPrevLow";
+    }
+
+    private static string NormalizeKnnSkipReason(string value)
+    {
+        var equals = value.IndexOf('=');
+        var colon = value.IndexOf(':');
+        var end = new[] { equals, colon }.Where(x => x >= 0).DefaultIfEmpty(value.Length).Min();
+        return value[..end];
+    }
+
+    private static bool HasKnnToken(IEnumerable<string> values, string token) => values.Contains(token, StringComparer.Ordinal);
+
+    private static string EmptyAsUnknown(string? value) => string.IsNullOrWhiteSpace(value) ? "Unknown" : value;
+
+    private static string KnnSession(int hour) => hour <= 5 ? "Asia" : hour <= 12 ? "Europe" : hour <= 19 ? "US" : "Late";
+
+    private static string KnnRegimeBucket(decimal score, decimal threshold)
+    {
+        if (threshold > 0m && score >= threshold)
+            return "Passed";
+        return score >= 50m ? "Weak50_69" : "WeakLT50";
+    }
+
+    private static string KnnSetupQualityBucket(decimal score)
+    {
+        if (score >= 80m)
+            return "Q80Plus";
+        if (score >= 70m)
+            return "Q70_79";
+        return score >= 50m ? "Q50_69" : "QLT50";
+    }
+
+    private static string KnnRiskBucket(decimal risk)
+    {
+        if (risk <= 0m)
+            return "None";
+        if (risk <= 8.5m)
+            return "RiskLE8_5";
+        if (risk <= 11m)
+            return "RiskLE11";
+        return risk <= 15m ? "RiskLE15" : "RiskGT15";
+    }
+
+    private static string KnnRrBucket(decimal rr)
+    {
+        if (rr >= 1.5m)
+            return "RR_GE_1_5";
+        if (rr >= 1.2m)
+            return "RR_GE_1_2";
+        return rr >= 1m ? "RR_GE_1_0" : "RR_LT_1_0";
+    }
+
+    private static string KnnTimeBucket(DateTime time)
+    {
+        var value = time.TimeOfDay;
+        if (value < new TimeSpan(10, 0, 0))
+            return "Pre10";
+        if (value < new TimeSpan(11, 30, 0))
+            return "Morning";
+        if (value < new TimeSpan(13, 30, 0))
+            return "Midday";
+        return value < new TimeSpan(15, 30, 0) ? "Afternoon" : "Late";
+    }
+
+    private sealed record KnnShadowFeatures(double[] Numeric, string[] Categorical);
+
+    private sealed record KnnShadowInput(
+        string SnapshotId,
+        string SignalId,
+        DateTime Time,
+        int Bar,
+        string Side,
+        string ResearchPath,
+        double[] Numeric,
+        string[] Categorical);
 
     private bool IsReplayExecutionPathEnabled(string researchPath)
     {

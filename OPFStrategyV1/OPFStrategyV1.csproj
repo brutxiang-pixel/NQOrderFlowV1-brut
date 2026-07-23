@@ -10,6 +10,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Models\opf_v197_knn_shadow_model.json.gz" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Reference Include="ATAS.DataFeedsCore">
       <HintPath>$(ATASPlatformDir)\ATAS.DataFeedsCore.dll</HintPath>
       <Private>false</Private>

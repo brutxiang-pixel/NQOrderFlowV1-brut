@@ -3,6 +3,7 @@ using OPFStrategyV1.Core.Signals;
 using OPFStrategyV1.Core.MarketData;
 using OPFStrategyV1.Regime;
 using OPFStrategyV1.Zones;
+using System.Globalization;
 using System.Text.Json;
 
 namespace OPFStrategyV1.Research;
@@ -14,6 +15,7 @@ public sealed class ResearchLogger
     private readonly bool _compact;
     private readonly object _fileWriteSync = new();
     private readonly Dictionary<string, List<string>> _bufferedShadowTradeRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedKnnShadowDecisionRows = new();
 
     public sealed record ActualOutcome(
         bool ActualVerified,
@@ -709,6 +711,70 @@ public sealed class ResearchLogger
             + Environment.NewLine);
 
         AppendFunnelEvent(snapshotId, time, bar, "ExecutionDecision", signalId, researchPath, side, setupType, decision, reason, executionScope);
+    }
+
+    public void AppendKnnShadowDecision(
+        string snapshotId,
+        string signalId,
+        DateTime time,
+        int bar,
+        string side,
+        string researchPath,
+        KnnShadowDecision decision,
+        IReadOnlyList<string> numericFeatureNames,
+        IReadOnlyList<double> numericValues,
+        IReadOnlyList<string> categoricalFeatureNames,
+        IReadOnlyList<string> categoricalValues)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_knn_shadow_decisions.csv");
+        var numeric = string.Join(";", numericFeatureNames.Select((name, index) => $"{name}={numericValues[index].ToString("0.########", CultureInfo.InvariantCulture)}"));
+        var categorical = string.Join(";", categoricalFeatureNames.Select((name, index) => $"{name}={categoricalValues[index]}"));
+        var row = string.Join(",",
+            ContextValues(snapshotId),
+            Csv(signalId),
+            Csv(time.ToString("O")),
+            bar,
+            Csv(side),
+            Csv(researchPath),
+            Csv(decision.ModelVersion),
+            Csv(decision.ModelSha256),
+            Csv(decision.Observed.Policy),
+            decision.Observed.ScoreR.ToString("R", CultureInfo.InvariantCulture),
+            decision.ObservedGatePassed,
+            decision.Observed.ReferenceCount,
+            Csv(decision.Conservative.Policy),
+            decision.Conservative.ScoreR.ToString("R", CultureInfo.InvariantCulture),
+            decision.ConservativeGatePassed,
+            decision.Conservative.ReferenceCount,
+            Csv(decision.UnavailableReason),
+            Csv(numeric),
+            Csv(categorical));
+        lock (_fileWriteSync)
+        {
+            if (!_bufferedKnnShadowDecisionRows.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                _bufferedKnnShadowDecisionRows[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
+    public void FlushKnnShadowDecisions()
+    {
+        Dictionary<string, string[]> buffered;
+        lock (_fileWriteSync)
+        {
+            buffered = _bufferedKnnShadowDecisionRows.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            _bufferedKnnShadowDecisionRows.Clear();
+        }
+
+        var header = ContextHeader("SignalID,Time,Bar,Side,ResearchPath,ModelVersion,ModelSHA256,ObservedPolicy,ObservedScoreR,ObservedGatePassed,ObservedReferenceCount,ConservativePolicy,ConservativeScoreR,ConservativeGatePassed,ConservativeReferenceCount,UnavailableReason,NumericFeatures,CategoricalFeatures");
+        foreach (var item in buffered)
+        {
+            EnsureHeader(item.Key, header);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
     }
 
     public void AppendExecutionTrade(
