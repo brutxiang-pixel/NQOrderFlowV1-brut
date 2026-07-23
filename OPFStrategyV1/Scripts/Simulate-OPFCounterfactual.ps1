@@ -11,6 +11,19 @@ param(
 
     [string]$ProtectBE075Paths = '',
 
+    [switch]$UseObservationConfirmShortFixed1_5R,
+
+    [string]$ExitPolicyOverrides = '',
+
+    [switch]$IncludeObservationConfirmLongGateCandidates,
+
+    [string]$ExcludedRegimeScores = '',
+
+    [ValidateRange(0, 1000)]
+    [int]$DailyTradeLimit = 15,
+
+    [string]$AllowedPathSides = '',
+
     [string]$OutputCsv,
 
     [string]$TraceCsv
@@ -24,6 +37,31 @@ $ErrorActionPreference = 'Stop'
 $protectBE075PathSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
 foreach ($path in @($ProtectBE075Paths -split '\|' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
     [void]$protectBE075PathSet.Add($path.Trim())
+}
+
+$exitPolicyOverrideByPath = @{}
+foreach ($item in @($ExitPolicyOverrides -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+    $parts = @($item -split '\|')
+    if ($parts.Count -ne 3) {
+        throw "Invalid exit policy override '$item'. Expected Side|ResearchPath|ExitPolicy."
+    }
+
+    $exitPolicyOverrideByPath['{0}|{1}' -f $parts[0].Trim(), $parts[1].Trim()] = $parts[2].Trim()
+}
+
+$excludedRegimeScoreSet = [Collections.Generic.HashSet[int]]::new()
+foreach ($value in @($ExcludedRegimeScores -split '\|' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+    [void]$excludedRegimeScoreSet.Add([int]$value.Trim())
+}
+
+$allowedPathSideSet = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+foreach ($item in @($AllowedPathSides -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })) {
+    $parts = @($item -split '\|')
+    if ($parts.Count -ne 2) {
+        throw "Invalid allowed path '$item'. Expected Side|ResearchPath."
+    }
+
+    [void]$allowedPathSideSet.Add(('{0}|{1}' -f $parts[0].Trim(), $parts[1].Trim()))
 }
 
 if (-not (Test-Path -LiteralPath $EvidenceDirectory)) {
@@ -57,6 +95,13 @@ function Policy-Key($Row, [string]$Policy) {
 
 function Is-PortfolioBlockedCandidate($Row) {
     if ($Row.Decision -eq 'Execute') {
+        return $true
+    }
+
+    if ($IncludeObservationConfirmLongGateCandidates -and
+        $Row.Side -eq 'Long' -and
+        $Row.ResearchPath -eq 'ObservationConfirm' -and
+        $Row.Reason -eq 'ObservationConfirmLongDirectionGateV185') {
         return $true
     }
 
@@ -136,6 +181,13 @@ $blockedByDailyLimit = 0
 $blockedByDailyLoss = 0
 $conservativeShadowAdjustments = 0
 $earlyBreakEvenAdjustments = 0
+$observationConfirmShortFixed15Adjustments = 0
+$ambiguousFixed15ConservativeAdjustments = 0
+$exitPolicyOverrideAdjustments = 0
+$ambiguousOverrideConservativeAdjustments = 0
+$missingOverrideOutcomes = 0
+$filteredByRegime = 0
+$filteredByPathSide = 0
 
 function Add-TraceRow($Candidate, [bool]$HasActualTrade, [bool]$DivergedBefore, [datetime]$ActiveBefore, [int]$TradesBefore, [decimal]$NetBefore, [bool]$RiskBandAllowed, [string]$Disposition, [string]$OutcomeSource, [string]$ExitReason, $ExitTime, [decimal]$Gross, [decimal]$Net, [bool]$DivergedAfter, [datetime]$ActiveAfter, [int]$TradesAfter, [decimal]$NetAfter) {
     if ([string]::IsNullOrWhiteSpace($TraceCsv)) {
@@ -180,12 +232,23 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
 
     foreach ($candidate in @($snapshotGroup.Group | Sort-Object @{ Expression = { DateTime-Value $_.Time } }, @{ Expression = { [int]$_.Bar } })) {
         $hasActualTrade = -not [string]::IsNullOrWhiteSpace($candidate.TradeID) -and $tradeById.ContainsKey($candidate.TradeID)
+        $isIncludedObservationConfirmLongGateCandidate =
+            $IncludeObservationConfirmLongGateCandidates -and
+            $candidate.Side -eq 'Long' -and
+            $candidate.ResearchPath -eq 'ObservationConfirm' -and
+            $candidate.Reason -eq 'ObservationConfirmLongDirectionGateV185'
+        $isIncludedDailyLimitCandidate =
+            $DailyTradeLimit -eq 0 -and
+            $candidate.Reason -match '^DailyTradeLimit:'
         $divergedBefore = $portfolioDiverged
         $activeBefore = $activeUntil
         $tradesBefore = $dailyTrades
         $netBefore = $dailyNet
         $riskBandAllowed = Is-V189RiskBandAllowed $candidate
-        if (-not $portfolioDiverged -and -not $hasActualTrade) {
+        if (-not $portfolioDiverged -and
+            -not $hasActualTrade -and
+            -not $isIncludedObservationConfirmLongGateCandidate -and
+            -not $isIncludedDailyLimitCandidate) {
             Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'IgnoredBeforeDivergence' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
         }
@@ -196,7 +259,7 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
             Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'BlockedByActiveTrade' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
         }
-        if ($dailyTrades -ge 15) {
+        if ($DailyTradeLimit -gt 0 -and $dailyTrades -ge $DailyTradeLimit) {
             $blockedByDailyLimit++
             Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'BlockedByDailyLimit' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
@@ -214,13 +277,76 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
             Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'FilteredByRiskBand' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
         }
+        if ($excludedRegimeScoreSet.Contains([int]$candidate.RegimeScore)) {
+            $filteredByRegime++
+            if ($hasActualTrade) {
+                $portfolioDiverged = $true
+            }
+            Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'FilteredByRegime' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
+            continue
+        }
+        $candidatePathSide = '{0}|{1}' -f $candidate.Side, $candidate.ResearchPath
+        if ($allowedPathSideSet.Count -gt 0 -and -not $allowedPathSideSet.Contains($candidatePathSide)) {
+            $filteredByPathSide++
+            if ($hasActualTrade) {
+                $portfolioDiverged = $true
+            }
+            Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'FilteredByPathSide' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
+            continue
+        }
 
         $source = 'ShadowPolicy'
         $exitReason = ''
         $gross = [decimal]0
         $exitTime = $entryTime
 
-        if ($hasActualTrade) {
+        $useObservationConfirmShortFixed15 =
+            $UseObservationConfirmShortFixed1_5R -and
+            $candidate.Side -eq 'Short' -and
+            $candidate.ResearchPath -eq 'ObservationConfirm'
+
+        $overrideKey = '{0}|{1}' -f $candidate.Side, $candidate.ResearchPath
+        $overridePolicyName = if ($exitPolicyOverrideByPath.ContainsKey($overrideKey)) {
+            $exitPolicyOverrideByPath[$overrideKey]
+        }
+        elseif ($useObservationConfirmShortFixed15) {
+            'Fixed1_5R'
+        }
+        else {
+            ''
+        }
+
+        $overridePolicy = $null
+        if (-not [string]::IsNullOrWhiteSpace($overridePolicyName)) {
+            $overridePolicyKey = Policy-Key $candidate $overridePolicyName
+            if ($policyByKey.ContainsKey($overridePolicyKey)) {
+                $overridePolicy = $policyByKey[$overridePolicyKey]
+            }
+            else {
+                $missingOverrideOutcomes++
+            }
+        }
+
+        if ($null -ne $overridePolicy) {
+            $source = 'ExitPolicyOverride:' + $overridePolicyName
+            $exitReason = $overridePolicy.ExitReason
+            $gross = Decimal-Value $overridePolicy.PnLDollars
+            $barDelta = [math]::Max(1, [int]$overridePolicy.PolicyExitBar - [int]$candidate.Bar)
+            $exitTime = $entryTime.AddMinutes(5 * $barDelta)
+            if ($ShadowTargetMode -eq 'Conservative' -and
+                $overridePolicy.AmbiguousStopAndTargetSameBar -eq 'True') {
+                $exitReason = 'Stop:ConservativeSameBarAmbiguity'
+                $gross = -(Decimal-Value $candidate.InitialRiskPoints) * [decimal]4
+                $ambiguousOverrideConservativeAdjustments++
+            }
+
+            $portfolioDiverged = $true
+            $exitPolicyOverrideAdjustments++
+            if ($useObservationConfirmShortFixed15 -and $overridePolicyName -eq 'Fixed1_5R') {
+                $observationConfirmShortFixed15Adjustments++
+            }
+        }
+        elseif ($hasActualTrade) {
             $trade = $tradeById[$candidate.TradeID]
             $source = 'ActualTrade'
             $exitReason = $trade.ExitRole
@@ -288,6 +414,9 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
         }
 
         $net = $gross - [decimal]2.4
+        if ($isIncludedDailyLimitCandidate) {
+            $portfolioDiverged = $true
+        }
         $dailyTrades++
         $dailyNet += $net
         $activeUntil = $exitTime
@@ -326,10 +455,28 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
 
 [pscustomobject]@{
     EvidenceDirectory = (Resolve-Path -LiteralPath $EvidenceDirectory).Path
-    Mode = if ($UseV189ShortWideStopRiskBand) { 'V189ShortWideStopRiskBand' } else { 'Baseline' }
+    Mode = @(
+        if ($UseV189ShortWideStopRiskBand) { 'V189ShortWideStopRiskBand' }
+        if ($UseObservationConfirmShortFixed1_5R) { 'ObservationConfirmShortFixed1_5R' }
+        if ($exitPolicyOverrideByPath.Count -gt 0) { 'ExitPolicyOverrides' }
+        if ($IncludeObservationConfirmLongGateCandidates) { 'ObservationConfirmLongGateCandidates' }
+        if ($excludedRegimeScoreSet.Count -gt 0) { 'ExcludedRegimeScores' }
+        if ($allowedPathSideSet.Count -gt 0) { 'AllowedPathSides' }
+        if (-not $UseV189ShortWideStopRiskBand -and
+            -not $UseObservationConfirmShortFixed1_5R -and
+            $exitPolicyOverrideByPath.Count -eq 0 -and
+            -not $IncludeObservationConfirmLongGateCandidates -and
+            $excludedRegimeScoreSet.Count -eq 0 -and
+            $allowedPathSideSet.Count -eq 0) { 'Baseline' }
+    ) -join '+'
     ShadowTargetMode = $ShadowTargetMode
     ProtectBE075Trigger = [bool]$UseProtectBE075Trigger
     ProtectBE075Paths = if ($protectBE075PathSet.Count -eq 0) { '*' } else { $ProtectBE075Paths }
+    ExitPolicyOverrides = $ExitPolicyOverrides
+    IncludeObservationConfirmLongGateCandidates = [bool]$IncludeObservationConfirmLongGateCandidates
+    ExcludedRegimeScores = $ExcludedRegimeScores
+    DailyTradeLimit = $DailyTradeLimit
+    AllowedPathSides = $AllowedPathSides
     CandidateRows = $candidateByKey.Count
     ActualTrades = $tradeById.Count
     ActualGrossDollars = [math]::Round((Decimal-Value $actualGross), 2)
@@ -346,6 +493,13 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
     MissingOutcomes = $missingOutcomes
     ConservativeShadowAdjustments = $conservativeShadowAdjustments
     EarlyBreakEvenAdjustments = $earlyBreakEvenAdjustments
+    ObservationConfirmShortFixed15Adjustments = $observationConfirmShortFixed15Adjustments
+    AmbiguousFixed15ConservativeAdjustments = $ambiguousFixed15ConservativeAdjustments
+    ExitPolicyOverrideAdjustments = $exitPolicyOverrideAdjustments
+    AmbiguousOverrideConservativeAdjustments = $ambiguousOverrideConservativeAdjustments
+    MissingOverrideOutcomes = $missingOverrideOutcomes
+    FilteredByRegime = $filteredByRegime
+    FilteredByPathSide = $filteredByPathSide
     OutputCsv = $OutputCsv
     TraceRows = $traceRows.Count
     TraceCsv = $TraceCsv
