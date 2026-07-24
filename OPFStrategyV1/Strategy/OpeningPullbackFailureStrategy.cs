@@ -19,6 +19,7 @@ using System.Drawing;
 using System.Globalization;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -93,6 +94,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal HistoricalDormantTargetOffsetPointsV181 = 500m;
     private const decimal ProtectBreakEvenTriggerRV186 = 1m;
     private const decimal ProtectBreakEvenTargetRV186 = 3m;
+    private static readonly bool UseLegacyV174StrategyPolicyV204 = true;
     private const decimal EntryFillRiskDriftTolerancePoints = 1m;
     private const decimal ShortObservationMidRiskQualityCutMinRisk = 8m;
     private const decimal ShortObservationMidRiskQualityCutMaxRisk = 15m;
@@ -112,6 +114,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private static readonly TimeSpan LiveLatencyRecoveryPeriod = TimeSpan.FromSeconds(10);
     private static readonly TimeZoneInfo EasternTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
     private const string ReplayStopExitRole = "SESSION_FLATTEN";
+    private const int RichBoundaryBackfillBars = 72;
     private readonly IZoneDetector _zoneDetector = new FvgZoneDetector(
         minGapPoints: 0.50m,
         maxGapPoints: 12m,
@@ -145,6 +148,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private readonly HashSet<string> _writtenResearchOutcomeKeys = new();
     private readonly HashSet<string> _liveNotificationKeys = new();
     private readonly List<OpfCandle> _recentCandles = new();
+    private readonly List<RichBarFeatureInput> _richBarFeatures = new();
     private readonly SemaphoreSlim _executionLock = new(1, 1);
     private PullbackEpisode? _activeBullPullback;
     private PullbackEpisode? _activeBearPullback;
@@ -159,6 +163,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private ConfigSnapshot? _snapshot;
     private readonly Dictionary<DateTime, RegimeDailyStats> _regimeDailyStatsByDate = new();
     private MarketRegime? _lastRegime;
+    private int _lastRegimeChangeBar = -1;
     private decimal _lastRegimeChangeBullScore;
     private decimal _lastRegimeChangeBearScore;
     private readonly object _renderLock = new();
@@ -253,6 +258,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     [DisplayName("Enable Actual Orders")]
     public bool EnableReplayOrders { get; set; } = true;
 
+    [Category("OPF Research")]
+    [DisplayName("Rich Bar Data Collection Only")]
+    public bool RichBarDataCollectionOnly { get; set; }
+
+    private bool ActualOrdersEnabled => EnableReplayOrders && !RichBarDataCollectionOnly;
+
     [Category("OPF Execution")]
     [DisplayName("Actual Execution Paths")]
     public string ReplayExecutionPath { get; set; } = "*";
@@ -315,6 +326,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             out var actualExecutionConfigPath,
             out var actualExecutionConfigStatus);
         ApplyActualExecutionSettings(actualExecutionSettings);
+        if (RichBarDataCollectionOnly)
+            EnableReplayOrders = false;
 
         var resolvedExecutionProfileName = ResolveExecutionProfileName(actualExecutionSettings);
         var profileSelection = ProfileCatalog.Select(InstrumentProfileName, resolvedExecutionProfileName);
@@ -334,6 +347,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 0,
                 DateTime.UtcNow,
                 $"ACTUAL_EXEC_CONFIG status={actualExecutionConfigStatus} path={actualExecutionConfigPath}");
+            if (RichBarDataCollectionOnly)
+            {
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    "RICH_BAR_DATA_COLLECTION_ONLY enabled=true actualOrders=false");
+            }
 
             try
             {
@@ -472,7 +493,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void ReconcileLiveExecutionState(string source)
     {
-        if (!EnableReplayOrders)
+        if (!ActualOrdersEnabled)
         {
             ClearLiveReadinessBlock(source);
             return;
@@ -578,6 +599,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _researchLogger?.FlushShadowTrades();
         FlushKnnShadowInputs();
         _researchLogger?.FlushKnnShadowDecisions();
+        FlushRichBarFeatures();
+        _researchLogger?.FlushRichBarFeatures();
         UnsubscribeConnectorEvents();
         base.OnStopped();
     }
@@ -640,6 +663,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 regime.BearTrendScore.TotalScore);
             _lastRegimeChangeBullScore = regime.BullTrendScore.TotalScore;
             _lastRegimeChangeBearScore = regime.BearTrendScore.TotalScore;
+            _lastRegimeChangeBar = bar;
             _lastRegime = regime.Regime;
         }
 
@@ -671,6 +695,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             _researchLogger?.AppendInfo(_snapshot.SnapshotId, bar, current.Time, $"OPF setup scaffold started. zones={zones.Count}");
 
         _previousCandle = current;
+        BufferRichBarFeature(current, regime);
         AddRecentCandle(current);
     }
 
@@ -709,7 +734,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     protected override void OnNewMyTrade(MyTrade myTrade)
     {
         base.OnNewMyTrade(myTrade);
-        if (!EnableReplayOrders)
+        if (!ActualOrdersEnabled)
             return;
 
         var trade = myTrade.Clone();
@@ -752,7 +777,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var notifiedOrder = newOrder ?? order;
         NotifyLiveIssue($"ModifyFail:{notifiedOrder?.ExtId}", $"Order modify failed. role={ParseExecutionRole(notifiedOrder?.Comment)}, message={message}");
         var execution = _replayExecution;
-        if (!EnableReplayOrders || execution is null)
+        if (!ActualOrdersEnabled || execution is null)
             return;
 
         var failedOrder = newOrder ?? order;
@@ -779,7 +804,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void AttachReplayOrder(Order? order, string source)
     {
-        if (!EnableReplayOrders || order is null || _replayExecution is null)
+        if (!ActualOrdersEnabled || order is null || _replayExecution is null)
             return;
         if (!TryParseExecutionComment(order.Comment, out var tradeId, out var role))
             return;
@@ -870,6 +895,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var current = TargetOrderForRoleV180(execution, role);
         if (current is null || current.ExtId == order.ExtId)
             return false;
+
+        if (execution.HistoricalObservedTargetExitRolesV206.Contains(role) &&
+            current.Type == OrderTypes.Market &&
+            order.Type != OrderTypes.Market)
+        {
+            reason = $"observedTargetMarketExt={current.ExtId}|staleDormantExt={order.ExtId}|staleDormantPrice={order.Price:0.########}";
+            return true;
+        }
 
         var intendedTarget = ExpectedExitPrice(execution, role);
         if (intendedTarget <= 0m)
@@ -2272,7 +2305,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void TrySubmitReplayExecution(CandidateSignal signal, OpfCandle entryCandle, string researchPath, decimal stop, decimal risk, bool allowDelayedExpansion = true)
     {
-        if (!EnableReplayOrders || _snapshot is null)
+        if (!ActualOrdersEnabled || _snapshot is null)
             return;
         if (_isStoppingActualExecution)
         {
@@ -2311,7 +2344,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionDecision(signal, entryCandle, "Skip", "PathDisabled", researchPath, stop, risk);
             return;
         }
-        if (IsObservationConfirmPath(researchPath) && signal.Side == TradeSide.Long)
+        if (!UseLegacyV174StrategyPolicyV204 &&
+            IsObservationConfirmPath(researchPath) &&
+            signal.Side == TradeSide.Long)
         {
             const string reason = "ObservationConfirmLongDirectionGateV185";
             AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
@@ -2466,7 +2501,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _researchLogger?.AppendInfo(_snapshot.SnapshotId, entryCandle.Bar, entryCandle.Time, $"EXEC_ENTRY_SEND trade={tradeId} signal={signal.SignalId} path={researchPath} side={signal.Side} qty={qty} stop={stop:0.########} target={target:0.########}");
         _researchLogger?.AppendSignal(signal with { Stage = SignalStage.Executed, SkipReasons = signal.SkipReasons.Concat(new[] { "ReplayExecuted", researchPath, tradeId }).ToArray() });
         var executeReasons = new List<string> { $"TradeID:{tradeId}" };
-        if (UsesProtectBreakEvenV186(signal.Side, researchPath))
+        if (UseLegacyV174StrategyPolicyV204)
+            executeReasons.Add($"LegacyV174PolicyV204:targetR={targetR:0.##}|dailyCap={ReplayMaxTradesPerDay}");
+        else if (UsesProtectBreakEvenV186(signal.Side, researchPath))
             executeReasons.Add($"ProtectBE1RThen3RV186:triggerR={ProtectBreakEvenTriggerRV186:0.##},targetR={ProtectBreakEvenTargetRV186:0.##}");
         var isObservationFiller = IsObservationConfirmFiller(signal, researchPath);
         if (isObservationFiller)
@@ -2746,6 +2783,114 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
     }
 
+    private void BufferRichBarFeature(OpfCandle candle, RegimeResult regime)
+    {
+        if (ActualOrdersEnabled)
+            return;
+
+        if (RichBarDataCollectionOnly && _richBarFeatures.Count == 0 && candle.Bar > 0)
+        {
+            BufferRichBarBoundaryFeatures(candle.Bar);
+            return;
+        }
+
+        BufferRichBarFeature(candle, regime, _recentCandles, RegimeBars(candle.Bar));
+    }
+
+    private void BufferRichBarBoundaryFeatures(int currentBar)
+    {
+        var engine = new TrendScoreEngine();
+        var recentCandles = new List<OpfCandle>();
+        MarketRegime? lastRegime = null;
+        var lastRegimeChangeBar = -1;
+
+        for (var bar = 0; bar <= currentBar; bar++)
+        {
+            var source = GetCandle(bar);
+            if (source is null)
+                continue;
+
+            var candle = ToOpfCandle(bar, source);
+            var regime = engine.Update(candle);
+            if (lastRegime != regime.Regime)
+            {
+                lastRegime = regime.Regime;
+                lastRegimeChangeBar = bar;
+            }
+
+            if (bar >= Math.Max(0, currentBar - RichBoundaryBackfillBars))
+            {
+                var regimeBars = lastRegimeChangeBar < 0 ? 0 : Math.Max(1, bar - lastRegimeChangeBar + 1);
+                BufferRichBarFeature(candle, regime, recentCandles, regimeBars);
+            }
+
+            recentCandles.Add(candle);
+            if (recentCandles.Count > 20)
+                recentCandles.RemoveAt(0);
+        }
+    }
+
+    private int RegimeBars(int bar) => _lastRegimeChangeBar < 0 ? 0 : Math.Max(1, bar - _lastRegimeChangeBar + 1);
+
+    private void BufferRichBarFeature(
+        OpfCandle candle,
+        RegimeResult regime,
+        IReadOnlyCollection<OpfCandle> recentCandles,
+        int regimeBars)
+    {
+        var averageVolume20 = recentCandles.Count == 0 ? 0m : recentCandles.Average(x => x.Volume);
+        var relativeVolume20 = averageVolume20 <= 0m ? 0m : Math.Round(candle.Volume / averageVolume20, 6);
+        var closeMinusVwap = candle.Vwap <= 0m ? 0m : candle.Close - candle.Vwap;
+        var atr14 = CalculateAtr14(candle, recentCandles);
+        _richBarFeatures.Add(new RichBarFeatureInput(
+            candle,
+            regime,
+            regimeBars,
+            averageVolume20,
+            relativeVolume20,
+            closeMinusVwap,
+            atr14,
+            atr14 <= 0m ? 0m : Math.Round(closeMinusVwap / atr14, 6)));
+    }
+
+    private void FlushRichBarFeatures()
+    {
+        if (_researchLogger is null || _snapshot is null)
+            return;
+
+        foreach (var feature in _richBarFeatures)
+        {
+            _researchLogger.AppendRichBarFeature(
+                _snapshot.SnapshotId,
+                new ResearchLogger.RichBarFeature(
+                    feature.Candle.Time,
+                    feature.Candle.Bar,
+                    feature.Regime.Regime.ToString(),
+                    feature.RegimeBars,
+                    feature.Candle.Open,
+                    feature.Candle.High,
+                    feature.Candle.Low,
+                    feature.Candle.Close,
+                    feature.Candle.Volume,
+                    feature.Candle.Vwap,
+                    feature.AverageVolume20,
+                    feature.RelativeVolume20,
+                    feature.CloseMinusVwap,
+                    feature.Atr14,
+                    feature.VwapDistanceAtr,
+                    feature.Regime.BullTrendScore.TotalScore,
+                    feature.Regime.BearTrendScore.TotalScore,
+                    SerializeTrendComponents(feature.Regime.BullTrendScore),
+                    SerializeTrendComponents(feature.Regime.BearTrendScore)));
+        }
+        _richBarFeatures.Clear();
+    }
+
+    private static string SerializeTrendComponents(ScoreBreakdown score)
+    {
+        return JsonSerializer.Serialize(score.Components);
+    }
+
     private KnnShadowFeatures BuildKnnShadowFeatures(
         CandidateSignal signal,
         OpfCandle candle,
@@ -2929,6 +3074,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         string ResearchPath,
         double[] Numeric,
         string[] Categorical);
+
+    private sealed record RichBarFeatureInput(
+        OpfCandle Candle,
+        RegimeResult Regime,
+        int RegimeBars,
+        decimal AverageVolume20,
+        decimal RelativeVolume20,
+        decimal CloseMinusVwap,
+        decimal Atr14,
+        decimal VwapDistanceAtr);
 
     private bool IsReplayExecutionPathEnabled(string researchPath)
     {
@@ -3805,7 +3960,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private static bool UsesProtectBreakEvenV186(TradeSide side, string researchPath)
     {
-        return IsExecutionEligiblePath(researchPath) && !UsesZoneBirthSplitRunnerV172(side, researchPath);
+        return !UseLegacyV174StrategyPolicyV204 &&
+            IsExecutionEligiblePath(researchPath) &&
+            !UsesZoneBirthSplitRunnerV172(side, researchPath);
     }
 
     private static decimal AggressiveExpansionTargetR(TradeSide side, string researchPath)
@@ -4176,6 +4333,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
             LogExecutionInfo($"EXEC_EXIT_FILLED trade={tradeId} role={role} price={trade.Price:0.########}");
             AppendExecutionEvent(_replayExecution, "EXIT_FILLED", role, trade.Price, trade.Volume, string.Empty);
+            if (_replayExecution.HistoricalObservedTargetExitRolesV206.Contains(role))
+            {
+                var expectedTarget = ExpectedExitPrice(_replayExecution, role);
+                LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_FILLED_V206 trade={tradeId} role={role} raw={trade.Price:0.########} expected={expectedTarget:0.########}");
+                AppendExecutionEvent(_replayExecution, "HISTORICAL_OBSERVED_TP_EXIT_FILLED_V206", role, trade.Price, trade.Volume, $"expected={expectedTarget:0.########}|normalizedByHistoricalReplayValidation");
+            }
             if (_replayExecution.ZoneBirthSplitRunnerV172 && role == "BASE_TP")
                 ScheduleZoneBirthRunnerBreakEvenAfterBaseTargetV173(_replayExecution, trade.Price);
             await TryCancelExecutionOrderAsync(_replayExecution.EntryOrder, "ExitFilledCancelEntry");
@@ -4207,7 +4370,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private async Task FinalizeCompletedExecutionExitAsync(ReplayExecutionState execution, decimal finalExitPrice, string role)
     {
         var finalRole = role;
-        var dailyRole = role;
+        var dailyRole = finalRole;
         ExecutionFillValidation validation;
         if (execution.ZoneBirthSplitRunnerV172)
         {
@@ -4219,7 +4382,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
         else
         {
-            validation = ValidateExecutionFill(execution, finalExitPrice, role);
+            validation = ValidateExecutionFill(execution, finalExitPrice, finalRole);
         }
         if (finalRole.Contains(ReplayStopExitRole, StringComparison.OrdinalIgnoreCase) && IsNormalizedReplayExitFill(validation))
         {
@@ -4306,16 +4469,40 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var points = execution.Side == TradeSide.Long ? exitPrice - entryPrice : entryPrice - exitPrice;
         var rawGross = replayRawGrossOverride ?? Math.Round(points * _snapshot.InstrumentProfile.PointValue * quantity, 2);
         var historicalReplay = IsHistoricalReplayTime(_lastResearchCandle.Time);
+        var abnormalFlattenReference = execution.EmergencyFlattenReferencePriceV205;
+        var normalizeAbnormalFlatten = historicalReplay &&
+            string.Equals(classification, "Abnormal", StringComparison.OrdinalIgnoreCase) &&
+            abnormalFlattenReference > 0m &&
+            Math.Abs(exitPrice - abnormalFlattenReference) > ExecutionFillTolerance();
+        var normalizedAbnormalPoints = execution.Side == TradeSide.Long
+            ? abnormalFlattenReference - entryPrice
+            : entryPrice - abnormalFlattenReference;
+        var normalizedAbnormalGross = Math.Round(normalizedAbnormalPoints * _snapshot.InstrumentProfile.PointValue * quantity, 2);
         var gross = historicalReplay
-            ? useRawReplayGross ? rawGross : Math.Round(replayNormalizedGrossDollars, 2)
+            ? normalizeAbnormalFlatten
+                ? normalizedAbnormalGross
+                : useRawReplayGross ? rawGross : Math.Round(replayNormalizedGrossDollars, 2)
             : rawGross;
         var pnlSource = historicalReplay
             ? classification == "Quarantine"
                 ? "HistoricalReplayQuarantineCommissionOnly"
                 : classification == "Abnormal"
-                    ? "HistoricalReplayAbnormalSafetyFlattenActualFill"
+                    ? normalizeAbnormalFlatten
+                        ? "HistoricalReplayAbnormalSafetyFlattenNormalizedV205"
+                        : "HistoricalReplayAbnormalSafetyFlattenActualFill"
                     : useRawReplayGross ? "HistoricalReplayProtectiveFlattenActualFill" : "HistoricalReplayNormalized"
             : "LiveActualFill";
+        if (normalizeAbnormalFlatten)
+        {
+            var drift = Math.Abs(exitPrice - abnormalFlattenReference);
+            AppendExecutionEvent(
+                execution,
+                "HISTORICAL_ABNORMAL_SAFETY_FLATTEN_NORMALIZED_V205",
+                "FLATTEN",
+                abnormalFlattenReference,
+                quantity,
+                $"raw={exitPrice:0.########}|reference={abnormalFlattenReference:0.########}|drift={drift:0.########}|rawGross={rawGross:0.##}|normalizedGross={normalizedAbnormalGross:0.##}");
+        }
         var commission = Math.Round(quantity * _actualCommissionPerContractRoundTrip, 2);
         var net = gross - commission;
         _liveAccountDailyNetPnlDollars += net;
@@ -5121,22 +5308,34 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                     }
 
                     var intendedTarget = ExpectedExitPrice(execution, role);
-                    var activatedTarget = target.Clone();
-                    activatedTarget.Price = intendedTarget;
-                    LogExecutionInfo($"EXEC_HISTORICAL_DORMANT_TP_ACTIVATE_V181 trade={execution.TradeId} role={role} old={target.Price:0.########} new={intendedTarget:0.########} ext={target.ExtId}");
-                    AppendExecutionEvent(execution, "HISTORICAL_DORMANT_TP_ACTIVATE_V181", role, intendedTarget, target.QuantityToFill, $"old={target.Price:0.########}|ext={target.ExtId}|ObservedTargetTouch");
-                    await ModifyOrderAsync(target, activatedTarget);
-                    SetTargetOrderForRoleV181(execution, role, activatedTarget);
+                    var observedTargetExit = new Order
+                    {
+                        Portfolio = Portfolio,
+                        Security = Security,
+                        Type = OrderTypes.Market,
+                        Direction = target.Direction,
+                        QuantityToFill = target.Unfilled > 0m ? target.Unfilled : target.QuantityToFill,
+                        TimeInForce = ReplayTimeInForce,
+                        Comment = target.Comment,
+                        AutoCancel = false
+                    };
+                    LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_SEND_V206 trade={execution.TradeId} role={role} target={intendedTarget:0.########} dormantExt={target.ExtId} qty={observedTargetExit.QuantityToFill:0.########}");
+                    AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_SEND_V206", role, intendedTarget, observedTargetExit.QuantityToFill, $"dormantExt={target.ExtId}|ObservedTargetTouch|orderType=Market");
+                    SetTargetOrderForRoleV181(execution, role, observedTargetExit);
+                    execution.HistoricalObservedTargetExitRolesV206.Add(role);
                     execution.HistoricalDormantTargetRolesV181.Remove(role);
-                    LogExecutionInfo($"EXEC_HISTORICAL_DORMANT_TP_ACTIVATED_V181 trade={execution.TradeId} role={role} target={intendedTarget:0.########} ext={activatedTarget.ExtId}");
-                    AppendExecutionEvent(execution, "HISTORICAL_DORMANT_TP_ACTIVATED_V181", role, intendedTarget, activatedTarget.QuantityToFill, $"ext={activatedTarget.ExtId}|ObservedTargetTouch");
+                    if (!await OpenProtectionOrderAsync(execution, observedTargetExit, role))
+                        return;
+                    await TryCancelExecutionOrderAsync(target, $"HistoricalObservedTargetExitV206:{role}");
+                    LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_SENT_V206 trade={execution.TradeId} role={role} target={intendedTarget:0.########} ext={observedTargetExit.ExtId}");
+                    AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_SENT_V206", role, intendedTarget, observedTargetExit.QuantityToFill, $"ext={observedTargetExit.ExtId}|ObservedTargetTouch|orderType=Market");
                 }
                 catch (Exception ex)
                 {
                     var intendedTarget = ExpectedExitPrice(execution, role);
-                    LogExecutionInfo($"EXEC_HISTORICAL_DORMANT_TP_ACTIVATE_FAILED_V181 trade={execution.TradeId} role={role} target={intendedTarget:0.########} err={ex.GetType().Name}:{ex.Message}");
-                    AppendExecutionEvent(execution, "HISTORICAL_DORMANT_TP_ACTIVATE_FAILED_V181", role, intendedTarget, TargetOrderForRoleV180(execution, role)?.QuantityToFill ?? 0m, $"{ex.GetType().Name}:{ex.Message}");
-                    NotifyLiveIssue($"DormantTargetActivate:{execution.TradeId}:{role}", $"Historical Replay dormant target activation failed. trade={execution.TradeId}, role={role}, error={ex.Message}");
+                    LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_FAILED_V206 trade={execution.TradeId} role={role} target={intendedTarget:0.########} err={ex.GetType().Name}:{ex.Message}");
+                    AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_FAILED_V206", role, intendedTarget, TargetOrderForRoleV180(execution, role)?.QuantityToFill ?? 0m, $"{ex.GetType().Name}:{ex.Message}");
+                    NotifyLiveIssue($"ObservedTargetExit:{execution.TradeId}:{role}", $"Historical Replay observed target exit failed. trade={execution.TradeId}, role={role}, error={ex.Message}");
                 }
                 finally
                 {
@@ -5514,7 +5713,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private void ScheduleGlobexCloseoutIfNeeded(OpfCandle candle)
     {
         var execution = _replayExecution;
-        if (!EnableReplayOrders ||
+        if (!ActualOrdersEnabled ||
             !IsGlobexCloseoutLockWindow(candle.Time, out var closeoutReason) ||
             execution is null ||
             execution.ExitCompleted ||
@@ -5624,7 +5823,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void ScheduleOrphanPositionFlattenIfNeeded(OpfCandle candle)
     {
-        if (!EnableReplayOrders || Portfolio is null || Security is null)
+        if (!ActualOrdersEnabled || Portfolio is null || Security is null)
             return;
 
         var position = GetCurrentAccountPosition();
@@ -5912,8 +6111,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         execution.EmergencyFlattenSubmitted = true;
         execution.EmergencyFlattenOrderSubmitted = true;
         execution.EmergencyFlattenOrder = order;
-        LogExecutionInfo($"EXEC_EMERGENCY_FLATTEN_SEND trade={execution.TradeId} reason={reason} dir={direction} qty={qty:0.########}");
-        AppendExecutionEvent(execution, "EMERGENCY_FLATTEN_SEND", "FLATTEN", 0m, qty, reason);
+        execution.EmergencyFlattenReferencePriceV205 = _lastResearchCandle?.Close ??
+            (execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice);
+        LogExecutionInfo($"EXEC_EMERGENCY_FLATTEN_SEND trade={execution.TradeId} reason={reason} dir={direction} qty={qty:0.########} reference={execution.EmergencyFlattenReferencePriceV205:0.########}");
+        AppendExecutionEvent(execution, "EMERGENCY_FLATTEN_SEND", "FLATTEN", execution.EmergencyFlattenReferencePriceV205, qty, $"{reason}|reference={execution.EmergencyFlattenReferencePriceV205:0.########}");
         await OpenOrderAsync(order);
     }
 
@@ -6660,9 +6861,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return support <= 0m ? 0m : Math.Round(entry - support, 2);
     }
 
-    private decimal CalculateAtr14(OpfCandle current)
+    private decimal CalculateAtr14(OpfCandle current) => CalculateAtr14(current, _recentCandles);
+
+    private static decimal CalculateAtr14(OpfCandle current, IEnumerable<OpfCandle> recentCandles)
     {
-        var candles = _recentCandles.Concat(new[] { current }).TakeLast(15).ToArray();
+        var candles = recentCandles.Concat(new[] { current }).TakeLast(15).ToArray();
         if (candles.Length < 2)
             return 0m;
 
@@ -7836,7 +8039,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var tradingDay = GlobexTradingDayKey(candle.Time);
         var globexLocked = IsGlobexCloseoutLockWindow(candle.Time, out _);
         hud.AppendLine($"TradingDay: {tradingDay:yyyy-MM-dd}  GlobexGate: {(globexLocked ? "LOCKED" : "OPEN")}");
-        hud.AppendLine($"ActualExec: {(EnableReplayOrders ? "ON" : "OFF")} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} active={IsReplayExecutionActive(_replayExecution)} pos={GetCurrentAccountPosition():0.##} cleanup={cleanupCount}");
+        hud.AppendLine($"ActualExec: {(ActualOrdersEnabled ? "ON" : "OFF")} dataOnly={RichBarDataCollectionOnly} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} active={IsReplayExecutionActive(_replayExecution)} pos={GetCurrentAccountPosition():0.##} cleanup={cleanupCount}");
         var dailyTarget = _snapshot?.ExecutionProfile.DailyTargetDollars ?? 0m;
         hud.AppendLine($"Today: TP={_replayTpToday} SL={_replaySlToday} Other={_replayOtherExitToday} NetR={_replayDailyR:0.00} Gross=${_replayDailyPnlDollars:0.##} AccountNet=${_liveAccountDailyNetPnlDollars:0.##} target=${dailyTarget:0.##} loss=${_actualDailyLossLimitDollars:0.##}");
         var latency = Connector?.LatencyManager;
@@ -8189,6 +8392,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public Order? RunnerTargetOrder { get; set; }
         public HashSet<string> HistoricalDormantTargetRolesV181 { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> HistoricalDormantTargetActivationPendingV181 { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> HistoricalObservedTargetExitRolesV206 { get; } = new(StringComparer.OrdinalIgnoreCase);
         public decimal BaseExitFilledQty { get; set; }
         public decimal RunnerExitFilledQty { get; set; }
         public string? BaseExitRole { get; set; }
@@ -8238,6 +8442,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public bool EmergencyFlattenSubmitted { get; set; }
         public bool EmergencyFlattenOrderSubmitted { get; set; }
         public Order? EmergencyFlattenOrder { get; set; }
+        public decimal EmergencyFlattenReferencePriceV205 { get; set; }
         public bool EmergencyFlattenResidualCheckPending { get; set; }
         public decimal EmergencyFlattenSubmittedQty { get; set; }
         public bool DuplicateExitFlattenSubmitted { get; set; }

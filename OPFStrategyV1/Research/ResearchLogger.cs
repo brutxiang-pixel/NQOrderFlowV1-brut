@@ -16,6 +16,7 @@ public sealed class ResearchLogger
     private readonly object _fileWriteSync = new();
     private readonly Dictionary<string, List<string>> _bufferedShadowTradeRows = new();
     private readonly Dictionary<string, List<string>> _bufferedKnnShadowDecisionRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedRichBarFeatureRows = new();
 
     public sealed record ActualOutcome(
         bool ActualVerified,
@@ -42,6 +43,27 @@ public sealed class ResearchLogger
         int RegimeChangeCount,
         decimal AvgBullScore,
         decimal AvgBearScore);
+
+    public sealed record RichBarFeature(
+        DateTime Time,
+        int Bar,
+        string Regime,
+        int RegimeBars,
+        decimal Open,
+        decimal High,
+        decimal Low,
+        decimal Close,
+        decimal Volume,
+        decimal Vwap,
+        decimal AverageVolume20,
+        decimal RelativeVolume20,
+        decimal CloseMinusVwap,
+        decimal Atr14,
+        decimal VwapDistanceAtr,
+        decimal BullScore,
+        decimal BearScore,
+        string BullComponents,
+        string BearComponents);
 
     public ResearchLogger(string strategyName, string logMode = "Full")
     {
@@ -770,6 +792,58 @@ public sealed class ResearchLogger
         }
 
         var header = ContextHeader("SignalID,Time,Bar,Side,ResearchPath,ModelVersion,ModelSHA256,ObservedPolicy,ObservedScoreR,ObservedGatePassed,ObservedReferenceCount,ConservativePolicy,ConservativeScoreR,ConservativeGatePassed,ConservativeReferenceCount,UnavailableReason,NumericFeatures,CategoricalFeatures");
+        foreach (var item in buffered)
+        {
+            EnsureHeader(item.Key, header);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
+    }
+
+    public void AppendRichBarFeature(string snapshotId, RichBarFeature feature)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_rich_bar_features.csv");
+        var row = string.Join(",",
+            ContextValues(snapshotId),
+            Csv(feature.Time.ToString("O")),
+            feature.Bar,
+            Csv(feature.Regime),
+            feature.RegimeBars,
+            feature.Open,
+            feature.High,
+            feature.Low,
+            feature.Close,
+            feature.Volume,
+            feature.Vwap,
+            feature.AverageVolume20,
+            feature.RelativeVolume20,
+            feature.CloseMinusVwap,
+            feature.Atr14,
+            feature.VwapDistanceAtr,
+            feature.BullScore,
+            feature.BearScore,
+            Csv(feature.BullComponents),
+            Csv(feature.BearComponents));
+        lock (_fileWriteSync)
+        {
+            if (!_bufferedRichBarFeatureRows.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                _bufferedRichBarFeatureRows[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
+    public void FlushRichBarFeatures()
+    {
+        Dictionary<string, string[]> buffered;
+        lock (_fileWriteSync)
+        {
+            buffered = _bufferedRichBarFeatureRows.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            _bufferedRichBarFeatureRows.Clear();
+        }
+
+        var header = ContextHeader("Time,Bar,Regime,RegimeBars,Open,High,Low,Close,Volume,Vwap,AverageVolume20,RelativeVolume20,CloseMinusVwap,Atr14,VwapDistanceAtr,BullScore,BearScore,BullComponents,BearComponents");
         foreach (var item in buffered)
         {
             EnsureHeader(item.Key, header);

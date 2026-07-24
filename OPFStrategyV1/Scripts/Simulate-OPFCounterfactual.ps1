@@ -24,9 +24,13 @@ param(
 
     [string]$AllowedPathSides = '',
 
+    [switch]$ExcludeUsNegativeShortPaths,
+
     [string]$OutputCsv,
 
-    [string]$TraceCsv
+    [string]$TraceCsv,
+
+    [string]$SummaryCsv
 )
 
 # Phase A calibration scaffold. Baseline mode must reproduce archived Actual trades exactly.
@@ -121,6 +125,23 @@ function Is-V189RiskBandAllowed($Row) {
     return $risk -gt [decimal]8 -and $risk -le [decimal]12
 }
 
+function Is-UsNegativeShortPath($Row) {
+    if (-not $ExcludeUsNegativeShortPaths -or $Row.Side -ne 'Short') {
+        return $false
+    }
+
+    $hour = (DateTime-Value $Row.Time).Hour
+    if ($hour -lt 13 -or $hour -gt 19) {
+        return $false
+    }
+
+    return $Row.ResearchPath -in @(
+        'ObservationConfirm',
+        'ObservationConfirm_WideStop1_5R',
+        'ZoneBirthResearch'
+    )
+}
+
 $decisions = Read-OpfCsv '*_execution_decisions.csv'
 $trades = Read-OpfCsv '*_execution_trades.csv'
 $policies = Read-OpfCsv '*_exit_policy_evaluations.csv'
@@ -188,6 +209,7 @@ $ambiguousOverrideConservativeAdjustments = 0
 $missingOverrideOutcomes = 0
 $filteredByRegime = 0
 $filteredByPathSide = 0
+$filteredByUsNegativeShortPath = 0
 
 function Add-TraceRow($Candidate, [bool]$HasActualTrade, [bool]$DivergedBefore, [datetime]$ActiveBefore, [int]$TradesBefore, [decimal]$NetBefore, [bool]$RiskBandAllowed, [string]$Disposition, [string]$OutcomeSource, [string]$ExitReason, $ExitTime, [decimal]$Gross, [decimal]$Net, [bool]$DivergedAfter, [datetime]$ActiveAfter, [int]$TradesAfter, [decimal]$NetAfter) {
     if ([string]::IsNullOrWhiteSpace($TraceCsv)) {
@@ -292,6 +314,14 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
                 $portfolioDiverged = $true
             }
             Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'FilteredByPathSide' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
+            continue
+        }
+        if (Is-UsNegativeShortPath $candidate) {
+            $filteredByUsNegativeShortPath++
+            if ($hasActualTrade) {
+                $portfolioDiverged = $true
+            }
+            Add-TraceRow $candidate $hasActualTrade $divergedBefore $activeBefore $tradesBefore $netBefore $riskBandAllowed 'FilteredByUsNegativeShortPath' '' '' $null 0 0 $portfolioDiverged $activeUntil $dailyTrades $dailyNet
             continue
         }
 
@@ -430,6 +460,7 @@ foreach ($snapshotGroup in @($candidateByKey.Values | Group-Object SnapshotID | 
             TradeID = $candidate.TradeID
             Side = $candidate.Side
             ResearchPath = $candidate.ResearchPath
+            AppliedExitPolicy = $overridePolicyName
             InitialRiskPoints = Decimal-Value $candidate.InitialRiskPoints
             Source = $source
             ExitReason = $exitReason
@@ -453,7 +484,7 @@ $actualNet = (Decimal-Value $actualGross) - [decimal]2.4 * $tradeById.Count
 $simulatedGross = ($results | Measure-Object -Property GrossDollars -Sum).Sum
 $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
 
-[pscustomobject]@{
+$summary = [pscustomobject]@{
     EvidenceDirectory = (Resolve-Path -LiteralPath $EvidenceDirectory).Path
     Mode = @(
         if ($UseV189ShortWideStopRiskBand) { 'V189ShortWideStopRiskBand' }
@@ -462,12 +493,14 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
         if ($IncludeObservationConfirmLongGateCandidates) { 'ObservationConfirmLongGateCandidates' }
         if ($excludedRegimeScoreSet.Count -gt 0) { 'ExcludedRegimeScores' }
         if ($allowedPathSideSet.Count -gt 0) { 'AllowedPathSides' }
+        if ($ExcludeUsNegativeShortPaths) { 'ExcludeUsNegativeShortPaths' }
         if (-not $UseV189ShortWideStopRiskBand -and
             -not $UseObservationConfirmShortFixed1_5R -and
             $exitPolicyOverrideByPath.Count -eq 0 -and
             -not $IncludeObservationConfirmLongGateCandidates -and
             $excludedRegimeScoreSet.Count -eq 0 -and
-            $allowedPathSideSet.Count -eq 0) { 'Baseline' }
+            $allowedPathSideSet.Count -eq 0 -and
+            -not $ExcludeUsNegativeShortPaths) { 'Baseline' }
     ) -join '+'
     ShadowTargetMode = $ShadowTargetMode
     ProtectBE075Trigger = [bool]$UseProtectBE075Trigger
@@ -477,6 +510,8 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
     ExcludedRegimeScores = $ExcludedRegimeScores
     DailyTradeLimit = $DailyTradeLimit
     AllowedPathSides = $AllowedPathSides
+    ExcludeUsNegativeShortPaths = [bool]$ExcludeUsNegativeShortPaths
+    SnapshotCount = @($candidateByKey.Values | Select-Object -ExpandProperty SnapshotID -Unique).Count
     CandidateRows = $candidateByKey.Count
     ActualTrades = $tradeById.Count
     ActualGrossDollars = [math]::Round((Decimal-Value $actualGross), 2)
@@ -500,7 +535,14 @@ $simulatedNet = ($results | Measure-Object -Property NetDollars -Sum).Sum
     MissingOverrideOutcomes = $missingOverrideOutcomes
     FilteredByRegime = $filteredByRegime
     FilteredByPathSide = $filteredByPathSide
+    FilteredByUsNegativeShortPath = $filteredByUsNegativeShortPath
     OutputCsv = $OutputCsv
     TraceRows = $traceRows.Count
     TraceCsv = $TraceCsv
-} | Format-List
+}
+
+if (-not [string]::IsNullOrWhiteSpace($SummaryCsv)) {
+    $summary | Export-Csv -LiteralPath $SummaryCsv -NoTypeInformation -Encoding utf8
+}
+
+$summary | Format-List

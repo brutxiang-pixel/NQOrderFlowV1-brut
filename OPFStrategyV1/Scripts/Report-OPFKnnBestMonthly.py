@@ -64,6 +64,7 @@ def main():
         [module.load_rows(args.h1, False), module.load_rows(args.q4, False)],
         ignore_index=True,
     )
+    numeric_features, categorical_features, rich_numeric = module.feature_set("none")
     results = []
     for mode, conservative, shrinkage in (
         ("Observed", False, 0.0),
@@ -85,6 +86,9 @@ def main():
                 ks=(40,),
                 category_weights=(0.75,),
                 shrinkages=(shrinkage,),
+                numeric_features=numeric_features,
+                categorical_features=categorical_features,
+                rich_numeric=rich_numeric,
             )
             score = predictions[("OutcomeR", 40, 0.75, shrinkage)]
             scored_parts.append(test.assign(Score=score))

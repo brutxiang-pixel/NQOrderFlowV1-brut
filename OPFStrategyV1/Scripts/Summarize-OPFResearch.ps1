@@ -1049,6 +1049,7 @@ if ($executionDecisionRows.Count -gt 0) {
             [string]::IsNullOrWhiteSpace($id) -or
                 (-not ($executionTradeRows | Where-Object { $_.TradeID -eq $id }) -and
                     -not ($quarantinedEntryTradeIds -contains $id) -and
+                    -not ($quarantinedProtectiveTradeIds -contains $id) -and
                     -not ($abortedEntryTradeIds -contains $id) -and
                     -not ($abnormalSafetyFlattenTradeIds -contains $id))
         }).Count
