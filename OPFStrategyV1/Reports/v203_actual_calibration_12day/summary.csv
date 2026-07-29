@@ -1,0 +1,5 @@
+﻿"Set","Dates","BaselineTrades","CandidateTrades","MatchedWTrades","WDirectActual","WDirectGross","MatchedNonWTrades","MatchedNonWDelta","MatchedNonWGrossDelta","AddedTrades","AddedContribution","AddedGrossContribution","RemovedTrades","RemovedContribution","RemovedGrossContribution","BaselineAccountNet","CandidateAccountNet","PortfolioDelta","RetentionPercent","Projected184","EconomicScalePassed"
+"All","12","147","146","55","488.00","488.00","54","86.50","86.50","37","-571.30","-482.50","38","-105.80","-197.00","-312.10","-414.70","-102.60","-21.02","-1573.20","False"
+"Primary","8","102","97","37","-30.00","-30.00","34","18.00","18.00","26","-275.40","-213.00","31","180.40","106.00","-860.20","-967.20","-107.00",,"-2461.00","False"
+"Q4","5","64","63","26","103.50","103.50","21","60.50","60.50","16","-227.90","-189.50","17","78.80","38.00","-602.10","-587.20","14.90","14.40","548.32","False"
+"H1","7","83","83","29","384.50","384.50","33","26.00","26.00","21","-343.40","-293.00","21","-184.60","-235.00","290.00","172.50","-117.50","-30.56","-3088.57","False"

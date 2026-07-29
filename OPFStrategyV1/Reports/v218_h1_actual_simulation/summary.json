@@ -1,0 +1,32 @@
+[
+  {
+    "candidate_rows":1356,
+    "predicted_sends":976,
+    "actual_sends":1036,
+    "predicted_secondary":168,
+    "actual_secondary":176,
+    "exact_send_identity":946,
+    "missing_actual":90,
+    "extra_predicted":30,
+    "predicted_preflight_aborted":38,
+    "actual_preflight_aborted":72,
+    "accepted":938,
+    "paired_normal":899,
+    "actual_normal":953,
+    "exit_role_match_pct":93.44,
+    "sim_gross":22362.09,
+    "sim_net":18985.29,
+    "sim_pf":1.5542,
+    "actual_normal_gross":24287.48,
+    "actual_normal_net":20856.68,
+    "diagnostics":{
+      "StaticRiskBlocked":43,
+      "ActiveBlocked":7,
+      "SecondaryGateBlocked":19,
+      "RiskCapBlocked":10,
+      "DailyCapBlocked":30,
+      "DailyLossBlocked":271,
+      "PreflightAborted":38
+    }
+  }
+]

@@ -1,0 +1,31 @@
+{
+  "Gate": "V3.0 G2 shadow opportunity Gate 0",
+  "Definition": "same-direction decision reached secondary branch during another normal trade's SL_SENT-to-exit window; self trade excluded",
+  "ProtectedWindows": 184,
+  "Opportunities": 59,
+  "H1Opportunities": 52,
+  "MonthlyOpportunities": {
+    "202601": 20,
+    "202602": 6,
+    "202603": 3,
+    "202604": 10,
+    "202605": 8,
+    "202606": 5,
+    "202607": 7
+  },
+  "JulyOpportunities": 7,
+  "EstimatedLabelReadyRate": 1.0,
+  "Thresholds": {
+    "H1Total": 120,
+    "Monthly": 12,
+    "July": 25,
+    "LabelRate": 0.8
+  },
+  "Passed": false,
+  "FailedThresholds": [
+    "H1Total",
+    "MonthlyCoverage",
+    "JulyCoverage"
+  ],
+  "NoPnlConclusion": true
+}

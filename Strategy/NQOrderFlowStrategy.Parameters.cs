@@ -62,6 +62,54 @@ namespace NQOrderFlowV1.Strategy
         [Category("Plan")]
         [DisplayName("OF Mismatch Softening Bars")]
         public int OrderFlowMismatchSofteningBars { get; set; } = 3;
+
+        [Category("Plan")]
+        [DisplayName("Enable Max Risk Points Filter")]
+        public bool EnableMaxRiskPointsFilter { get; set; } = true;
+
+        [Category("Plan")]
+        [DisplayName("Max Entry Risk Points")]
+        public decimal MaxEntryRiskPoints { get; set; } = 30m;
+
+        [Category("Plan")]
+        [DisplayName("Enable Strict Short Softened Filter")]
+        public bool EnableStrictShortSoftenedFilter { get; set; } = true;
+
+        [Category("Plan")]
+        [DisplayName("Max Short Softened Mismatch Bars")]
+        public int MaxShortSoftenedMismatchBars { get; set; } = 6;
+
+        [Category("Plan")]
+        [DisplayName("Enable Strict Long Softened Filter")]
+        public bool EnableStrictLongSoftenedFilter { get; set; } = false;
+
+        [Category("Plan")]
+        [DisplayName("Block Long Softened Exact Mismatch Bars")]
+        public int BlockLongSoftenedExactMismatchBars { get; set; } = 6;
+
+        [Category("Plan")]
+        [DisplayName("Min Long Softened High Mismatch Bars")]
+        public int MinLongSoftenedHighMismatchBars { get; set; } = 10;
+
+        [Category("Plan")]
+        [DisplayName("Enable Daily Guard")]
+        public bool EnableDailyGuard { get; set; } = false;
+
+        [Category("Plan")]
+        [DisplayName("Daily Profit Target Dollars")]
+        public decimal DailyProfitTargetDollars { get; set; } = 150m;
+
+        [Category("Plan")]
+        [DisplayName("Daily Loss Limit Dollars")]
+        public decimal DailyLossLimitDollars { get; set; } = 100m;
+
+        [Category("Plan")]
+        [DisplayName("Max Trades Per Day")]
+        public int MaxTradesPerDay { get; set; } = 3;
+
+        [Category("Plan")]
+        [DisplayName("Max Losses Per Day")]
+        public int MaxLossesPerDay { get; set; } = 2;
         // =====================================================================
         // Instrument Rules (P0)
         // =====================================================================

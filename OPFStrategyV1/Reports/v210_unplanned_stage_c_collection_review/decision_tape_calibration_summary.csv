@@ -1,0 +1,2 @@
+Snapshots,ResearchVersions,ExpectedDecisionKeys,CalibrationRows,DuplicateCalibrationRows,MatchedDecisionKeys,MissingCalibrationKeys,CalibrationOnlyKeys,DecisionMatchPct,ReasonMatchPct,ExecuteRows,ExecuteCalibrationCoveragePct,ExecuteTradeIdMatchPct,MissingOriginalDecisionRows,EntryBarStopRows,Over36BarRows,ExecutionTrades,EntrySend,CleanupDone,DangerEvents,CollectionGatePassed
+2,OPF_RESEARCH_2.10,444,444,0,444,0,0,100.0,100.0,16,100.0,100.0,0,92,0,16,16,16,0,True

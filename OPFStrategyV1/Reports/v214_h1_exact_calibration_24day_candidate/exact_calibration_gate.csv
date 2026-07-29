@@ -1,0 +1,2 @@
+WorstDelayMinutes,ImprovementRetentionPct,ExactVsCoarseCandidatePct,Lower95GrossRatioPct,Lower95ProjectedH1Gross,ProjectedPF,Lower95ProjectedJanFebGross,Lower95ProjectedMarAprGross,Lower95ProjectedMayJunGross,PeakConcurrentRisk,RiskCapViolations,ExactCalibrationPassed
+10,67.22,112.41,77.88,19087.35,1.4171,4240.28,6111.07,8736.0,275.28,0,False

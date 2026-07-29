@@ -130,6 +130,48 @@ namespace NQOrderFlowV1.Strategy
                 }
 
                 // ===== 3) 数量对齐（ENTRY用Ceil，确保>=期望且满足min）=====
+                if (!TrySelectStop(
+                        bar,
+                        isLong,
+                        limit,
+                        zone,
+                        usedShadow,
+                        out var preStop,
+                        out _,
+                        out _,
+                        out var preRiskPoints,
+                        out var preFailReason,
+                        out var preFailDetail))
+                {
+                    switch (preFailReason)
+                    {
+                        case StopSelectFailReason.TooSmall:
+                            SetBlock(bar, TriggerBlockReason.RiskTicksTooSmall, preFailDetail);
+                            break;
+                        case StopSelectFailReason.TooLarge:
+                        case StopSelectFailReason.MixedOutOfRange:
+                            SetBlock(bar, TriggerBlockReason.RiskTicksTooLarge, preFailDetail);
+                            break;
+                        default:
+                            SetBlock(bar, TriggerBlockReason.RiskInvalid, preFailDetail);
+                            break;
+                    }
+
+                    return;
+                }
+
+                preStop = AlignStopToTick(preStop, isLong, bar);
+                preRiskPoints = Math.Abs(limit - preStop);
+                if (ShouldBlockEntryByV128Filters(
+                        bar,
+                        side,
+                        preRiskPoints,
+                        _confirmZoneKey,
+                        "LIVE_LIMIT",
+                        _ofSoftenedForEntry,
+                        _ofSoftenedMismatchBars))
+                    return;
+
                 var rawQty = GetRawEntryQuantity();
                 var qty = AlignQtyCeilForEntry(rawQty, bar, role: "ENTRY");
                 AppendLog($"QTY_ALIGN bar={bar} role=ENTRY raw={rawQty:0.########} aligned={qty:0.########} step={GetQtyStep(bar):0.########} min={GetMinQty(bar):0.########}");
@@ -167,6 +209,8 @@ namespace NQOrderFlowV1.Strategy
                     AnchorUsed = anchorUsed,
                     OfScore = _ofArmedScore,
                     OfText = _ofArmedText,
+                    OfSoftened = _ofSoftenedForEntry,
+                    OfMismatchBars = _ofSoftenedMismatchBars,
                     LockedQScore = qLock,
                     EntryOrder = entryOrder
                 };
@@ -321,6 +365,49 @@ namespace NQOrderFlowV1.Strategy
                 }
             }
 
+            var preEntry = RoundToTick(cur.Close, bar);
+            if (!TrySelectStop(
+                    bar,
+                    isLong,
+                    preEntry,
+                    zone,
+                    usedShadow,
+                    out var preStop,
+                    out _,
+                    out _,
+                    out var preRiskPoints,
+                    out var preFailReason,
+                    out var preFailDetail))
+            {
+                switch (preFailReason)
+                {
+                    case StopSelectFailReason.TooSmall:
+                        SetBlock(bar, TriggerBlockReason.RiskTicksTooSmall, preFailDetail);
+                        break;
+                    case StopSelectFailReason.TooLarge:
+                    case StopSelectFailReason.MixedOutOfRange:
+                        SetBlock(bar, TriggerBlockReason.RiskTicksTooLarge, preFailDetail);
+                        break;
+                    default:
+                        SetBlock(bar, TriggerBlockReason.RiskInvalid, preFailDetail);
+                        break;
+                }
+
+                return;
+            }
+
+            preStop = AlignStopToTick(preStop, isLong, bar);
+            preRiskPoints = Math.Abs(preEntry - preStop);
+            if (ShouldBlockEntryByV128Filters(
+                    bar,
+                    side,
+                    preRiskPoints,
+                    _confirmZoneKey,
+                    "LIVE_MARKET",
+                    _ofSoftenedForEntry,
+                    _ofSoftenedMismatchBars))
+                return;
+
             var tradeId = CreateLiveTradeId(bar, cur);
             var zoneShadow = CloneZone(zone);
 
@@ -350,6 +437,8 @@ namespace NQOrderFlowV1.Strategy
                 AnchorUsed = ZoneEntryAnchor.Mid,
                 OfScore = _ofArmedScore,
                 OfText = _ofArmedText,
+                OfSoftened = _ofSoftenedForEntry,
+                OfMismatchBars = _ofSoftenedMismatchBars,
                 LockedQScore = qLock,
                 EntryOrder = entryOrder
             };

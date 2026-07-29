@@ -1,0 +1,17 @@
+Variant,H1Trades,H1Gross,H1Net,H1NetDelta,H1PF,PositiveWeeks,WorstWeek,MaxDD,PositiveDeltaMonths,NegativeDeltaMonths,Delta_2026-01,Delta_2026-02,Delta_2026-03,Delta_2026-04,Delta_2026-05,Delta_2026-06,Blocked_WeeklyLong,Blocked_WeeklyLongDrawdown,Blocked_WeeklyShort,Blocked_SecondaryGate,Blocked_Active,Blocked_DailyCap,Blocked_DailyLoss,Blocked_CombinedRisk,Blocked_PreflightAborted
+LongOCRegimeMin=8;Breakaway=Both;ShortOCRegime2=False,846,27840.84,24795.24,1520.92,1.7755,22,-634.4,1922.9,6,0,570.62,174.8,303.5,32.4,137.7,301.9,85,0,0,8,0,7,206,0,204
+LongOCRegimeMin=5;Breakaway=Both;ShortOCRegime2=False,857,27839.62,24754.42,1480.1,1.7664,22,-634.4,1922.9,5,1,307.0,174.8,413.2,-10.8,361.1,234.8,85,0,0,8,0,12,208,0,186
+LongOCRegimeMin=3;Breakaway=Both;ShortOCRegime2=False,865,27826.12,24712.12,1437.8,1.7621,22,-634.4,1882.9,6,0,188.2,295.2,349.1,4.6,365.9,234.8,87,0,0,8,0,13,208,0,175
+LongOCRegimeMin=5;Breakaway=VwapSide;ShortOCRegime2=False,863,27761.12,24654.32,1380.0,1.7624,22,-634.4,1927.0,5,1,309.9,174.8,320.4,-15.4,361.1,229.2,85,0,0,8,0,14,208,0,178
+LongOCRegimeMin=3;Breakaway=VwapSide;ShortOCRegime2=False,871,27747.62,24612.02,1337.7,1.7581,22,-634.4,1887.0,5,0,191.1,295.2,256.3,0.0,365.9,229.2,87,0,0,8,0,15,208,0,167
+LongOCRegimeMin=8;Breakaway=VwapSide;ShortOCRegime2=False,852,27663.34,24596.14,1321.82,1.7673,22,-634.4,1927.0,5,1,573.52,174.8,210.7,-71.2,137.7,296.3,85,0,0,8,0,8,206,0,197
+LongOCRegimeMin=8;Breakaway=QualityRisk;ShortOCRegime2=False,851,27342.84,24279.24,1004.92,1.7511,22,-634.4,2053.6,6,0,570.62,177.2,47.3,32.4,29.1,148.3,85,0,0,8,0,7,206,0,199
+LongOCRegimeMin=5;Breakaway=QualityRisk;ShortOCRegime2=False,862,27341.62,24238.42,964.1,1.7424,22,-634.4,2053.6,5,1,307.0,177.2,157.0,-10.8,252.5,81.2,85,0,0,8,0,12,208,0,181
+LongOCRegimeMin=Off;Breakaway=Both;ShortOCRegime2=False,862,27323.12,24219.92,945.6,1.748,22,-665.1,1982.2,5,1,-2.9,62.3,349.0,9.1,293.3,234.8,95,0,0,8,0,17,210,0,164
+LongOCRegimeMin=3;Breakaway=QualityRisk;ShortOCRegime2=False,870,27328.12,24196.12,921.8,1.7382,22,-634.4,2013.6,6,0,188.2,297.6,92.9,4.6,257.3,81.2,87,0,0,8,0,13,208,0,170
+LongOCRegimeMin=Off;Breakaway=VwapSide;ShortOCRegime2=False,868,27240.12,24115.32,841.0,1.7438,22,-665.1,1986.3,4,0,0.0,62.3,256.2,0.0,293.3,229.2,95,0,0,8,0,18,210,0,157
+LongOCRegimeMin=5;Breakaway=Off;ShortOCRegime2=False,873,26956.12,23813.32,539.0,1.7242,22,-634.4,2061.8,4,1,309.9,112.5,64.2,-15.4,67.8,0.0,85,0,0,8,0,14,208,0,168
+LongOCRegimeMin=3;Breakaway=Off;ShortOCRegime2=False,881,26942.62,23771.02,496.7,1.7201,22,-634.4,2021.8,4,0,191.1,232.9,0.1,0.0,72.6,0.0,87,0,0,8,0,15,208,0,157
+LongOCRegimeMin=8;Breakaway=Off;ShortOCRegime2=False,862,26858.34,23755.14,480.82,1.7286,22,-634.4,2061.8,3,3,573.52,112.5,-45.5,-71.2,-155.6,67.1,85,0,0,8,0,8,206,0,187
+LongOCRegimeMin=Off;Breakaway=QualityRisk;ShortOCRegime2=False,867,26825.12,23703.92,429.6,1.7244,22,-665.1,2112.9,5,1,-2.9,64.7,92.8,9.1,184.7,81.2,95,0,0,8,0,17,210,0,159
+LongOCRegimeMin=Off;Breakaway=Off;ShortOCRegime2=False,878,26435.12,23274.32,0.0,1.7062,22,-665.1,2121.1,0,0,0.0,0.0,0.0,0.0,0.0,0.0,95,0,0,8,0,18,210,0,147

@@ -343,6 +343,24 @@ namespace NQOrderFlowV1.Strategy
                 // stop/target align
 
                 stop = AlignStopToTick(stop, isLong, _lastCalcBar);
+                riskPoints = Math.Abs(entry - stop);
+                var tick = GetTickSize(_lastCalcBar, "LiveFillRisk.tick");
+                riskTicks = tick > 0m ? (int)Math.Round(riskPoints / tick) : riskTicks;
+                if (ShouldBlockEntryByV128Filters(
+                        Math.Max(0, _lastCalcBar),
+                        side,
+                        riskPoints,
+                        _live.ZoneKey,
+                        "LIVE_FILL",
+                        _live.OfSoftened,
+                        _live.OfMismatchBars))
+                {
+                    AppendLog($"LIVE_FILL_RISK_FLATTEN tradeId={_live.TradeId} side={side} riskPts={riskPoints:0.##} entry={entry:0.########} stop={stop:0.########}");
+                    if (LiveFlattenOnCriticalBracketFailure)
+                        await FlattenPositionMarketAsync().ConfigureAwait(false);
+                    return;
+                }
+
                 var target = ComputeTargetFromRiskTicks(entry, isLong, riskTicks, RiskRewardR, _lastCalcBar);
                 target = AlignTargetToTick(target, isLong, _lastCalcBar);
 
@@ -418,8 +436,11 @@ namespace NQOrderFlowV1.Strategy
                         Zone = _live.ZoneKey,
                         OfScore = _live.OfScore,
                         OfText = _live.OfText,
+                        OfSoftened = _live.OfSoftened,
+                        OfMismatchBars = _live.OfMismatchBars,
                     };
                     _planState = PlanState.InPosition;
+                    LogWideRiskIfNeeded(_lastCalcBar, _activePlan);
 
                     // after we are in position, clear confirm session
                     ResetConfirm(_lastCalcBar, "已成交入场(LIVE)");

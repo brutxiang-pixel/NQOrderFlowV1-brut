@@ -1,0 +1,2 @@
+Sample,Policy,DailyCap,DailyLoss,LongDrawdown,ShortMetric,ShortThreshold,Trades,Gross,Net,PF,PositiveWeeks,WeekCount,WorstWeek,MaxDD,SecondaryGross,BreakawayShortGross,AllMonthsPositive,WeeklyLong,WeeklyLongDrawdown,WeeklyShort,SecondaryGate,Active,CombinedRisk,PreflightAborted
+H1,Cap15_Loss250_LongDDOff_ShortOff_PrimaryOff_ZoneQ45_PrimaryShortQOff,18,210,,Off,,878,26435.12,23274.32,1.7062,22,27,-665.1,2121.1,6036.5,4133.0,True,95,0,0,8,0,0,147

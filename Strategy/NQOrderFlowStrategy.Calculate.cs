@@ -257,6 +257,10 @@ namespace NQOrderFlowV1.Strategy
             _tradeLosses = 0;
             _netR = 0m;
             _netPnLDollar = 0m;
+            _dailyGuardDate = DateTime.MinValue;
+            _dailyGuardTrades = 0;
+            _dailyGuardLosses = 0;
+            _dailyGuardPnLDollar = 0m;
 
             _barBlockReason = TriggerBlockReason.None;
             _barBlockDetail = "-";

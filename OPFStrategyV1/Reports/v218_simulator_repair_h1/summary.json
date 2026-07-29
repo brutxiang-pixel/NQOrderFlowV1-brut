@@ -1,0 +1,32 @@
+[
+  {
+    "sends":1023,
+    "actual_sends":1036,
+    "secondary":174,
+    "actual_secondary":176,
+    "match":992,
+    "missing":44,
+    "extra":31,
+    "identity_pct":95.75,
+    "aborts":83,
+    "actual_aborts":72,
+    "accepted":940,
+    "actual_normal":953,
+    "paired":900,
+    "role_match_pct":93.56,
+    "gross":22873.09,
+    "actual_normal_gross":24287.48,
+    "net":19489.09,
+    "actual_normal_net":20856.68,
+    "pf":1.5663,
+    "diag":{
+      "StaticRiskBlocked":0,
+      "ActiveBlocked":8,
+      "SecondaryGateBlocked":15,
+      "RiskCapBlocked":0,
+      "DailyCapBlocked":31,
+      "DailyLossBlocked":279,
+      "PreflightAborted":83
+    }
+  }
+]

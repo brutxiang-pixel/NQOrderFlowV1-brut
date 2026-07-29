@@ -1,0 +1,2 @@
+ActualNormalTrades,SimulatedNormalTrades,IdentityMatched,IdentityMatchPct,BlindExitRoleMatchPct,ActualGross,BlindPredictedGross,GrossDelta,GrossAbsErrorPerDay,MedianAbsDailyGrossError,MaxAbsDailyGrossError,RelativeGrossErrorPct,GrossScaleDenominator,ScaleRelativeGrossErrorPct,MaxDailyTradeCountError,PathEndFallbacks,FillAnchoredCandidates,LifecycleDefects,GateProfile,ConnectorGatePassed
+207,207,207,100.0,96.62,4735.99,5091.92,355.93,14.83,6.67,378.01,7.52,8440.01,4.22,0,341,207,0,validation,True

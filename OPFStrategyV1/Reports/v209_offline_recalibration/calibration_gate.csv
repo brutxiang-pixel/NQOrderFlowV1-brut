@@ -1,0 +1,2 @@
+ActualRuns,UniqueTradingDates,ActualNormalTrades,IdentityMatched,OldTapeMissingActualCandidates,RawDecisionOnlyActualCandidates,SimulationGross,ActualGross,GrossDelta,RichCoverageGapTrades,CalibrationGatePassed
+8,6,75,61,8,8,2415.25,1622.0,-793.25,17,False

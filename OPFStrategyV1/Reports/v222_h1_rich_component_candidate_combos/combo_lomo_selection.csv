@@ -1,0 +1,7 @@
+TestMonth,ChosenVariant,TrainNet,ChosenTestNet,BaselineTestNet,TestNetDelta
+2026-01,LongOCRegimeMin=3;Breakaway=Both;ShortOCRegime2=False,20734.74,3977.38,3789.18,188.2
+2026-02,LongOCRegimeMin=8;Breakaway=Both;ShortOCRegime2=False,22679.54,2115.7,1940.9,174.8
+2026-03,LongOCRegimeMin=8;Breakaway=Both;ShortOCRegime2=False,22287.24,2508.0,2204.5,303.5
+2026-04,LongOCRegimeMin=5;Breakaway=Both;ShortOCRegime2=False,19441.88,5312.54,5323.34,-10.8
+2026-05,LongOCRegimeMin=8;Breakaway=Both;ShortOCRegime2=False,19356.94,5438.3,5300.6,137.7
+2026-06,LongOCRegimeMin=5;Breakaway=Both;ShortOCRegime2=False,19803.82,4950.6,4715.8,234.8

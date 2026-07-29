@@ -241,6 +241,8 @@ namespace NQOrderFlowV1.Strategy
         private int _mismatchCount = 0;
         private string _mismatchDir = "";  // "BULL"/"BEAR" - OF方向 during consecutive mismatch
         private string _ofArmedText = "-";
+        private bool _ofSoftenedForEntry = false;
+        private int _ofSoftenedMismatchBars = 0;
 
         // =========================
         // 入场：虚拟限价（回撤成交）
@@ -262,6 +264,8 @@ namespace NQOrderFlowV1.Strategy
 
             public int OfScore { get; init; }
             public string OfText { get; init; } = "-";
+            public bool OfSoftened { get; init; }
+            public int OfMismatchBars { get; init; }
 
             public int LockedQScore { get; init; } = -1;
 
@@ -293,6 +297,8 @@ namespace NQOrderFlowV1.Strategy
 
             public int OfScore { get; init; }
             public string OfText { get; init; } = "-";
+            public bool OfSoftened { get; init; }
+            public int OfMismatchBars { get; init; }
             public int LockedQScore { get; init; }
 
             public Order? EntryOrder { get; set; }
@@ -334,6 +340,11 @@ namespace NQOrderFlowV1.Strategy
         private int _lastHudTradeCount = -1;
         private readonly List<string> _pendingTradeCsvLines = new();
 
+        private DateTime _dailyGuardDate = DateTime.MinValue;
+        private int _dailyGuardTrades = 0;
+        private int _dailyGuardLosses = 0;
+        private decimal _dailyGuardPnLDollar = 0m;
+
         // =========================
         // TradePlan
         // =========================
@@ -371,6 +382,8 @@ namespace NQOrderFlowV1.Strategy
 
             public int OfScore { get; init; }
             public string OfText { get; init; } = "-";
+            public bool OfSoftened { get; init; }
+            public int OfMismatchBars { get; init; }
 
             public string ExitReason { get; set; } = "-";
             public int? ExitBar { get; set; }
@@ -396,9 +409,12 @@ namespace NQOrderFlowV1.Strategy
             public decimal PnLDollar { get; init; }
 
             public string ExitReason { get; init; } = "-";
+            public string ExitClass { get; init; } = "-";
 
             public int OfScore { get; init; }
             public string OfText { get; init; } = "-";
+            public bool OfSoftened { get; init; }
+            public int OfMismatchBars { get; init; }
 
             public ZoneKey Zone { get; init; } = new(ZoneType.BullishFVG, 0, 0, 0, 0);
         }
@@ -444,6 +460,8 @@ namespace NQOrderFlowV1.Strategy
             RiskInvalid,
             RiskTicksTooSmall,
             RiskTicksTooLarge,
+
+            DailyGuardBlocked,
 
             LiveOrderPending,
             LiveOrderError

@@ -1,0 +1,2 @@
+Candidates,UniqueCandidateKeys,DuplicateDecisionEvents,ShadowJoinPct,Execute,ActiveTrade,DailyTradeLimit,LiveDailyLoss,ExitTimeFallbacks,ActiveStateMatchPct,LifecycleCompatiblePct,DailyTradeCountMatchPct,DailyPnlMatchPct
+1930,1930,0,100.0,1075,635,148,72,361,88.8601,99.8964,99.8446,85.6995

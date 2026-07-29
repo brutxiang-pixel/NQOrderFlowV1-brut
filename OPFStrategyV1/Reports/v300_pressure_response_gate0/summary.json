@@ -1,0 +1,22 @@
+{
+  "Gate": "V3.0 aggressor pressure-price response Gate 0",
+  "Data": "OnNewTrade raw Buy/Sell volume joined to same-bar Rich OHLC; DOM excluded",
+  "Proxy": "abs(delta share)>=10% with close in opposite outer third",
+  "ImportantLimitation": "bar aggregate distinguishes pressure response only; it cannot distinguish absorption from intrabar exhaustion",
+  "H1OpposingPressureResponse": 29,
+  "JulyOpposingPressureResponse": 1,
+  "Thresholds": {
+    "H1": 90,
+    "July": 20,
+    "H1Day": 8,
+    "JulyDay": 5
+  },
+  "Passed": false,
+  "FailedThresholds": [
+    "H1 response density",
+    "July response density",
+    "H1 day coverage",
+    "July day coverage"
+  ],
+  "NoPnlConclusion": true
+}

@@ -1,0 +1,2 @@
+TradingDays,Q4Days,H1Days,RichRows,RichDuplicateKeys,ExecutionDecisionMatched,ExecutionDecisionTotal,ExitPolicyMatched,ExitPolicyTotal,AvailableShadowMatched,AvailableShadowTotal,MatchedCandidateInitializationZeros,ComponentJsonErrors
+184,62,122,49723,0,46644,46644,315146,315146,2283,2283,0,0

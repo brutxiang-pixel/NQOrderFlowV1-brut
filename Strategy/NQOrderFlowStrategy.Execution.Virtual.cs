@@ -96,6 +96,9 @@ namespace NQOrderFlowV1.Strategy
                 return;
             }
 
+            if (ShouldBlockByDailyGuard(bar, cur.Time))
+                return;
+
             if (EnableCooldown && _cooldownUntilBar >= 0 && bar < _cooldownUntilBar)
             {
                 var left = _cooldownUntilBar - bar;
@@ -234,6 +237,8 @@ namespace NQOrderFlowV1.Strategy
                 _ofArmedBullWeight = _lastOrderFlow.BullWeight;
                 _ofArmedBearWeight = _lastOrderFlow.BearWeight;
                 _ofArmedText = _lastOrderFlow.Text;
+                _ofSoftenedForEntry = false;
+                _ofSoftenedMismatchBars = 0;
 
                 AppendLog($"OF_ARMED bar={bar} score={_ofArmedScore}/4 text={_ofArmedText} zone={zone.ToShortText()}");
             }
@@ -256,6 +261,8 @@ namespace NQOrderFlowV1.Strategy
                         AppendLog($"OF_MISMATCH_RESET bar={bar} count={_mismatchCount} dir={_mismatchDir} -> bias aligned");
                         _mismatchCount = 0;
                         _mismatchDir = "";
+                        _ofSoftenedForEntry = false;
+                        _ofSoftenedMismatchBars = 0;
                     }
                 }
 
@@ -267,6 +274,8 @@ namespace NQOrderFlowV1.Strategy
                     var softenBars = Math.Max(1, OrderFlowMismatchSofteningBars);
                     if (EnableOrderFlowMismatchSoftening && _mismatchCount >= softenBars)
                     {
+                        _ofSoftenedForEntry = true;
+                        _ofSoftenedMismatchBars = _mismatchCount;
                         AppendLog($"OF_BEAR_SOFTEN bar={bar} n={_mismatchCount} -> skip mismatch, allow entry");
                     }
                     else
@@ -289,6 +298,8 @@ namespace NQOrderFlowV1.Strategy
                     var softenBars = Math.Max(1, OrderFlowMismatchSofteningBars);
                     if (EnableOrderFlowMismatchSoftening && _mismatchCount >= softenBars)
                     {
+                        _ofSoftenedForEntry = true;
+                        _ofSoftenedMismatchBars = _mismatchCount;
                         AppendLog($"OF_BULL_SOFTEN bar={bar} n={_mismatchCount} -> skip mismatch, allow entry");
                     }
                     else
@@ -370,6 +381,8 @@ namespace NQOrderFlowV1.Strategy
                         Zone = _confirmZoneKey,
                         OfScore = _ofArmedScore,
                         OfText = _ofArmedText,
+                        OfSoftened = _ofSoftenedForEntry,
+                        OfMismatchBars = _ofSoftenedMismatchBars,
                         LockedQScore = qLock,
                         CancelLogged = false
                     };
@@ -542,6 +555,16 @@ namespace NQOrderFlowV1.Strategy
                 }
 
                 stop = AlignStopToTick(stop, isLong, bar);
+                if (ShouldBlockEntryByV128Filters(
+                        bar,
+                        side,
+                        riskPoints,
+                        _confirmZoneKey,
+                        "VIRTUAL",
+                        _pendingEntry.OfSoftened,
+                        _pendingEntry.OfMismatchBars))
+                    return;
+
                 var target = ComputeTargetFromRiskTicks(entry, isLong, riskTicks, RiskRewardR, bar);
                 target = AlignTargetToTick(target, isLong, bar);
 
@@ -556,13 +579,16 @@ namespace NQOrderFlowV1.Strategy
                     InitialRiskPoints = riskPoints,
                     Zone = _confirmZoneKey,
                     OfScore = _pendingEntry.OfScore,
-                    OfText = _pendingEntry.OfText
+                    OfText = _pendingEntry.OfText,
+                    OfSoftened = _pendingEntry.OfSoftened,
+                    OfMismatchBars = _pendingEntry.OfMismatchBars
                 };
 
                 _planState = PlanState.InPosition;
+                LogWideRiskIfNeeded(bar, _activePlan);
 
                 AppendLog($"ENTRY_ORDER_FILLED bar={bar} side={side} entry={entry:0.########} limit={limitPrice:0.########} anchor={_pendingEntry.AnchorText} mode=VIRTUAL -> PLAN_CREATE");
-                AppendLog($"PLAN_CREATE bar={bar} side={side} entry={entry:0.########} stop={stop:0.########} tp={target:0.########} riskTicks={riskTicks} of={_activePlan.OfScore}/4 zone={FormatZoneKeyCN(_activePlan.Zone)} src={stopSource} qLock={(qLock < 0 ? "-" : qLock.ToString())}/10 mode=VIRTUAL");
+                AppendLog($"PLAN_CREATE bar={bar} side={side} entry={entry:0.########} stop={stop:0.########} tp={target:0.########} riskTicks={riskTicks} of={_activePlan.OfScore}/4 ofSoftened={_activePlan.OfSoftened} mismatchBars={_activePlan.OfMismatchBars} zone={FormatZoneKeyCN(_activePlan.Zone)} src={stopSource} qLock={(qLock < 0 ? "-" : qLock.ToString())}/10 mode=VIRTUAL");
 
                 _lastTriggeredConfirmStartBar = _confirmStartBar;
                 _lastTriggeredZoneKey = _confirmZoneKey;
@@ -685,6 +711,16 @@ namespace NQOrderFlowV1.Strategy
             }
 
             stop = AlignStopToTick(stop, isLong, bar);
+            if (ShouldBlockEntryByV128Filters(
+                    bar,
+                    side,
+                    riskPoints,
+                    _confirmZoneKey,
+                    "VIRTUAL_MARKET",
+                    _ofSoftenedForEntry,
+                    _ofSoftenedMismatchBars))
+                return;
+
             var target = ComputeTargetFromRiskTicks(entry, isLong, riskTicks, RiskRewardR, bar);
             target = AlignTargetToTick(target, isLong, bar);
 
@@ -699,13 +735,16 @@ namespace NQOrderFlowV1.Strategy
                 InitialRiskPoints = riskPoints,
                 Zone = _confirmZoneKey,
                 OfScore = _ofArmedScore,
-                OfText = _ofArmedText
+                OfText = _ofArmedText,
+                OfSoftened = _ofSoftenedForEntry,
+                OfMismatchBars = _ofSoftenedMismatchBars
             };
 
             _planState = PlanState.InPosition;
+            LogWideRiskIfNeeded(bar, _activePlan);
 
             AppendLog($"ENTRY_ORDER_FILLED bar={bar} side={side} entry={entry:0.########} mode=VIRTUAL_MARKET -> PLAN_CREATE");
-            AppendLog($"PLAN_CREATE bar={bar} side={side} entry={entry:0.########} stop={stop:0.########} tp={target:0.########} riskTicks={riskTicks} of={_activePlan.OfScore}/4 zone={FormatZoneKeyCN(_activePlan.Zone)} src={stopSource} qLock={(qLock < 0 ? "-" : qLock.ToString())}/10 mode=VIRTUAL_MARKET");
+            AppendLog($"PLAN_CREATE bar={bar} side={side} entry={entry:0.########} stop={stop:0.########} tp={target:0.########} riskTicks={riskTicks} of={_activePlan.OfScore}/4 ofSoftened={_activePlan.OfSoftened} mismatchBars={_activePlan.OfMismatchBars} zone={FormatZoneKeyCN(_activePlan.Zone)} src={stopSource} qLock={(qLock < 0 ? "-" : qLock.ToString())}/10 mode=VIRTUAL_MARKET");
 
             _lastTriggeredConfirmStartBar = _confirmStartBar;
             _lastTriggeredZoneKey = _confirmZoneKey;
@@ -882,13 +921,16 @@ namespace NQOrderFlowV1.Strategy
                     if (EnableLiveOrders && _live is not null && _live.TargetOrder is not null)
                     {
                         var old = _live.TargetOrder;
-                        var neu = old.Clone();
-                        neu.Price = newTarget;
-                        EnqueueOrderAction("DynamicTP_ModifyTarget", async () =>
+                        if (IsLiveOrderModifiable(old, "DynamicTP_ModifyTarget"))
                         {
-                            await ModifyOrderAsync(old, neu);
-                        });
-                        _live.TargetPrice = newTarget;
+                            var neu = old.Clone();
+                            neu.Price = newTarget;
+                            EnqueueOrderAction("DynamicTP_ModifyTarget", async () =>
+                            {
+                                await ModifyOrderAsync(old, neu);
+                            });
+                            _live.TargetPrice = newTarget;
+                        }
                     }
                 }
             }
@@ -1009,17 +1051,30 @@ namespace NQOrderFlowV1.Strategy
                         if (EnableLiveOrders && _live is not null && _live.TargetOrder is not null)
                         {
                             var old = _live.TargetOrder;
-                            var neu = old.Clone();
-                            neu.Price = newTP;
-                            EnqueueOrderAction("TrailTP_ModifyTarget", async () =>
+                            if (IsLiveOrderModifiable(old, "TrailTP_ModifyTarget"))
                             {
-                                await ModifyOrderAsync(old, neu);
-                            });
-                            _live.TargetPrice = newTP;
+                                var neu = old.Clone();
+                                neu.Price = newTP;
+                                EnqueueOrderAction("TrailTP_ModifyTarget", async () =>
+                                {
+                                    await ModifyOrderAsync(old, neu);
+                                });
+                                _live.TargetPrice = newTP;
+                            }
                         }
                     }
                 }
             }
+        }
+
+        private bool IsLiveOrderModifiable(Order order, string tag)
+        {
+            var state = order.State.ToString();
+            if (string.Equals(state, "Active", StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            AppendLog($"LIVE_MODIFY_SKIP tag={tag} extId={order.ExtId} state={state} type={order.Type} price={order.Price:0.########} trig={order.TriggerPrice:0.########}");
+            return false;
         }
 
         private void ExitPlan(int bar, string reason, decimal exitPrice, DateTime exitTime)
@@ -1031,7 +1086,8 @@ namespace NQOrderFlowV1.Strategy
             _activePlan.ExitReason = reason;
             _activePlan.ExitPrice = exitPrice;
 
-            AppendLog($"PLAN_EXIT bar={bar} reason={reason} exit={exitPrice:0.########} side={_activePlan.Side} entry={_activePlan.Entry:0.########} stop={_activePlan.Stop:0.########} tp={_activePlan.Target:0.########} mode={(EnableLiveOrders ? "LIVE" : "VIRTUAL")}");
+            var exitClass = ClassifyExit(_activePlan, reason, exitPrice);
+            AppendLog($"PLAN_EXIT bar={bar} reason={reason} exitClass={exitClass} exit={exitPrice:0.########} side={_activePlan.Side} entry={_activePlan.Entry:0.########} stop={_activePlan.Stop:0.########} tp={_activePlan.Target:0.########} mode={(EnableLiveOrders ? "LIVE" : "VIRTUAL")}");
 
             AddTradeRecord(_activePlan, bar, exitPrice, reason);
 
@@ -1072,31 +1128,35 @@ skipHudSummary:
                 var r = risk > 0m ? (plan.Side == "LONG" ? (exitPrice - plan.Entry) / risk : (plan.Entry - exitPrice) / risk) : 0m;
                 var tSz = GetTickSize(bar, "csv.pnl");
                 var pnlDollar = tSz > 0m ? Math.Round(r * (risk / tSz) * (TickValuePerContract <= 0m ? 0.5m : TickValuePerContract) * Math.Max(1, Contracts), (int)2) : 0m;
+                var exitClass = ClassifyExitFromR(plan.ExitReason ?? "-", r);
                 var csvLine = string.Join(",",
-                    exitTime.ToString("yyyy-MM-dd HH:mm:ss"),
-                    bar.ToString(),
-                    plan.Side,
-                    plan.Entry.ToString("F2"),
-                    plan.Stop.ToString("F2"),
-                    plan.Target.ToString("F2"),
-                    exitPrice.ToString("F2"),
-                    plan.ExitReason ?? "-",
-                    risk.ToString("F2"),
-                    r.ToString("F2"),
-                    pnlDollar.ToString("F2"),
-                    mode,
-                    plan.OfScore.ToString(),
-                    "\"\"" + plan.OfText + "\"\"",
-                    plan.Zone.Type.ToString(),
-                    plan.Zone.Low.ToString("F2"),
-                    plan.Zone.High.ToString("F2")
+                    CsvCell(exitTime.ToString("yyyy-MM-dd HH:mm:ss")),
+                    CsvCell(bar.ToString()),
+                    CsvCell(plan.Side),
+                    CsvCell(plan.Entry.ToString("F2")),
+                    CsvCell(plan.Stop.ToString("F2")),
+                    CsvCell(plan.Target.ToString("F2")),
+                    CsvCell(exitPrice.ToString("F2")),
+                    CsvCell(plan.ExitReason ?? "-"),
+                    CsvCell(exitClass),
+                    CsvCell(risk.ToString("F2")),
+                    CsvCell(r.ToString("F2")),
+                    CsvCell(pnlDollar.ToString("F2")),
+                    CsvCell(mode),
+                    CsvCell(plan.OfScore.ToString()),
+                    CsvCell(plan.OfSoftened ? "true" : "false"),
+                    CsvCell(plan.OfMismatchBars.ToString()),
+                    CsvCell(NormalizeOfTextForCsv(plan.OfText)),
+                    CsvCell(plan.Zone.Type.ToString()),
+                    CsvCell(plan.Zone.Low.ToString("F2")),
+                    CsvCell(plan.Zone.High.ToString("F2"))
                 );
 
                 var lines = new List<string>(_pendingTradeCsvLines.Count + 1);
                 lines.AddRange(_pendingTradeCsvLines);
                 lines.Add(csvLine);
 
-                var header = "Time,Bar,Side,Entry,Stop,TP,ExitPrice,ExitReason,RiskPts,R,PnL$,Mode,OFScore,OFText,ZoneType,ZoneLow,ZoneHigh";
+                var header = "Time,Bar,Side,Entry,Stop,TP,ExitPrice,ExitReason,ExitClass,RiskPts,R,PnL$,Mode,OFScore,OFSoftened,OFMismatchBars,OFText,ZoneType,ZoneLow,ZoneHigh";
                 if (TryAppendTradeCsvLines(csvPath, header, lines, bar))
                 {
                     if (_pendingTradeCsvLines.Count > 0)
@@ -1122,7 +1182,7 @@ skipHudSummary:
                 {
                     var exists = File.Exists(csvPath);
                     using var stream = new FileStream(csvPath, FileMode.Append, FileAccess.Write, FileShare.Read);
-                    using var writer = new StreamWriter(stream);
+                    using var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
                     if (!exists)
                         writer.WriteLine(header);
@@ -1182,6 +1242,9 @@ skipHudSummary:
 
             _netPnLDollar += pnlDollar;
 
+            var exitClass = ClassifyExitFromR(exitReason, r);
+            UpdateDailyGuard(exitTime, pnlDollar, exitClass);
+
             _tradeHistory.Add(new TradeRecord
             {
                 EntryBar = plan.CreatedBar,
@@ -1196,13 +1259,208 @@ skipHudSummary:
                 PnLDollar = pnlDollar,
                 ExitTime = exitTime,
                 ExitReason = exitReason,
+                ExitClass = exitClass,
                 OfScore = plan.OfScore,
                 OfText = plan.OfText,
+                OfSoftened = plan.OfSoftened,
+                OfMismatchBars = plan.OfMismatchBars,
                 Zone = plan.Zone
             });
 
             if (_tradeHistory.Count > 500)
                 _tradeHistory.RemoveRange(0, _tradeHistory.Count - 500);
+        }
+
+        private void LogWideRiskIfNeeded(int bar, TradePlan plan)
+        {
+            var riskPts = Math.Abs(plan.Entry - plan.InitialStop);
+            if (riskPts < 30m)
+                return;
+
+            var tick = GetTickSize(bar, "WideRiskLog.tick");
+            var riskTicks = tick > 0m ? riskPts / tick : 0m;
+            AppendLog($"RISK_WIDE_ENTRY bar={bar} side={plan.Side} riskPts={riskPts:0.##} riskTicks={riskTicks:0.##} entry={plan.Entry:0.########} stop={plan.InitialStop:0.########} zone={FormatZoneKeyCN(plan.Zone)} of={plan.OfScore}/4 ofSoftened={plan.OfSoftened} mismatchBars={plan.OfMismatchBars}");
+        }
+
+        private bool ShouldBlockEntryByV128Filters(
+            int bar,
+            string side,
+            decimal riskPoints,
+            ZoneKey? zoneKey,
+            string mode,
+            bool ofSoftened,
+            int mismatchBars)
+        {
+            if (EnableMaxRiskPointsFilter)
+            {
+                var maxRisk = Math.Max(0m, MaxEntryRiskPoints);
+                if (maxRisk > 0m && riskPoints >= maxRisk)
+                {
+                    AppendLog($"RISK_WIDE_BLOCK bar={bar} side={side} riskPts={riskPoints:0.##} max={maxRisk:0.##} zone={(zoneKey is null ? "-" : FormatZoneKeyCN(zoneKey))} mode={mode} ofSoftened={ofSoftened} mismatchBars={mismatchBars}");
+                    SetBlock(bar, TriggerBlockReason.RiskTicksTooLarge, $"RiskPts {riskPoints:0.##} >= max {maxRisk:0.##}");
+                    ResetConfirm(bar, "RiskWideBlocked");
+                    _phase = ConfirmPhase.WaitZoneTouch;
+                    return true;
+                }
+            }
+
+            if (EnableStrictShortSoftenedFilter &&
+                string.Equals(side, "SHORT", StringComparison.OrdinalIgnoreCase) &&
+                ofSoftened)
+            {
+                var maxBars = Math.Max(0, MaxShortSoftenedMismatchBars);
+                if (maxBars > 0 && mismatchBars >= maxBars)
+                {
+                    AppendLog($"SHORT_SOFTENED_BLOCK bar={bar} side={side} mismatchBars={mismatchBars} max={maxBars} zone={(zoneKey is null ? "-" : FormatZoneKeyCN(zoneKey))} mode={mode} riskPts={riskPoints:0.##}");
+                    SetBlock(bar, TriggerBlockReason.EntryTooFarFromZone, $"SHORT softened mismatchBars {mismatchBars} >= max {maxBars}");
+                    ResetConfirm(bar, "ShortSoftenedBlocked");
+                    _phase = ConfirmPhase.WaitZoneTouch;
+                    return true;
+                }
+            }
+
+            if (EnableStrictLongSoftenedFilter &&
+                string.Equals(side, "LONG", StringComparison.OrdinalIgnoreCase) &&
+                ofSoftened)
+            {
+                var exactBars = Math.Max(0, BlockLongSoftenedExactMismatchBars);
+                var highBars = Math.Max(0, MinLongSoftenedHighMismatchBars);
+                var exactBlocked = exactBars > 0 && mismatchBars == exactBars;
+                var highBlocked = highBars > 0 && mismatchBars >= highBars;
+
+                if (exactBlocked || highBlocked)
+                {
+                    var rule = exactBlocked ? $"== {exactBars}" : $">= {highBars}";
+                    AppendLog($"LONG_SOFTENED_BLOCK bar={bar} side={side} mismatchBars={mismatchBars} rule={rule} zone={(zoneKey is null ? "-" : FormatZoneKeyCN(zoneKey))} mode={mode} riskPts={riskPoints:0.##}");
+                    SetBlock(bar, TriggerBlockReason.EntryTooFarFromZone, $"LONG softened mismatchBars {mismatchBars} {rule}");
+                    ResetConfirm(bar, "LongSoftenedBlocked");
+                    _phase = ConfirmPhase.WaitZoneTouch;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool ShouldBlockByDailyGuard(int bar, DateTime time)
+        {
+            if (!EnableDailyGuard)
+                return false;
+
+            EnsureDailyGuardDate(time);
+
+            var profitTarget = Math.Max(0m, DailyProfitTargetDollars);
+            if (profitTarget > 0m && _dailyGuardPnLDollar >= profitTarget)
+            {
+                AppendLog($"DAILY_GUARD_BLOCK bar={bar} reason=ProfitTarget pnl={_dailyGuardPnLDollar:0.##} target={profitTarget:0.##} trades={_dailyGuardTrades} losses={_dailyGuardLosses}");
+                SetBlock(bar, TriggerBlockReason.DailyGuardBlocked, $"Daily profit target hit ${_dailyGuardPnLDollar:0.##} >= ${profitTarget:0.##}");
+                ResetConfirm(bar, "DailyProfitTarget");
+                _phase = ConfirmPhase.WaitZoneTouch;
+                return true;
+            }
+
+            var lossLimit = Math.Max(0m, DailyLossLimitDollars);
+            if (lossLimit > 0m && _dailyGuardPnLDollar <= -lossLimit)
+            {
+                AppendLog($"DAILY_GUARD_BLOCK bar={bar} reason=LossLimit pnl={_dailyGuardPnLDollar:0.##} limit={lossLimit:0.##} trades={_dailyGuardTrades} losses={_dailyGuardLosses}");
+                SetBlock(bar, TriggerBlockReason.DailyGuardBlocked, $"Daily loss limit hit ${_dailyGuardPnLDollar:0.##} <= -${lossLimit:0.##}");
+                ResetConfirm(bar, "DailyLossLimit");
+                _phase = ConfirmPhase.WaitZoneTouch;
+                return true;
+            }
+
+            var maxTrades = Math.Max(0, MaxTradesPerDay);
+            if (maxTrades > 0 && _dailyGuardTrades >= maxTrades)
+            {
+                AppendLog($"DAILY_GUARD_BLOCK bar={bar} reason=MaxTrades trades={_dailyGuardTrades} max={maxTrades} pnl={_dailyGuardPnLDollar:0.##} losses={_dailyGuardLosses}");
+                SetBlock(bar, TriggerBlockReason.DailyGuardBlocked, $"Daily max trades hit {_dailyGuardTrades}/{maxTrades}");
+                ResetConfirm(bar, "DailyMaxTrades");
+                _phase = ConfirmPhase.WaitZoneTouch;
+                return true;
+            }
+
+            var maxLosses = Math.Max(0, MaxLossesPerDay);
+            if (maxLosses > 0 && _dailyGuardLosses >= maxLosses)
+            {
+                AppendLog($"DAILY_GUARD_BLOCK bar={bar} reason=MaxLosses losses={_dailyGuardLosses} max={maxLosses} pnl={_dailyGuardPnLDollar:0.##} trades={_dailyGuardTrades}");
+                SetBlock(bar, TriggerBlockReason.DailyGuardBlocked, $"Daily max losses hit {_dailyGuardLosses}/{maxLosses}");
+                ResetConfirm(bar, "DailyMaxLosses");
+                _phase = ConfirmPhase.WaitZoneTouch;
+                return true;
+            }
+
+            return false;
+        }
+
+        private void UpdateDailyGuard(DateTime time, decimal pnlDollar, string exitClass)
+        {
+            EnsureDailyGuardDate(time);
+
+            _dailyGuardTrades++;
+            _dailyGuardPnLDollar += pnlDollar;
+            if (string.Equals(exitClass, "FullLoss", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(exitClass, "SmallLoss", StringComparison.OrdinalIgnoreCase))
+            {
+                _dailyGuardLosses++;
+            }
+
+            AppendLog($"DAILY_GUARD_UPDATE date={_dailyGuardDate:yyyy-MM-dd} trades={_dailyGuardTrades} losses={_dailyGuardLosses} pnl={_dailyGuardPnLDollar:0.##} lastPnL={pnlDollar:0.##} exitClass={exitClass}");
+        }
+
+        private void EnsureDailyGuardDate(DateTime time)
+        {
+            var tradingDate = GetTradingDate(time);
+            if (_dailyGuardDate == tradingDate)
+                return;
+
+            _dailyGuardDate = tradingDate;
+            _dailyGuardTrades = 0;
+            _dailyGuardLosses = 0;
+            _dailyGuardPnLDollar = 0m;
+            AppendLog($"DAILY_GUARD_RESET date={_dailyGuardDate:yyyy-MM-dd}");
+        }
+
+        private static DateTime GetTradingDate(DateTime time)
+            => time.Hour >= 6 ? time.Date : time.Date.AddDays(-1);
+
+        private string ClassifyExit(TradePlan plan, string exitReason, decimal exitPrice)
+        {
+            var risk = Math.Abs(plan.Entry - plan.InitialStop);
+            if (risk <= 0m)
+                risk = plan.InitialRiskPoints;
+
+            var r = risk > 0m
+                ? (plan.Side == "LONG" ? (exitPrice - plan.Entry) / risk : (plan.Entry - exitPrice) / risk)
+                : 0m;
+
+            return ClassifyExitFromR(exitReason, r);
+        }
+
+        private static string ClassifyExitFromR(string exitReason, decimal r)
+        {
+            if (exitReason.StartsWith("TP", StringComparison.OrdinalIgnoreCase))
+                return "TP";
+            if (r > 0m)
+                return "ProtectedProfit";
+            if (r <= -0.9m)
+                return "FullLoss";
+            return "SmallLoss";
+        }
+
+        private static string NormalizeOfTextForCsv(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return "-";
+
+            return text
+                .Replace("ΔDiv", "DeltaDiv", StringComparison.Ordinal)
+                .Replace("ExtremeΔ", "ExtremeDelta", StringComparison.Ordinal);
+        }
+
+        private static string CsvCell(string value)
+        {
+            value ??= string.Empty;
+            return "\"" + value.Replace("\"", "\"\"", StringComparison.Ordinal) + "\"";
         }
 
         private (decimal Price, ZoneEntryAnchor AnchorUsed, string AnchorText) GetLimitEntryPriceDynamic(int bar, TradingZone zone, bool isLong)

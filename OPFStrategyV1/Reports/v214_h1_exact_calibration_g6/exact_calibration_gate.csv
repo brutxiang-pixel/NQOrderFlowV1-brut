@@ -1,0 +1,2 @@
+SecondaryPolicy,SecondaryScoreFloor,WorstDelayMinutes,ImprovementRetentionPct,ExactVsCoarseCandidatePct,Lower95GrossRatioPct,Lower95ProjectedH1Gross,ProjectedPF,Lower95ProjectedJanFebGross,Lower95ProjectedMarAprGross,Lower95ProjectedMayJunGross,PeakConcurrentRisk,RiskCapViolations,ExactCalibrationPassed
+PathRiskA50G6_0,6,5,-109.77,103.98,77.19,17821.47,1.4469,4076.99,5785.92,7958.57,278.28,0,False

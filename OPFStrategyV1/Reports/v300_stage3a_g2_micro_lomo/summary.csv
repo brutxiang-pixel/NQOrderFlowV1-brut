@@ -1,0 +1,5 @@
+Candidate,H1ThresholdForJuly,H1BaselineTrades,H1BaselineNet,H1BaselinePerTrade,H1KeptTrades,H1KeptNet,H1KeptPerTrade,H1ExcludedTrades,H1ExcludedNet,H1ExcludedPerTrade,JulyBaselineTrades,JulyBaselineNet,JulyBaselinePerTrade,JulyKeptTrades,JulyKeptNet,JulyKeptPerTrade,JulyExcludedTrades,JulyExcludedNet,JulyExcludedPerTrade
+Aggressor60Aligned,0.0,34,1905.1,56.03,16,1144.4,71.53,18,760.7,42.26,3,-129.3,-43.1,1,-140.1,-140.1,2,10.8,5.4
+ZoneTouchDeltaAligned,0.0,34,1905.1,56.03,26,1691.4,65.05,8,213.7,26.71,3,-129.3,-43.1,3,-129.3,-43.1,0,0,0.0
+PocMigrationAligned,0.0,34,1905.1,56.03,28,1478.7,52.81,6,426.4,71.07,3,-129.3,-43.1,2,4.3,2.15,1,-133.6,-133.6
+ZoneOccupancyMedian,1.0,34,1905.1,56.03,25,1729.5,69.18,9,175.6,19.51,3,-129.3,-43.1,2,-273.7,-136.85,1,144.4,144.4

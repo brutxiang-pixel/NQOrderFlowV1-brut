@@ -1,0 +1,9 @@
+Enabled,ConservativeGross5m,ConservativeGross10m,RobustConservativeGross,RobustPF,RobustPositiveWeekPct,RobustMaxDD,RobustWorstWeek,RobustTrades,RobustJanFebGross,RobustMarAprGross,RobustMayJunGross,TargetMet
+None,19221.73,19720.78,19221.73,1.356,74.07,1485.98,-496.8,867,2973.49,7629.66,8618.59,False
+LongFailureRetestQuality,18977.3,20880.61,18977.3,1.3063,70.37,1537.61,-1008.04,936,3993.77,6269.29,8714.24,False
+LongFailureRetestQuality;LongOcWideLowRR,16904.96,17542.11,16904.96,1.2239,74.07,2131.38,-1955.65,1025,3952.48,4472.81,8479.67,False
+LongFailureObservationLowRR;LongFailureRetestQuality,15833.35,16067.43,15833.35,1.2221,70.37,1614.51,-1305.72,999,2573.38,6227.57,7032.4,False
+LongFailureObservationLowRR,15635.41,14993.63,14993.63,1.2439,74.07,2117.18,-656.94,915,1877.19,5328.99,7787.45,False
+LongOcWideLowRR,15214.31,14423.26,14423.26,1.2144,66.67,2056.6,-1729.97,915,1164.58,5514.44,7744.24,False
+LongFailureObservationLowRR;LongFailureRetestQuality;LongOcWideLowRR,14220.24,13288.1,13288.1,1.1606,59.26,2108.7,-1742.33,1024,2276.61,4170.53,6840.97,False
+LongFailureObservationLowRR;LongOcWideLowRR,12925.16,11425.72,11425.72,1.1382,55.56,2817.7,-1949.94,992,298.3,3916.5,7210.91,False

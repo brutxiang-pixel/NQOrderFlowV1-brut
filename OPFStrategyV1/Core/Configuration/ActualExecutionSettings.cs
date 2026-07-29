@@ -11,6 +11,7 @@ public sealed record ActualExecutionSettings(
     decimal ActualTargetR,
     int ActualMaxTradesPerDay,
     decimal ActualDailyLossLimitDollars,
+    decimal ActualWeeklyLongLossLimitDollars,
     decimal ActualCommissionPerContractRoundTrip,
     bool ActualUseFullLossGuard,
     bool ActualUseConsecutiveLossGuard,
@@ -33,19 +34,22 @@ public sealed record ActualExecutionSettings(
     bool ActualEnableWideStopExecution,
     decimal ActualWideStopMultiplier,
     string ActualRrTiers,
-    string ResearchLogMode)
+    string ResearchLogMode,
+    string RunProfileId,
+    string RunMode)
 {
     public static ActualExecutionSettings Default()
     {
         return new ActualExecutionSettings(
-            Version: "ACTUAL_EXEC_2.36",
+            Version: "ACTUAL_EXEC_2.48",
             EnableActualOrders: true,
             ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|BreakawayRetest|AlmostConfirmed|ShadowCandidate|TrendPullbackConfirmed|ObservationStrict_Other|ObservationStrict_Other_WideStop1_5R|ObservationStrict_BullFresh_WideStop1_5R|ZoneBirthResearch|FailureReverse_ObservationInvalidated|FailureReverse_ObservationInvalidated_WideStop1_5R|FailureReverse_RetestFailed|FailureReverse_RetestFailed_WideStop1_5R|UnknownRegimeZoneTouch",
             ActualAllowResearchPaths: false,
-            ActualOrderQuantity: 2m,
+            ActualOrderQuantity: 3m,
             ActualTargetR: 1.5m,
-            ActualMaxTradesPerDay: 12,
-            ActualDailyLossLimitDollars: 300m,
+            ActualMaxTradesPerDay: 15,
+            ActualDailyLossLimitDollars: 250m,
+            ActualWeeklyLongLossLimitDollars: 500m,
             ActualCommissionPerContractRoundTrip: 1.2m,
             ActualUseFullLossGuard: false,
             ActualUseConsecutiveLossGuard: false,
@@ -68,7 +72,9 @@ public sealed record ActualExecutionSettings(
             ActualEnableWideStopExecution: true,
             ActualWideStopMultiplier: 1.5m,
             ActualRrTiers: "1.0|1.2|1.5",
-            ResearchLogMode: "Compact");
+            ResearchLogMode: "Compact",
+            RunProfileId: "ACTUAL_BASELINE",
+            RunMode: "ActualExecution");
     }
 
     public static ActualExecutionSettings LoadOrCreateDefault(out string path, out string status)
@@ -128,6 +134,7 @@ public sealed record ActualExecutionSettings(
             ActualTargetR = settings.ActualTargetR <= 0m ? fallback.ActualTargetR : settings.ActualTargetR,
             ActualMaxTradesPerDay = settings.ActualMaxTradesPerDay <= 0 ? fallback.ActualMaxTradesPerDay : settings.ActualMaxTradesPerDay,
             ActualDailyLossLimitDollars = settings.ActualDailyLossLimitDollars <= 0m ? fallback.ActualDailyLossLimitDollars : settings.ActualDailyLossLimitDollars,
+            ActualWeeklyLongLossLimitDollars = settings.ActualWeeklyLongLossLimitDollars <= 0m ? fallback.ActualWeeklyLongLossLimitDollars : settings.ActualWeeklyLongLossLimitDollars,
             ActualCommissionPerContractRoundTrip = settings.ActualCommissionPerContractRoundTrip < 0m ? fallback.ActualCommissionPerContractRoundTrip : settings.ActualCommissionPerContractRoundTrip,
             ActualTimeInForce = string.IsNullOrWhiteSpace(settings.ActualTimeInForce) ? fallback.ActualTimeInForce : settings.ActualTimeInForce,
             ActualStopTriggerType = string.IsNullOrWhiteSpace(settings.ActualStopTriggerType) ? fallback.ActualStopTriggerType : settings.ActualStopTriggerType,
@@ -145,7 +152,9 @@ public sealed record ActualExecutionSettings(
             ActualFailureReverseMinSetupQualityScore = settings.ActualFailureReverseMinSetupQualityScore <= 0m ? fallback.ActualFailureReverseMinSetupQualityScore : settings.ActualFailureReverseMinSetupQualityScore,
             ActualWideStopMultiplier = settings.ActualWideStopMultiplier <= 1m ? fallback.ActualWideStopMultiplier : settings.ActualWideStopMultiplier,
             ActualRrTiers = string.IsNullOrWhiteSpace(settings.ActualRrTiers) ? fallback.ActualRrTiers : settings.ActualRrTiers,
-            ResearchLogMode = string.IsNullOrWhiteSpace(settings.ResearchLogMode) ? fallback.ResearchLogMode : settings.ResearchLogMode
+            ResearchLogMode = string.IsNullOrWhiteSpace(settings.ResearchLogMode) ? fallback.ResearchLogMode : settings.ResearchLogMode,
+            RunProfileId = string.IsNullOrWhiteSpace(settings.RunProfileId) ? fallback.RunProfileId : settings.RunProfileId,
+            RunMode = string.IsNullOrWhiteSpace(settings.RunMode) ? fallback.RunMode : settings.RunMode
         };
     }
 }

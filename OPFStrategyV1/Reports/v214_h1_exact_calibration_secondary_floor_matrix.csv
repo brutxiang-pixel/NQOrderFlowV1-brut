@@ -1,0 +1,6 @@
+SecondaryPolicy,SecondaryScoreFloor,WorstDelayMinutes,ImprovementRetentionPct,ExactVsCoarseCandidatePct,Lower95GrossRatioPct,Lower95ProjectedH1Gross,ProjectedPF,Lower95ProjectedJanFebGross,Lower95ProjectedMarAprGross,Lower95ProjectedMayJunGross,PeakConcurrentRisk,RiskCapViolations,ExactCalibrationPassed
+PathRiskA50G0_0,0,10,67.22,112.41,77.88,19087.35,1.4171,4240.28,6111.07,8736.00,275.28,0,False
+PathRiskA50G1_0,1,10,90.68,116.26,85.70,20196.45,1.4094,4326.43,6804.70,9065.32,275.28,0,True
+PathRiskA50G2_0,2,10,146.10,127.03,100.68,23880.84,1.4286,5828.17,7303.30,10749.36,267.00,0,True
+PathRiskA50G4_0,4,5,247.44,127.58,95.60,22443.54,1.4500,5131.56,7214.64,10097.35,278.28,0,True
+PathRiskA50G6_0,6,5,-109.77,103.98,77.19,17821.47,1.4469,4076.99,5785.92,7958.57,278.28,0,False

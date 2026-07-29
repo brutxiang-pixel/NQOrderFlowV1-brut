@@ -1,0 +1,3 @@
+SnapshotID,Date,TotalBars,BullTrendBars,BearTrendBars,UnknownBars,BullTrendPct,BearTrendPct,UnknownPct,RegimeChangeCount,AvgBullScore,AvgBearScore
+"OPF-20260725-151655","2026-05-04",1,0,0,1,0,0,100,0,0,0
+"OPF-20260725-151655","2026-05-05",276,31,0,245,11.23,0,88.77,18,39.24,10.98

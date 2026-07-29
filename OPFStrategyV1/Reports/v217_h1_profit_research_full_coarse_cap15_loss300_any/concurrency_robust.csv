@@ -1,0 +1,2 @@
+Arm,PrimaryQuantity,SecondaryQuantity,SecondaryPolicy,RiskCap,ConservativeGross5m,ConservativeGross10m,RobustConservativeGross,RobustPF,RobustPositiveWeekPct,RobustMaxDD,RobustWorstWeek,RobustTrades,RobustJanFebGross,RobustMarAprGross,RobustMayJunGross,RobustSecondaryGross,RobustSecondaryExpectancy,SecondaryAccepted,SameDirectionOverlapPct,PeakConcurrentRisk,DailyLossTriggeredDays,TargetMet
+D_3plus3,3,3,StaticPathRiskA50G2_0,300.0,22831.04,21837.25,21837.25,1.434,77.78,1369.5,-399.73,871,4504.61,6646.92,10685.72,3223.48,31.82,92,83.7,297.75,30,False

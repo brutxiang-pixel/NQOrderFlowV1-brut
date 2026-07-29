@@ -1,0 +1,13 @@
+PolicyLabel,Sample,Progress,WeeklyLongWide,DailyLongWide,SecondaryGate,Active,DailyCap,DailyLoss,CombinedRisk,PreflightAborted
+Baseline,H1,0,0,0,0,0,40,280,0,72
+Baseline,July1,0,0,0,0,0,0,23,0,4
+Baseline,July2,0,0,0,0,0,0,24,0,3
+WeeklyAllLong500,H1,0,24,0,7,0,40,249,0,75
+WeeklyAllLong500,July1,0,18,0,1,0,0,7,0,5
+WeeklyAllLong500,July2,0,20,0,1,0,0,3,0,4
+WeeklyAllLong600,H1,0,23,0,7,0,40,249,0,75
+WeeklyAllLong600,July1,0,16,0,1,0,0,8,0,5
+WeeklyAllLong600,July2,0,18,0,1,0,0,4,0,4
+WeeklyEitherLossAllLong500,H1,0,82,0,7,0,27,224,0,76
+WeeklyEitherLossAllLong500,July1,0,18,0,1,0,0,7,0,5
+WeeklyEitherLossAllLong500,July2,0,20,0,1,0,0,3,0,4

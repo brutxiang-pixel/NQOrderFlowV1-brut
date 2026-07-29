@@ -1,0 +1,17 @@
+Period,Regime,Side,Trades,Net,PerTrade,G2Trades
+H1,BullTrend,Long,10,-104.0,-10.4,5
+H1,BullTrend,Short,0,0,0.0,0
+H1,BearTrend,Long,1,363.9,363.9,0
+H1,BearTrend,Short,5,319.0,63.8,0
+H1,ChopRange,Long,92,3551.8,38.61,22
+H1,ChopRange,Short,65,1669.5,25.68,7
+H1,DirectShortOnly,All,70,1988.5,28.41,7
+H1,DirectRemovedLong,All,103,3811.7,37.01,27
+July,BullTrend,Long,0,0,0.0,0
+July,BullTrend,Short,0,0,0.0,0
+July,BearTrend,Long,0,0,0.0,0
+July,BearTrend,Short,6,-272.1,-45.35,1
+July,ChopRange,Long,2,-237.2,-118.6,0
+July,ChopRange,Short,11,110.9,10.08,2
+July,DirectShortOnly,All,17,-161.2,-9.48,3
+July,DirectRemovedLong,All,2,-237.2,-118.6,0

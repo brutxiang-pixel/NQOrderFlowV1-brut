@@ -1,0 +1,18 @@
+{
+  "InputG2NormalOutcomes": 37,
+  "H1Months": [
+    "202601",
+    "202602",
+    "202603",
+    "202604",
+    "202605",
+    "202606"
+  ],
+  "JulyStressMonth": "202607",
+  "Candidates": [
+    "Aggressor60Aligned",
+    "ZoneTouchDeltaAligned",
+    "PocMigrationAligned",
+    "ZoneOccupancyMedian"
+  ]
+}

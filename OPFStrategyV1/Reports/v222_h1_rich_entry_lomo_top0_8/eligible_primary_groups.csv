@@ -1,0 +1,8 @@
+Side,ResearchPath,BaseTrades
+Long,ObservationConfirm,160
+Long,ObservationConfirm_WideStop1_5R,117
+Long,ObservationStrict_Other,21
+Short,BreakawayFvg,53
+Short,FailureReverse_ObservationInvalidated_WideStop1_5R,36
+Short,ObservationConfirm,222
+Short,ZoneBirthResearch,31

@@ -1,0 +1,4 @@
+Date,ActualTrades,SimulatedTrades,IdentityMatched,IdentityPct,ActualGross,SimulatedGross,GrossDelta,RelativeErrorPct,ExitRoleMatchPct
+2026-02-03,10,10,10,100.0,191.0,222.75,31.75,16.623036649214658,100.0
+2026-06-08,1,3,1,100.0,-111.0,22.5,133.5,120.27027027027027,100.0
+2026-06-09,2,3,2,100.0,113.0,22.5,-90.5,80.08849557522124,100.0

@@ -1,0 +1,15 @@
+{
+  "WarmFootprintRows": 6362,
+  "StrictMatchedRows": 6358,
+  "UnmatchedWarmRows": 4,
+  "StrictMatchRate": 0.999371,
+  "OutcomeClasses": {
+    "NoEntry": 6152,
+    "NormalOutcome": 192,
+    "ExcludedAbnormal": 2,
+    "EntryAborted": 12
+  },
+  "SecondaryNormalOutcomes": 37,
+  "RunProfile": "V300_OUTCOME_LABEL_24DAY",
+  "Passed": true
+}

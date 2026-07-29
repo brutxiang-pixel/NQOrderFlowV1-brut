@@ -25,7 +25,7 @@ using System.Threading.Tasks;
 
 namespace OPFStrategyV1.Strategy;
 
-public sealed class OpeningPullbackFailureStrategy : ChartStrategy
+public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 {
     private const decimal MaxStructureSwingRiskPoints = 25m;
     private const decimal MaxConfirmBarRiskPoints = 25m;
@@ -43,6 +43,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal DailyVolumeQualityRescueMinEstimatedRr = 0.8m;
     private const int DailyVolumeQualityRescueMaxTradesPerDay = 4;
     private const decimal ZoneBirthVolumeV122MinSetupQualityScore = 45m;
+    private const decimal PrimaryZoneBirthMinSetupQualityV221 = 45m;
+    private const int PrimaryObservationConfirmMinRegimeBarsV223 = 8;
+    private const decimal PrimaryBreakawayMinSetupQualityV223 = 88m;
+    private const decimal PrimaryBreakawayMinRiskPointsV223 = 12m;
     private const decimal ZoneBirthVolumeV122MaxRiskPoints = 25m;
     private const decimal ZoneBirthVolumeV122MinEstimatedRr = 0.3m;
     private const decimal StrictVolumeV122MinSetupQualityScore = 45m;
@@ -88,10 +92,21 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal ZoneBirthShortV170LowRiskMaxPoints = 8m;
     private const decimal ZoneBirthShortV170MidRiskMinExclusivePoints = 12m;
     private const decimal ZoneBirthShortV170MidRiskMaxPoints = 18m;
-    private const decimal ZoneBirthSplitRunnerV172TotalQuantity = 2m;
-    private const decimal ZoneBirthSplitRunnerV172LegQuantity = 1m;
+    private const decimal ZoneBirthSplitRunnerV172TotalQuantity = 3m;
+    private const decimal ZoneBirthSplitRunnerV172BaseQuantity = 2m;
+    private const decimal ZoneBirthSplitRunnerV172RunnerQuantity = 1m;
     private const decimal ZoneBirthSplitRunnerV173TargetR = 4m;
-    private const decimal HistoricalDormantTargetOffsetPointsV181 = 500m;
+    private const decimal StrictEntryExcludedRiskMinExclusiveV208 = 13.25m;
+    private const decimal StrictEntryExcludedRiskMaxInclusiveV208 = 16m;
+    private const bool EnableDeferredContinuationV209 = false;
+    private const decimal DeferredContinuationTargetRV208 = 3m;
+    private const int DeferredContinuationMaxBarsV208 = 18;
+    private const decimal BreakawayShortTargetRV209 = 4m;
+    private const decimal BreakawayShortBreakEvenTriggerRV209 = 1.5m;
+    private const int LongPolicyTimeStopBarsV209 = 36;
+    private const int ShortPolicyTimeStopBarsV209 = 36;
+    private const int FastPolicyTimeStopBarsV209 = 12;
+    private const int DecisionTapeCalibrationMaxBars = 36;
     private const decimal ProtectBreakEvenTriggerRV186 = 1m;
     private const decimal ProtectBreakEvenTargetRV186 = 3m;
     private static readonly bool UseLegacyV174StrategyPolicyV204 = true;
@@ -138,10 +153,21 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private readonly List<PendingAggressiveExpansionWait1> _pendingAggressiveExpansionWait1s = new();
     private readonly List<PendingConfirmedRetrace> _pendingConfirmedRetraces = new();
     private readonly List<PendingFailureReverseRetest> _pendingFailureReverseRetests = new();
+    private readonly object _pendingProtectedSecondarySyncV216 = new();
+    private PendingProtectedSecondaryV216? _pendingProtectedSecondaryV216;
     private readonly List<ResearchTracker> _researchTrackers = new();
     private readonly List<ShadowTradeTracker> _shadowTradeTrackers = new();
     private readonly Dictionary<string, ShadowTradeTracker> _shadowTradeTrackersByKey = new();
+    private readonly List<DecisionTapeCalibrationTracker> _decisionTapeCalibrationTrackers = new();
+    private readonly Dictionary<string, DecisionTapeCalibrationTracker> _decisionTapeCalibrationTrackersByKey = new();
+    private readonly List<DecisionTapeMarketTurn> _decisionTapeMarketTurns = new();
+    private long _decisionTapeMarketSequence;
+    private int _decisionTapeTurnBar = -1;
+    private decimal _decisionTapeTurnPrice;
+    private long _decisionTapeTurnSequence;
+    private int _decisionTapeTurnDirection;
     private readonly List<ReplayExecutionState> _recentReplayExecutions = new();
+    private readonly Dictionary<string, ReplayExecutionState> _replayExecutionsByTradeId = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ActualTradeOutcome> _actualTradeOutcomesBySignalPath = new();
     private readonly HashSet<string> _writtenExecutionTradeIds = new();
     private readonly HashSet<string> _writtenLiveAccountPnlTradeIds = new();
@@ -179,6 +205,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private OpfCandle? _lastResearchCandle;
     private decimal _latestCalculatedMarketPrice;
     private ReplayExecutionState? _replayExecution;
+    private readonly List<DeferredContinuationCandidate> _deferredContinuations = new();
+    private long _deferredCaptureSequence;
     private DateTime _replayExecutionDate = DateTime.MinValue;
     private int _replayTradesToday;
     private int _replayExitsToday;
@@ -194,6 +222,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private decimal _replayDailyR;
     private decimal _liveAccountDailyNetPnlDollars;
     private DateTime _liveAccountPnlDate = DateTime.MinValue;
+    private decimal _liveAccountWeeklyNetPnlDollars;
+    private decimal _liveLongWeeklyNetPnlDollars;
+    private DateTime _liveAccountPnlWeekStart = DateTime.MinValue;
+    private bool _weeklyLongLossGateTriggered;
+    private string _weeklyLongLossGateTrigger = string.Empty;
     private int _replayAbnormalEntryToday;
     private string _lastAbnormalEntryHudText = "-";
     private int _replayAbnormalProtectiveFillToday;
@@ -213,6 +246,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     private decimal _actualFailureRetestMaxRiskPoints = 11m;
     private decimal _actualFailureRetestMinSetupQualityScore = 56m;
     private decimal _actualDailyLossLimitDollars = 200m;
+    private decimal _actualWeeklyLongLossLimitDollars = 500m;
     private decimal _actualCommissionPerContractRoundTrip = 1.2m;
     private bool _actualRequireFailureRetest = true;
     private bool _compactResearchLogging;
@@ -262,7 +296,23 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     [DisplayName("Rich Bar Data Collection Only")]
     public bool RichBarDataCollectionOnly { get; set; }
 
-    private bool ActualOrdersEnabled => EnableReplayOrders && !RichBarDataCollectionOnly;
+    [Category("OPF Research")]
+    [DisplayName("Decision Tape Calibration Collection")]
+    public bool DecisionTapeCalibrationCollection { get; set; } = true;
+
+    [Category("OPF Research")]
+    [DisplayName("Microstructure Audit Collection Only")]
+    public bool MicrostructureAuditCollectionOnly { get; set; }
+
+    [Category("OPF Research")]
+    [DisplayName("Footprint Data Collection Only")]
+    public bool FootprintDataCollectionOnly { get; set; }
+
+    [Category("OPF Research")]
+    [DisplayName("Sweep-Reclaim Data Collection Only")]
+    public bool SweepReclaimDataCollectionOnly { get; set; }
+
+    private bool ActualOrdersEnabled => EnableReplayOrders && !RichBarDataCollectionOnly && !MicrostructureAuditCollectionOnly && !FootprintDataCollectionOnly && !SweepReclaimDataCollectionOnly;
 
     [Category("OPF Execution")]
     [DisplayName("Actual Execution Paths")]
@@ -322,12 +372,21 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         base.OnStarted();
 
+        _decisionTapeMarketTurns.Clear();
+        _decisionTapeMarketSequence = 0;
+        _decisionTapeTurnBar = -1;
+        _decisionTapeTurnPrice = 0m;
+        _decisionTapeTurnSequence = 0;
+        _decisionTapeTurnDirection = 0;
+
         var actualExecutionSettings = ActualExecutionSettings.LoadOrCreateDefault(
             out var actualExecutionConfigPath,
             out var actualExecutionConfigStatus);
         ApplyActualExecutionSettings(actualExecutionSettings);
-        if (RichBarDataCollectionOnly)
-            EnableReplayOrders = false;
+        ApplyRunMode(actualExecutionSettings.RunMode);
+        InitializeMicrostructureAudit();
+        InitializeFootprintCollection();
+        InitializeSweepReclaimCollection();
 
         var resolvedExecutionProfileName = ResolveExecutionProfileName(actualExecutionSettings);
         var profileSelection = ProfileCatalog.Select(InstrumentProfileName, resolvedExecutionProfileName);
@@ -347,6 +406,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 0,
                 DateTime.UtcNow,
                 $"ACTUAL_EXEC_CONFIG status={actualExecutionConfigStatus} path={actualExecutionConfigPath}");
+            _researchLogger.AppendInfo(
+                _snapshot.SnapshotId,
+                0,
+                DateTime.UtcNow,
+                $"RUN_PROFILE id={actualExecutionSettings.RunProfileId} mode={actualExecutionSettings.RunMode} actualOrders={ActualOrdersEnabled.ToString().ToLowerInvariant()}");
             if (RichBarDataCollectionOnly)
             {
                 _researchLogger.AppendInfo(
@@ -354,6 +418,38 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                     0,
                     DateTime.UtcNow,
                     "RICH_BAR_DATA_COLLECTION_ONLY enabled=true actualOrders=false");
+            }
+            if (MicrostructureAuditCollectionOnly)
+            {
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    "MICROSTRUCTURE_AUDIT_COLLECTION_ONLY enabled=true actualOrders=false sources=OnNewTrade|OnNewTrades|MarketDepthChanged|MarketDepthsChanged|OnBestBidAskChanged");
+            }
+            if (FootprintDataCollectionOnly)
+            {
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    "FOOTPRINT_DATA_COLLECTION_ONLY enabled=true actualOrders=false source=OnNewTrade candidateLane=ResearchCandidate join=baselineExecutionEvidence");
+            }
+            if (SweepReclaimDataCollectionOnly)
+            {
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    "SWEEP_RECLAIM_DATA_COLLECTION_ONLY enabled=true actualOrders=false source=ClosedM5+OnNewTrade label=nextBarOpen/1.5R/12Bars");
+            }
+            if (DecisionTapeCalibrationCollection)
+            {
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    $"DECISION_TAPE_CALIBRATION_COLLECTION enabled=true actualOrders={ActualOrdersEnabled.ToString().ToLowerInvariant()} maxBars={DecisionTapeCalibrationMaxBars}");
             }
 
             try
@@ -396,7 +492,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         SubscribeConnectorEvents();
         ReconcileLiveExecutionState("Started");
         var restoreTime = _lastResearchCandle?.Time ?? DateTime.UtcNow;
-        RestoreLiveDailyNetPnl(GlobexTradingDayKey(restoreTime));
+        var restoreTradingDay = GlobexTradingDayKey(restoreTime);
+        RestoreLiveDailyNetPnl(restoreTradingDay);
+        RestoreLiveWeeklyNetPnl(restoreTradingDay);
     }
 
     private string ResolveExecutionProfileName(ActualExecutionSettings settings)
@@ -422,6 +520,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         ReplayTargetR = settings.ActualTargetR;
         ReplayMaxTradesPerDay = settings.ActualMaxTradesPerDay;
         _actualDailyLossLimitDollars = settings.ActualDailyLossLimitDollars;
+        _actualWeeklyLongLossLimitDollars = settings.ActualWeeklyLongLossLimitDollars;
         _actualCommissionPerContractRoundTrip = settings.ActualCommissionPerContractRoundTrip;
         ReplayUseFullLossGuard = settings.ActualUseFullLossGuard;
         ReplayUseConsecutiveLossGuard = settings.ActualUseConsecutiveLossGuard;
@@ -447,6 +546,32 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             ReplayTimeInForce = timeInForce;
         if (Enum.TryParse<TriggerPriceType>(settings.ActualStopTriggerType, ignoreCase: true, out var triggerPriceType))
             ReplayStopTriggerPriceType = triggerPriceType;
+    }
+
+    private void ApplyRunMode(string runMode)
+    {
+        RichBarDataCollectionOnly = false;
+        MicrostructureAuditCollectionOnly = false;
+        FootprintDataCollectionOnly = false;
+        SweepReclaimDataCollectionOnly = false;
+        DecisionTapeCalibrationCollection = false;
+
+        if (string.Equals(runMode, "FootprintDataOnly", StringComparison.OrdinalIgnoreCase))
+        {
+            FootprintDataCollectionOnly = true;
+            EnableReplayOrders = false;
+            return;
+        }
+
+        if (string.Equals(runMode, "SweepReclaimDataOnly", StringComparison.OrdinalIgnoreCase))
+        {
+            SweepReclaimDataCollectionOnly = true;
+            EnableReplayOrders = false;
+            return;
+        }
+
+        if (!string.Equals(runMode, "ActualExecution", StringComparison.OrdinalIgnoreCase))
+            EnableReplayOrders = false;
     }
 
     private void SubscribeConnectorEvents()
@@ -509,13 +634,23 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             var workingOrders = Connector.Orders
                 .Where(IsWorkingOpfOrderForCurrentContext)
                 .ToArray();
-            var execution = _replayExecution;
-            if (IsReplayExecutionActive(execution))
+            var activeExecutions = ActiveReplayExecutions();
+            if (activeExecutions.Count > 0)
             {
                 foreach (var order in workingOrders)
                     AttachReplayOrder(order, $"Reconcile:{source}");
 
-                if (GetCurrentAccountPosition() != 0m && !HasRequiredWorkingStops(execution!))
+                var expectedPosition = activeExecutions.Sum(execution =>
+                    (execution.Side == TradeSide.Long ? 1m : -1m) * RemainingExecutionQuantity(execution));
+                var actualPosition = GetCurrentAccountPosition();
+                if (Math.Abs(actualPosition - expectedPosition) > 0.0000001m)
+                {
+                    SetLiveReadinessBlocked("ManagedPositionMismatch", $"{source}: managed position mismatch. actual={actualPosition:0.########}, expected={expectedPosition:0.########}.");
+                    return;
+                }
+
+                var unprotected = activeExecutions.Where(execution => !HasRequiredWorkingStops(execution)).ToArray();
+                if (actualPosition != 0m && unprotected.Length > 0)
                 {
                     SetLiveReadinessBlocked("ProtectionMissing", $"{source}: active position has no valid OPF stop protection.");
                     ScheduleProtectionLossCheckIfNeeded($"Reconcile:{source}");
@@ -523,7 +658,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 }
 
                 ClearLiveReadinessBlock(source);
-                AppendExecutionEvent(execution!, "LIVE_RECONCILE_OK", "-", 0m, Math.Abs(GetCurrentAccountPosition()), $"source={source}|working={workingOrders.Length}");
+                foreach (var execution in activeExecutions)
+                    AppendExecutionEvent(execution, "LIVE_RECONCILE_OK", "-", 0m, RemainingExecutionQuantity(execution), $"source={source}|working={workingOrders.Length}|activeSlots={activeExecutions.Count}");
                 return;
             }
 
@@ -592,11 +728,21 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         _isStoppingActualExecution = true;
         ProcessClosedBar(_lastSeenBar);
+        ClearPendingProtectedSecondaryV216("StrategyStopped");
         FinalizeActiveExecutionOnStop();
         WriteRegimeDailyStats();
         FlushResearchTrackers("ResearchStopped");
         FlushShadowTradeTrackers("StrategyStopped");
+        FlushDecisionTapeCalibrationTrackers("StrategyStopped");
+        FlushDecisionTapeMarketTurns();
+        FlushMicrostructureAudit();
+        _researchLogger?.FlushMicrostructureAudit();
+        FlushFootprintCollection();
+        _researchLogger?.FlushFootprintFeatures();
+        FinalizeSweepReclaimCollection();
+        _researchLogger?.FlushSweepReclaim();
         _researchLogger?.FlushShadowTrades();
+        _researchLogger?.FlushDecisionTapeCalibration();
         FlushKnnShadowInputs();
         _researchLogger?.FlushKnnShadowDecisions();
         FlushRichBarFeatures();
@@ -607,13 +753,19 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     protected override void OnCalculate(int bar, decimal value)
     {
+        CaptureDecisionTapeMarketTurn(bar, value);
+        var isNewBar = bar > _lastSeenBar;
         _lastSeenBar = Math.Max(_lastSeenBar, bar);
+        if (isNewBar)
+            CaptureMicrostructureDepthSnapshot(bar);
         if (value > 0m)
             _latestCalculatedMarketPrice = value;
         UpdateActiveProtectionObservation(value);
         ScheduleProtectBreakEvenV186(value);
-        ScheduleHistoricalDormantTargetsV181();
+        ScheduleHistoricalVirtualTargetsV220();
         ProcessClosedBar(bar - 1);
+        if (isNewBar && EnableDeferredContinuationV209)
+            TryActivateDeferredContinuationV209(bar);
     }
 
     private void ProcessClosedBar(int bar)
@@ -633,14 +785,18 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         AllowHistoricalReplayConnectorBypass(current);
         UpdateActualExecutionExcursion(current);
         ScheduleProtectBreakEvenV186(current.Close);
-        ScheduleHistoricalDormantTargetsV181();
+        ScheduleHistoricalVirtualTargetsV220();
         ScheduleHistoricalReplayAccountFlatReconciliationIfNeeded(current);
         ScheduleStaleUnfilledEntryAbortIfNeeded(current);
+        SchedulePolicyTimeStopV209(current);
         ScheduleGlobexCloseoutIfNeeded(current);
         ScheduleOrphanPositionFlattenIfNeeded(current);
         ScheduleProtectionCleanupIfNeeded("ClosedBar");
+        ExpirePendingProtectedSecondaryV216(current);
         var zones = _zoneDetector.Update(current);
         var regime = _trendScoreEngine.Update(current);
+
+        UpdateSweepReclaimCollection(current);
 
         if (!EnableResearchLogging)
             return;
@@ -680,6 +836,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         EvaluateConfirmBarWait1s(current);
         EvaluateAggressiveExpansionWait1s(current);
         UpdateShadowTradeTrackers(current);
+        UpdateDecisionTapeCalibrationTrackers(current);
 
         if (regime.Regime == MarketRegime.Unknown)
         {
@@ -745,14 +902,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         base.OnOrderRegisterFailed(order, message);
         var role = ParseExecutionRole(order?.Comment);
+        var execution = ExecutionForOrder(order);
         LogExecutionInfo($"EXEC_REGISTER_FAILED role={role} ext={order?.ExtId} msg={message}");
         AppendOrderFailureEvent(order, "REGISTER_FAIL", message);
         NotifyLiveIssue($"RegisterFail:{order?.ExtId}:{role}", $"Order register failed. role={role}, message={message}");
-        if (IsActiveExecutionOrder(order) &&
-            (IsExitOrder(order) || string.Equals(role, ReplayStopExitRole, StringComparison.OrdinalIgnoreCase)))
-            EnqueueExecutionAction("FlattenOnProtectionRegisterFailed", async () => await SubmitEmergencyFlattenAsync(order?.QuantityToFill ?? 0m, "ProtectionRegisterFailed"));
+        if (IsReplayExecutionActive(execution) &&
+            (IsExitOrder(order) || string.Equals(role, "TIME_STOP", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(role, ReplayStopExitRole, StringComparison.OrdinalIgnoreCase)))
+            EnqueueExecutionAction("FlattenOnProtectionRegisterFailed", async () => await SubmitEmergencyFlattenAsync(execution!, order?.QuantityToFill ?? 0m, "ProtectionRegisterFailed"));
 
-        if (IsActiveExecutionOrder(order) && string.Equals(role, "FLATTEN", StringComparison.OrdinalIgnoreCase))
+        if (IsReplayExecutionActive(execution) && string.Equals(role, "FLATTEN", StringComparison.OrdinalIgnoreCase))
             SetLiveReadinessBlocked("EmergencyFlattenFailed", $"Emergency flatten order registration failed: {message}. Manual intervention is required immediately.");
     }
 
@@ -776,17 +935,18 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         base.OnOrderModifyFailed(order, newOrder, message);
         var notifiedOrder = newOrder ?? order;
         NotifyLiveIssue($"ModifyFail:{notifiedOrder?.ExtId}", $"Order modify failed. role={ParseExecutionRole(notifiedOrder?.Comment)}, message={message}");
-        var execution = _replayExecution;
+        var failedOrder = newOrder ?? order;
+        var execution = ExecutionForOrder(failedOrder);
         if (!ActualOrdersEnabled || execution is null)
             return;
 
-        var failedOrder = newOrder ?? order;
         var failedRole = ParseExecutionRole(failedOrder?.Comment);
         if (execution.ProtectBreakEvenPendingV186 && string.Equals(failedRole, "SL", StringComparison.OrdinalIgnoreCase))
         {
             execution.ProtectBreakEvenPendingV186 = false;
-            LogExecutionInfo($"EXEC_PROTECT_BE1R_V186_MODIFY_FAILED trade={execution.TradeId} msg={message}");
-            AppendExecutionEvent(execution, "PROTECT_BE1R_MODIFY_FAILED_V186", "SL", execution.ProtectPendingStopV186, execution.BracketQty, message);
+            var eventName = ProtectBreakEvenEventName(execution, "MODIFY_FAILED");
+            LogExecutionInfo($"EXEC_{eventName} trade={execution.TradeId} msg={message}");
+            AppendExecutionEvent(execution, eventName, "SL", execution.ProtectPendingStopV186, execution.BracketQty, message);
             return;
         }
         if (!execution.RunnerBreakEvenPending)
@@ -799,72 +959,75 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         execution.RunnerBreakEvenPending = false;
         LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_MODIFY_FAILED trade={execution.TradeId} msg={message}");
-        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_MODIFY_FAILED", "RUNNER_SL", execution.RunnerPendingStop, ZoneBirthSplitRunnerV172LegQuantity, message);
+        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_MODIFY_FAILED", "RUNNER_SL", execution.RunnerPendingStop, ZoneBirthSplitRunnerV172RunnerQuantity, message);
     }
 
     private void AttachReplayOrder(Order? order, string source)
     {
-        if (!ActualOrdersEnabled || order is null || _replayExecution is null)
+        if (!ActualOrdersEnabled || order is null)
             return;
         if (!TryParseExecutionComment(order.Comment, out var tradeId, out var role))
             return;
-        if (!string.Equals(tradeId, _replayExecution.TradeId, StringComparison.OrdinalIgnoreCase))
+        var execution = FindReplayExecution(tradeId);
+        if (execution is null)
             return;
 
-        if (ShouldIgnoreStaleHistoricalTargetOrderV183(_replayExecution, role, order, out var staleTargetReason))
+        if (ShouldIgnoreStaleHistoricalTargetOrderV183(execution, role, order, out var staleTargetReason))
         {
             LogExecutionInfo($"EXEC_HISTORICAL_DORMANT_TP_STALE_ORDER_IGNORED_V183 trade={tradeId} role={role} {staleTargetReason} src={source}");
-            AppendExecutionEvent(_replayExecution, "HISTORICAL_DORMANT_TP_STALE_ORDER_IGNORED_V183", role, order.Price, order.QuantityToFill, $"{staleTargetReason}|src={source}");
+            AppendExecutionEvent(execution, "HISTORICAL_DORMANT_TP_STALE_ORDER_IGNORED_V183", role, order.Price, order.QuantityToFill, $"{staleTargetReason}|src={source}");
             return;
         }
-        if (ShouldIgnoreStaleProtectBreakEvenOrderV186(_replayExecution, role, order, out var staleStopReason))
+        if (ShouldIgnoreStaleProtectBreakEvenOrderV186(execution, role, order, out var staleStopReason))
         {
             LogExecutionInfo($"EXEC_PROTECT_BE1R_STALE_ORDER_IGNORED_V186 trade={tradeId} role={role} {staleStopReason} src={source}");
-            AppendExecutionEvent(_replayExecution, "PROTECT_BE1R_STALE_ORDER_IGNORED_V186", role, order.TriggerPrice, order.QuantityToFill, $"{staleStopReason}|src={source}");
+            AppendExecutionEvent(execution, "PROTECT_BE1R_STALE_ORDER_IGNORED_V186", role, order.TriggerPrice, order.QuantityToFill, $"{staleStopReason}|src={source}");
             return;
         }
 
         if (role == "ENTRY")
-            _replayExecution.EntryOrder = order;
+            execution.EntryOrder = order;
         else if (role == "SL")
         {
-            _replayExecution.StopOrder = order;
-            TryMarkProtectBreakEvenV186Applied(_replayExecution, order, source);
+            execution.StopOrder = order;
+            TryMarkProtectBreakEvenV186Applied(execution, order, source);
         }
         else if (role == "TP")
-            _replayExecution.TargetOrder = order;
+            execution.TargetOrder = order;
         else if (role == "BASE_SL")
-            _replayExecution.StopOrder = order;
+            execution.StopOrder = order;
         else if (role == "BASE_TP")
-            _replayExecution.TargetOrder = order;
+            execution.TargetOrder = order;
         else if (role == "RUNNER_SL")
         {
-            if (_replayExecution.RunnerBreakEvenApplied &&
+            if (execution.RunnerBreakEvenApplied &&
                 _snapshot is not null &&
-                _replayExecution.RunnerStopOrder is not null &&
-                order.ExtId != _replayExecution.RunnerStopOrder.ExtId &&
-                Math.Abs(order.TriggerPrice - _replayExecution.RunnerStop) > _snapshot.InstrumentProfile.TickSize / 2m)
+                execution.RunnerStopOrder is not null &&
+                order.ExtId != execution.RunnerStopOrder.ExtId &&
+                Math.Abs(order.TriggerPrice - execution.RunnerStop) > _snapshot.InstrumentProfile.TickSize / 2m)
             {
-                LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_STALE_ORDER_IGNORED trade={tradeId} ext={order.ExtId} trigger={order.TriggerPrice:0.########} currentExt={_replayExecution.RunnerStopOrder.ExtId} currentStop={_replayExecution.RunnerStop:0.########} src={source}");
-                AppendExecutionEvent(_replayExecution, "ZONEBIRTH_RUNNER_V173_STALE_ORDER_IGNORED", "RUNNER_SL", order.TriggerPrice, order.QuantityToFill, $"ext={order.ExtId}|currentExt={_replayExecution.RunnerStopOrder.ExtId}|src={source}");
+                LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_STALE_ORDER_IGNORED trade={tradeId} ext={order.ExtId} trigger={order.TriggerPrice:0.########} currentExt={execution.RunnerStopOrder.ExtId} currentStop={execution.RunnerStop:0.########} src={source}");
+                AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_STALE_ORDER_IGNORED", "RUNNER_SL", order.TriggerPrice, order.QuantityToFill, $"ext={order.ExtId}|currentExt={execution.RunnerStopOrder.ExtId}|src={source}");
                 return;
             }
-            _replayExecution.RunnerStopOrder = order;
-            TryMarkZoneBirthRunnerBreakEvenV173Applied(_replayExecution, order, source);
+            execution.RunnerStopOrder = order;
+            TryMarkZoneBirthRunnerBreakEvenV173Applied(execution, order, source);
         }
         else if (role == "RUNNER_TP")
-            _replayExecution.RunnerTargetOrder = order;
+            execution.RunnerTargetOrder = order;
+        else if (role == "TIME_STOP")
+            execution.TimeStopOrderV208 = order;
         else if (role is "FLATTEN" or ReplayStopExitRole)
         {
-            _replayExecution.EmergencyFlattenOrder = order;
-            if (!IsWorkingExecutionOrder(order) && !_replayExecution.ExitCompleted &&
-                _replayExecution.EntryFilledQty > _replayExecution.ExitFilledQty)
+            execution.EmergencyFlattenOrder = order;
+            if (!IsWorkingExecutionOrder(order) && !execution.ExitCompleted &&
+                execution.EntryFilledQty > execution.ExitFilledQty)
             {
-                ScheduleEmergencyFlattenResidualCheck(_replayExecution, $"OrderInactive:{role}");
+                ScheduleEmergencyFlattenResidualCheck(execution, $"OrderInactive:{role}");
             }
         }
 
-        MarkProtectiveExitCallbackPendingV187(_replayExecution, role, order, source);
+        MarkProtectiveExitCallbackPendingV187(execution, role, order, source);
 
         LogExecutionInfo($"EXEC_ORDER_ATTACH src={source} trade={tradeId} role={role} state={order.State} ext={order.ExtId} type={order.Type} dir={order.Direction} price={order.Price:0.########} trig={order.TriggerPrice:0.########} unfilled={order.Unfilled:0.########} qty={order.QuantityToFill:0.########}");
         if (IsFailedOrderState(order.State.ToString()))
@@ -872,12 +1035,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             var eventName = IsExpectedOcoSiblingInactive(order)
                 ? "OCO_SIBLING_INACTIVE"
                 : "ORDER_STATE_FAILED";
-            AppendExecutionEvent(_replayExecution, eventName, role, order.Price > 0m ? order.Price : order.TriggerPrice, order.QuantityToFill, $"src={source}|state={order.State}|ext={order.ExtId}");
+            AppendExecutionEvent(execution, eventName, role, order.Price > 0m ? order.Price : order.TriggerPrice, order.QuantityToFill, $"src={source}|state={order.State}|ext={order.ExtId}");
             if (!string.Equals(eventName, "OCO_SIBLING_INACTIVE", StringComparison.Ordinal))
             {
                 NotifyLiveIssue($"OrderStateFailed:{order.ExtId}:{role}", $"Order entered a failed state. role={role}, state={order.State}, ext={order.ExtId}");
                 if (IsStopExitRole(role))
-                    EnqueueExecutionAction("FlattenOnStopStateFailed", async () => await SubmitEmergencyFlattenAsync(RemainingExecutionQuantity(_replayExecution), $"StopStateFailed:{role}"));
+                    EnqueueExecutionAction("FlattenOnStopStateFailed", async () => await SubmitEmergencyFlattenAsync(execution, RemainingExecutionQuantity(execution), $"StopStateFailed:{role}"));
             }
         }
     }
@@ -956,10 +1119,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return;
 
         execution.ProtectiveExitCallbackCheckScheduledV187 = true;
-        _ = VerifyProtectiveExitCallbackAfterGraceV187Async(execution, role, order.ExtId, source);
+        _ = VerifyProtectiveExitCallbackAfterGraceV187Async(execution, role, order, source);
     }
 
-    private async Task VerifyProtectiveExitCallbackAfterGraceV187Async(ReplayExecutionState execution, string role, long orderExtId, string source)
+    private async Task VerifyProtectiveExitCallbackAfterGraceV187Async(ReplayExecutionState execution, string role, Order order, string source)
     {
         await Task.Delay(2000);
         EnqueueExecutionAction("ProtectiveExitCallbackGraceV187", async () =>
@@ -971,10 +1134,39 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 return;
             }
 
+            if (IsFilledExecutionOrder(order))
+            {
+                if (execution.ZoneBirthSplitRunnerV172)
+                {
+                    RecoverHistoricalReplaySplitLegIfFilled(execution, role, order, ExpectedExitPrice(execution, role));
+                }
+                else
+                {
+                    var missingQty = Math.Min(RemainingExecutionQuantity(execution), order.QuantityToFill);
+                    if (missingQty > 0m)
+                    {
+                        var recoveredPrice = ExpectedExitPrice(execution, role);
+                        var oldExitValue = execution.ExitAvgPrice * execution.ExitFilledQty;
+                        execution.ExitFilledQty += missingQty;
+                        execution.ExitAvgPrice = (oldExitValue + recoveredPrice * missingQty) / execution.ExitFilledQty;
+                        AppendExecutionEvent(execution, "PROTECTIVE_EXIT_CALLBACK_RECOVERED_V215", role, recoveredPrice, missingQty, $"ext={order.ExtId}|state={order.State}|src={source}");
+                    }
+                }
+
+                var completeQty = execution.BracketQty > 0m ? execution.BracketQty : execution.Quantity;
+                if (execution.ExitFilledQty + 0.0000001m >= completeQty)
+                {
+                    execution.ProtectiveExitCallbackPendingV187 = false;
+                    var recoveredPrice = execution.ExitAvgPrice > 0m ? execution.ExitAvgPrice : ExpectedExitPrice(execution, role);
+                    await FinalizeCompletedExecutionExitAsync(execution, recoveredPrice, role);
+                    return;
+                }
+            }
+
             var position = GetCurrentAccountPosition();
             if (position == 0m)
             {
-                AppendExecutionEvent(execution, "PROTECTIVE_EXIT_ACCOUNT_FLAT_CALLBACK_PENDING_V187", role, 0m, 0m, $"ext={orderExtId}|src={source}");
+                AppendExecutionEvent(execution, "PROTECTIVE_EXIT_ACCOUNT_FLAT_CALLBACK_PENDING_V187", role, 0m, 0m, $"ext={order.ExtId}|src={source}");
                 return;
             }
             if (HasRequiredWorkingStops(execution))
@@ -983,13 +1175,22 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 return;
             }
 
+
+            var expectedPosition = ActiveReplayExecutions().Sum(active =>
+                (active.Side == TradeSide.Long ? 1m : -1m) * RemainingExecutionQuantity(active));
+            if (Math.Abs(position) + 0.0000001m < Math.Abs(expectedPosition))
+            {
+                AppendExecutionEvent(execution, "PROTECTIVE_EXIT_CALLBACK_POSITION_REDUCED_V215", role, 0m, RemainingExecutionQuantity(execution), $"position={position:0.########}|expected={expectedPosition:0.########}|ext={order.ExtId}|src={source}|noCrossSlotFlatten");
+                return;
+            }
+
             execution.ProtectiveExitCallbackPendingV187 = false;
             execution.EmergencyFlattenSubmitted = true;
             var remainingQty = RemainingExecutionQuantity(execution);
             LogExecutionInfo($"EXEC_PROTECTIVE_EXIT_CALLBACK_TIMEOUT_V187 trade={execution.TradeId} role={role} position={position:0.########} remaining={remainingQty:0.########}");
-            AppendExecutionEvent(execution, "PROTECTIVE_EXIT_CALLBACK_TIMEOUT_V187", role, 0m, remainingQty, $"position={position:0.########}|ext={orderExtId}|src={source}");
+            AppendExecutionEvent(execution, "PROTECTIVE_EXIT_CALLBACK_TIMEOUT_V187", role, 0m, remainingQty, $"position={position:0.########}|ext={order.ExtId}|src={source}");
             NotifyLiveIssue($"ProtectiveExitCallbackTimeout:{execution.TradeId}", $"Protective order became terminal but its fill callback did not complete within the grace window. trade={execution.TradeId}, role={role}. Emergency flatten is being submitted.");
-            await SubmitEmergencyFlattenAsync(remainingQty, $"ProtectiveExitCallbackTimeout:{role}");
+            await SubmitEmergencyFlattenAsync(execution, remainingQty, $"ProtectiveExitCallbackTimeout:{role}");
         });
     }
 
@@ -1164,7 +1365,21 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             _researchLogger?.AppendSignal(qualified);
             StartResearchTracking(qualified, candle, "BreakawayFvg_Qualified");
         }
-        _pendingBreakawayRetests.Add(new PendingBreakawayRetest(signal, candle.Bar + 6));
+        _pendingBreakawayRetests.Add(new PendingBreakawayRetest(signal, candle.Bar + 6, "BreakawayRetest", 6, false));
+        foreach (var windowBars in new[] { 12, 18 })
+        {
+            var retestResearch = signal with
+            {
+                SignalId = $"{signal.SignalId}-RT{windowBars}",
+                SkipReasons = signal.SkipReasons.Concat(new[] { $"BreakawayRetest{windowBars}Research" }).ToArray()
+            };
+            _pendingBreakawayRetests.Add(new PendingBreakawayRetest(
+                retestResearch,
+                candle.Bar + windowBars,
+                $"BreakawayRetest{windowBars}Research",
+                windowBars,
+                true));
+        }
     }
 
     private void TryStartMainlinePullbackRetest(OpfCandle candle, MarketRegime marketRegime, RegimeResult regime, DetectedZone zone, string skipReason)
@@ -1305,7 +1520,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
             if (IsInvalidated(signal.Zone, candle))
             {
-                _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, signal.SignalId, candle.Time, candle.Bar, "BreakawayRetest", new[] { "BreakawayZoneInvalidated" });
+                _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, signal.SignalId, candle.Time, candle.Bar, pending.ResearchPath, BreakawayRetestLogReasons(pending, "BreakawayZoneInvalidated"));
                 _pendingBreakawayRetests.RemoveAt(i);
                 continue;
             }
@@ -1313,6 +1528,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             var touched = IsZoneTouched(candle, signal.Zone);
             if (touched)
                 pending.Touched = true;
+            else if (pending.ResearchOnly && !pending.WaitingTouchLogged)
+            {
+                _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, signal.SignalId, candle.Time, candle.Bar, pending.ResearchPath, new[] { "WaitingRetestTouch", $"WindowBars={pending.WindowBars}" });
+                pending.WaitingTouchLogged = true;
+            }
 
             (bool Confirmed, string Reason) confirm = pending.Touched
                 ? TryConfirm(signal, candle, _previousCandle)
@@ -1322,7 +1542,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 var qualityReason = BreakawayRetestQualityRejectReason(signal, candle);
                 if (qualityReason is not null)
                 {
-                    _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, signal.SignalId, candle.Time, candle.Bar, "BreakawayRetest", new[] { qualityReason, confirm.Reason });
+                    _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, signal.SignalId, candle.Time, candle.Bar, pending.ResearchPath, BreakawayRetestLogReasons(pending, qualityReason, confirm.Reason));
                     _pendingBreakawayRetests.RemoveAt(i);
                     continue;
                 }
@@ -1334,18 +1554,20 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                     Bar = candle.Bar,
                     Stage = SignalStage.ResearchOnly,
                     SetupQualityScore = BuildSetupQualityScore(signal.RegimeScore, signal.Zone, "BreakawayRetest", signal.Side, candle),
-                    SkipReasons = new[] { "BreakawayRetestResearch", confirm.Reason }
+                    SkipReasons = pending.ResearchOnly
+                        ? new[] { pending.ResearchPath, confirm.Reason, $"WindowBars={pending.WindowBars}" }
+                        : new[] { "BreakawayRetestResearch", confirm.Reason }
                 };
 
                 _researchLogger?.AppendSignal(retestSignal);
-                StartResearchTracking(retestSignal, candle, "BreakawayRetest");
+                StartResearchTracking(retestSignal, candle, pending.ResearchPath, submitReplayExecution: !pending.ResearchOnly);
                 _pendingBreakawayRetests.RemoveAt(i);
                 continue;
             }
 
             if (candle.Bar >= pending.MaxRetestBar)
             {
-                _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, signal.SignalId, candle.Time, candle.Bar, "BreakawayRetest", new[] { "BreakawayRetestExpired", confirm.Reason });
+                _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, signal.SignalId, candle.Time, candle.Bar, pending.ResearchPath, BreakawayRetestLogReasons(pending, "BreakawayRetestExpired", confirm.Reason));
                 _pendingBreakawayRetests.RemoveAt(i);
             }
         }
@@ -2198,7 +2420,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             _recentCandles.RemoveAt(0);
     }
 
-    private void StartResearchTracking(CandidateSignal signal, OpfCandle entryCandle, string researchPath)
+    private void StartResearchTracking(CandidateSignal signal, OpfCandle entryCandle, string researchPath, bool submitReplayExecution = true)
     {
         if (signal.Zone is null)
             return;
@@ -2208,17 +2430,17 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var stop = signal.Side == TradeSide.Long
             ? signal.Zone.Low - buffer
             : signal.Zone.High + buffer;
-        StartResearchTracking(signal, entryCandle, researchPath, stop);
+        StartResearchTracking(signal, entryCandle, researchPath, stop, submitReplayExecution);
     }
 
-    private void StartResearchTracking(CandidateSignal signal, OpfCandle entryCandle, string researchPath, decimal stop)
+    private void StartResearchTracking(CandidateSignal signal, OpfCandle entryCandle, string researchPath, decimal stop, bool submitReplayExecution = true)
     {
         var entry = entryCandle.Close;
         var risk = Math.Abs(entry - stop);
         if (risk <= 0m)
             return;
 
-        AddResearchTracker(signal, entryCandle, researchPath, stop, risk);
+        AddResearchTracker(signal, entryCandle, researchPath, stop, risk, submitReplayExecution: submitReplayExecution);
 
         if (ActualEnableWideStopExecution && ShouldTrackWideStopVariant(researchPath))
         {
@@ -2299,11 +2521,115 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             maxBars: 12,
             researchPath));
 
+        CaptureFootprintCandidate(signal, entryCandle, researchPath, stop, risk);
+
         if (submitReplayExecution)
             TrySubmitReplayExecution(signal, entryCandle, researchPath, stop, risk, allowDelayedExpansion);
     }
 
-    private void TrySubmitReplayExecution(CandidateSignal signal, OpfCandle entryCandle, string researchPath, decimal stop, decimal risk, bool allowDelayedExpansion = true)
+    private void CaptureDeferredContinuationV209(
+        CandidateSignal signal,
+        OpfCandle entryCandle,
+        string researchPath,
+        decimal risk,
+        ReplayExecutionState parent)
+    {
+        var shadowKey = ShadowTradeKey(signal.SignalId, researchPath, entryCandle.Bar);
+        if (_deferredContinuations.Any(x => string.Equals(x.ShadowKey, shadowKey, StringComparison.Ordinal)))
+            return;
+
+        var candidate = new DeferredContinuationCandidate(
+            signal,
+            researchPath,
+            risk,
+            parent.TradeId,
+            shadowKey,
+            ++_deferredCaptureSequence);
+        _deferredContinuations.Add(candidate);
+
+        var parentCount = _deferredContinuations.Count(x => string.Equals(x.ParentTradeId, parent.TradeId, StringComparison.Ordinal));
+        var message = $"parent={parent.TradeId}|risk={risk:0.##}|shadowKey={shadowKey}|parentCandidates={parentCount}|sequence={candidate.CaptureSequence}";
+        AppendExecutionEvent(signal, parent.TradeId, entryCandle, "DEFERRED_CANDIDATE_QUEUED_V209", "-", researchPath, entryCandle.Close, 0m, message);
+    }
+
+    private void TryActivateDeferredContinuationV209(int bar)
+    {
+        if (_snapshot is null || _deferredContinuations.Count == 0 || bar < 0 || ActiveReplayExecutions().Count > 0)
+            return;
+
+        var entryCandle = CurrentBarOpenCandleV208(bar);
+        if (entryCandle is null)
+            return;
+
+        var parentTradeId = _deferredContinuations
+            .OrderByDescending(x => x.CaptureSequence)
+            .Select(x => x.ParentTradeId)
+            .First();
+        var parentCandidates = _deferredContinuations
+            .Where(x => string.Equals(x.ParentTradeId, parentTradeId, StringComparison.Ordinal))
+            .ToArray();
+        _deferredContinuations.RemoveAll(x => string.Equals(x.ParentTradeId, parentTradeId, StringComparison.Ordinal));
+
+        var pending = parentCandidates
+            .Where(x => _shadowTradeTrackersByKey.ContainsKey(x.ShadowKey))
+            .OrderByDescending(x => x.Signal.Time)
+            .ThenByDescending(x => x.CaptureSequence)
+            .FirstOrDefault();
+        foreach (var expired in parentCandidates.Where(x => pending is null || !string.Equals(x.ShadowKey, pending.ShadowKey, StringComparison.Ordinal)))
+        {
+            var state = _shadowTradeTrackersByKey.ContainsKey(expired.ShadowKey) ? "SupersededByLaterLiveCandidate" : "ShadowLifecycleCompleted";
+            AppendExecutionEvent(expired.Signal, expired.ParentTradeId, entryCandle, "DEFERRED_CANDIDATE_REJECTED_V209", "-", expired.ResearchPath, entryCandle.Open, 0m, $"state={state}|shadowKey={expired.ShadowKey}|activationBar={bar}");
+        }
+        if (pending is null)
+        {
+            AppendExecutionEvent(parentCandidates[^1].Signal, parentTradeId, entryCandle, "DEFERRED_NO_LIVE_CANDIDATE_V209", "-", parentCandidates[^1].ResearchPath, entryCandle.Open, 0m, $"candidates={parentCandidates.Length}|activationBar={bar}");
+            return;
+        }
+
+        var signal = pending.Signal with { Time = entryCandle.Time, Bar = entryCandle.Bar };
+        var stop = signal.Side == TradeSide.Long
+            ? entryCandle.Open - pending.Risk
+            : entryCandle.Open + pending.Risk;
+        AppendExecutionEvent(signal, pending.ParentTradeId, entryCandle, "DEFERRED_ACTIVATION_ATTEMPT_V209", "ENTRY", pending.ResearchPath, entryCandle.Open, ReplayOrderQuantity, $"parent={pending.ParentTradeId}|risk={pending.Risk:0.##}|shadowKey={pending.ShadowKey}|candidates={parentCandidates.Length}");
+
+        TrySubmitReplayExecution(
+            signal,
+            entryCandle,
+            pending.ResearchPath,
+            stop,
+            pending.Risk,
+            allowDelayedExpansion: false,
+            isDeferredContinuation: true,
+            deferredParentTradeId: pending.ParentTradeId);
+
+        if (_replayExecution is not null && _replayExecution.IsDeferredContinuation &&
+            string.Equals(_replayExecution.DeferredParentTradeId, pending.ParentTradeId, StringComparison.Ordinal))
+        {
+            AppendExecutionEvent(signal, _replayExecution.TradeId, entryCandle, "DEFERRED_ACTIVATED_V209", "ENTRY", pending.ResearchPath, entryCandle.Open, _replayExecution.Quantity, $"parent={pending.ParentTradeId}|targetR={DeferredContinuationTargetRV208:0.##}|timeStopBars={DeferredContinuationMaxBarsV208}|shadowKey={pending.ShadowKey}");
+            return;
+        }
+
+        AppendExecutionEvent(signal, pending.ParentTradeId, entryCandle, "DEFERRED_GATE_REJECTED_V209", "-", pending.ResearchPath, entryCandle.Open, 0m, "See execution_decisions.csv for the exact recheck reason");
+    }
+
+    private OpfCandle? CurrentBarOpenCandleV208(int bar)
+    {
+        var source = GetCandle(bar);
+        if (source is null)
+            return null;
+        var candle = ToOpfCandle(bar, source);
+        return candle with { High = candle.Open, Low = candle.Open, Close = candle.Open };
+    }
+
+    private void TrySubmitReplayExecution(
+        CandidateSignal signal,
+        OpfCandle entryCandle,
+        string researchPath,
+        decimal stop,
+        decimal risk,
+        bool allowDelayedExpansion = true,
+        bool isDeferredContinuation = false,
+        string deferredParentTradeId = "")
     {
         if (!ActualOrdersEnabled || _snapshot is null)
             return;
@@ -2332,6 +2658,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return;
         }
         ResetReplayExecutionDailyCounter(GlobexTradingDayKey(entryCandle.Time));
+        StartDecisionTapeCalibrationTracking(signal, entryCandle, researchPath, stop, risk);
         if (_liveReadinessBlocked)
         {
             var reason = $"LiveReadinessBlocked:{_liveReadinessBlockReason}";
@@ -2391,12 +2718,19 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_SAME_BAR_AMBIGUOUS", "-", researchPath, entryCandle.Close, 0m, string.Join("|", sameBarSkipReasons));
             return;
         }
-        StartShadowTradeTracking(signal, entryCandle, researchPath, stop, risk);
+        if (!isDeferredContinuation)
+            StartShadowTradeTracking(signal, entryCandle, researchPath, stop, risk);
         if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
         {
             var reason = $"LiveDailyLoss:net={_liveAccountDailyNetPnlDollars:0.##},limit={_actualDailyLossLimitDollars:0.##}";
             AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_LIVE_DAILY_LOSS", "-", researchPath, entryCandle.Close, 0m, reason);
+            return;
+        }
+        if (signal.Side == TradeSide.Long && IsWeeklyLongLossGateActive(out var weeklyLongLossReason))
+        {
+            AppendExecutionDecision(signal, entryCandle, "Skip", weeklyLongLossReason, researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_WEEKLY_LONG_LOSS_V219", "-", researchPath, entryCandle.Close, 0m, weeklyLongLossReason);
             return;
         }
         if (ReplayMaxTradesPerDay > 0 && _replayTradesToday >= ReplayMaxTradesPerDay)
@@ -2430,22 +2764,102 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_DAILY_CONSEC_LOSS_LIMIT", "-", researchPath, entryCandle.Close, 0m, $"consecLosses={_replayConsecutiveLossesToday}|max={executionProfile.MaxConsecutiveLossesPerDay}");
             return;
         }
-        var activeExecution = _replayExecution;
-        if (activeExecution is not null && IsReplayExecutionActive(activeExecution))
+        var activeExecutions = ActiveReplayExecutions();
+        var isSecondaryExecution = activeExecutions.Count == 1;
+        if (activeExecutions.Count >= 2)
         {
-            _researchLogger?.AppendInfo(_snapshot.SnapshotId, entryCandle.Bar, entryCandle.Time, $"EXEC_SKIP_ACTIVE signal={signal.SignalId} active={activeExecution.TradeId}");
-            AppendExecutionDecision(signal, entryCandle, "Skip", $"ActiveTrade:{activeExecution.TradeId}", researchPath, stop, risk);
-            AppendExecutionEvent(signal, activeExecution.TradeId, entryCandle, "SKIP_ACTIVE", "-", researchPath, entryCandle.Close, 0m, activeExecution.TradeId);
+            var activeIds = string.Join(",", activeExecutions.Select(x => x.TradeId));
+            AppendExecutionDecision(signal, entryCandle, "Skip", $"ActiveTradeLimit:{activeIds}", researchPath, stop, risk);
+            AppendExecutionEvent(signal, activeIds, entryCandle, "SKIP_ACTIVE_LIMIT_V215", "-", researchPath, entryCandle.Close, 0m, activeIds);
             return;
         }
+        if (!isSecondaryExecution &&
+            string.Equals(researchPath, "ZoneBirthResearch", StringComparison.OrdinalIgnoreCase) &&
+            signal.SetupQualityScore.TotalScore < PrimaryZoneBirthMinSetupQualityV221)
+        {
+            var reason = $"PrimaryZoneBirthQualityV221:score={signal.SetupQualityScore.TotalScore:0.##}|min={PrimaryZoneBirthMinSetupQualityV221:0.##}";
+            AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_PRIMARY_ZONE_BIRTH_QUALITY_V221", "-", researchPath, entryCandle.Close, 0m, reason);
+            return;
+        }
+        if (!isSecondaryExecution &&
+            signal.Side == TradeSide.Long &&
+            string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase) &&
+            RegimeBars(entryCandle.Bar) < PrimaryObservationConfirmMinRegimeBarsV223)
+        {
+            var regimeBars = RegimeBars(entryCandle.Bar);
+            var reason = $"PrimaryObservationConfirmRegimeBarsV223:bars={regimeBars}|min={PrimaryObservationConfirmMinRegimeBarsV223}";
+            AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_PRIMARY_OC_REGIME_BARS_V223", "-", researchPath, entryCandle.Close, 0m, reason);
+            return;
+        }
+        if (!isSecondaryExecution &&
+            signal.Side == TradeSide.Short &&
+            string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase) &&
+            (signal.SetupQualityScore.TotalScore < PrimaryBreakawayMinSetupQualityV223 ||
+             risk < PrimaryBreakawayMinRiskPointsV223 ||
+             !HasPassedRegimeComponent(signal.RegimeScore, "VWAPSide")))
+        {
+            var vwapSidePassed = HasPassedRegimeComponent(signal.RegimeScore, "VWAPSide");
+            var reason = $"PrimaryBreakawayRichV223:score={signal.SetupQualityScore.TotalScore:0.##}|minScore={PrimaryBreakawayMinSetupQualityV223:0.##}|risk={risk:0.##}|minRisk={PrimaryBreakawayMinRiskPointsV223:0.##}|vwapSidePassed={vwapSidePassed}";
+            AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_PRIMARY_BREAKAWAY_RICH_V223", "-", researchPath, entryCandle.Close, 0m, reason);
+            return;
+        }
+        if (isSecondaryExecution)
+        {
+            var primary = activeExecutions[0];
+            var secondaryQty = Math.Max(0m, ReplayOrderQuantity);
+            var pointValue = _snapshot.InstrumentProfile.PointValue;
+            var combinedRisk = primary.InitialRiskPoints * pointValue * RemainingExecutionQuantity(primary) +
+                risk * pointValue * secondaryQty;
+            var secondaryReason = string.Empty;
+            if (isDeferredContinuation)
+                secondaryReason = "DeferredSecondaryDisabled";
+            else if (primary.Side != signal.Side)
+                secondaryReason = $"SecondaryDirectionMismatch:primary={primary.Side}|candidate={signal.Side}";
+            else if (!IsStaticSecondaryEligibleV215(signal.Side, researchPath, risk))
+                secondaryReason = $"SecondaryStaticG2Blocked:path={researchPath}|side={signal.Side}|band={StaticRiskBandV215(risk)}";
+            else if (combinedRisk > 300m)
+                secondaryReason = $"SecondaryRiskCap:combined={combinedRisk:0.##}|max=300";
+            else if (!primary.BracketSubmitted || primary.EntryFilledQty <= primary.ExitFilledQty)
+            {
+                if (TryQueuePendingProtectedSecondaryV216(primary, signal, entryCandle, researchPath, stop, risk, out var pendingReason))
+                {
+                    AppendExecutionEvent(signal, primary.TradeId, entryCandle, "SECONDARY_WAITING_FOR_PROTECTION_V216", "-", researchPath, entryCandle.Close, 0m, pendingReason);
+                    return;
+                }
+
+                secondaryReason = pendingReason;
+            }
+            if (!string.IsNullOrEmpty(secondaryReason))
+            {
+                AppendExecutionDecision(signal, entryCandle, "Skip", secondaryReason, researchPath, stop, risk);
+                AppendExecutionEvent(signal, primary.TradeId, entryCandle, "SKIP_SECONDARY_GATE_V215", "-", researchPath, entryCandle.Close, 0m, secondaryReason);
+                return;
+            }
+        }
         var currentPosition = GetCurrentAccountPosition();
-        if (currentPosition != 0m)
+        if (activeExecutions.Count == 0 && currentPosition != 0m)
         {
             var reason = $"OrphanPosition:pos={currentPosition:0.########}";
             _researchLogger?.AppendInfo(_snapshot.SnapshotId, entryCandle.Bar, entryCandle.Time, $"EXEC_SKIP_ORPHAN_POSITION signal={signal.SignalId} pos={currentPosition:0.########}");
             AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_ORPHAN_POSITION", "-", researchPath, entryCandle.Close, Math.Abs(currentPosition), reason);
             return;
+        }
+        if (activeExecutions.Count == 1)
+        {
+            var primary = activeExecutions[0];
+            var expectedPosition = (primary.Side == TradeSide.Long ? 1m : -1m) * RemainingExecutionQuantity(primary);
+            if (Math.Sign(currentPosition) != Math.Sign(expectedPosition) ||
+                Math.Abs(Math.Abs(currentPosition) - Math.Abs(expectedPosition)) > 0.0000001m)
+            {
+                var reason = $"ManagedPositionMismatch:actual={currentPosition:0.########}|expected={expectedPosition:0.########}|primary={primary.TradeId}";
+                AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
+                AppendExecutionEvent(signal, primary.TradeId, entryCandle, "SKIP_MANAGED_POSITION_MISMATCH_V215", "-", researchPath, entryCandle.Close, Math.Abs(currentPosition), reason);
+                return;
+            }
         }
         if (Portfolio is null || Security is null)
         {
@@ -2465,9 +2879,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         var entry = entryCandle.Close;
-        var targetR = ActualTargetRFor(signal, researchPath, risk);
+        var targetR = isDeferredContinuation ? DeferredContinuationTargetRV208 : ActualTargetRFor(signal, researchPath, risk);
         var target = TargetFromRisk(signal.Side, entry, risk, targetR);
-        var tradeId = $"{entryCandle.Time:yyyyMMdd-HHmm}-{signal.Side}-{entryCandle.Bar}";
+        var lane = isSecondaryExecution ? "Secondary" : "Primary";
+        var tradeId = $"{entryCandle.Time:yyyyMMdd-HHmm}-{signal.Side}-{entryCandle.Bar}{(isSecondaryExecution ? "-S2" : string.Empty)}{(isDeferredContinuation ? "-DEF" : string.Empty)}";
         var maxAllowedRiskPoints = MaxAllowedActualRiskPoints(signal, researchPath, risk);
         var entryOrder = new Order
         {
@@ -2481,7 +2896,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AutoCancel = false
         };
 
-        _replayExecution = new ReplayExecutionState(
+        var execution = new ReplayExecutionState(
             tradeId,
             signal.SignalId,
             signal.Side,
@@ -2496,15 +2911,23 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             maxAllowedRiskPoints,
             targetR,
             entryOrder);
-        TrackRecentReplayExecution(_replayExecution);
+        execution.Lane = lane;
+        execution.IsDeferredContinuation = isDeferredContinuation;
+        execution.DeferredParentTradeId = deferredParentTradeId;
+        _replayExecution = execution;
+        TrackRecentReplayExecution(execution);
 
         _researchLogger?.AppendInfo(_snapshot.SnapshotId, entryCandle.Bar, entryCandle.Time, $"EXEC_ENTRY_SEND trade={tradeId} signal={signal.SignalId} path={researchPath} side={signal.Side} qty={qty} stop={stop:0.########} target={target:0.########}");
         _researchLogger?.AppendSignal(signal with { Stage = SignalStage.Executed, SkipReasons = signal.SkipReasons.Concat(new[] { "ReplayExecuted", researchPath, tradeId }).ToArray() });
         var executeReasons = new List<string> { $"TradeID:{tradeId}" };
+        if (isDeferredContinuation)
+            executeReasons.Add($"DeferredContinuationV208:parent={deferredParentTradeId}|targetR={DeferredContinuationTargetRV208:0.##}|timeStopBars={DeferredContinuationMaxBarsV208}");
         if (UseLegacyV174StrategyPolicyV204)
             executeReasons.Add($"LegacyV174PolicyV204:targetR={targetR:0.##}|dailyCap={ReplayMaxTradesPerDay}");
         else if (UsesProtectBreakEvenV186(signal.Side, researchPath))
             executeReasons.Add($"ProtectBE1RThen3RV186:triggerR={ProtectBreakEvenTriggerRV186:0.##},targetR={ProtectBreakEvenTargetRV186:0.##}");
+        if (!isDeferredContinuation && TryGetActualExitPolicyV209(signal.Side, researchPath, out var policyTargetR, out var policyBreakEvenTriggerR, out var policyTimeStopBars, risk))
+            executeReasons.Add($"ActualExitPolicyV209:targetR={policyTargetR:0.##}|beTriggerR={policyBreakEvenTriggerR:0.##}|timeStopBars={policyTimeStopBars}");
         var isObservationFiller = IsObservationConfirmFiller(signal, researchPath);
         if (isObservationFiller)
         {
@@ -2584,7 +3007,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (IsZoneBirthShortExpansionV168(signal, researchPath))
             {
                 executeReasons.Add($"ZoneBirthShortDualRiskBandV170:{ZoneBirthShortV170RiskBandTag(risk)},risk={risk:0.##}");
-                executeReasons.Add($"ZoneBirthSplitRunnerV173:baseQty=1,runnerQty=1,baseTargetR={targetR:0.##},runnerTargetR={ZoneBirthSplitRunnerV173TargetR:0.##},runnerBeAfter=BaseTP");
+                executeReasons.Add($"ZoneBirthSplitRunnerV208:baseQty={ZoneBirthSplitRunnerV172BaseQuantity:0},runnerQty={ZoneBirthSplitRunnerV172RunnerQuantity:0},baseTargetR={targetR:0.##},runnerTargetR={ZoneBirthSplitRunnerV173TargetR:0.##},runnerBeAfter=BaseTP");
             }
         }
         var wait1Tag = signal.SkipReasons.FirstOrDefault(x => x.StartsWith("AggressiveExpansionWait1V165:", StringComparison.Ordinal));
@@ -2601,9 +3024,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (targetR != ReplayTargetR)
             executeReasons.Add($"ActualTargetOverride:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
         var executeReason = string.Join("|", executeReasons);
-        _replayExecution.CountedAsObservationFiller = isObservationFiller;
-        _replayExecution.CountedAsQualityRescue = IsDailyVolumeQualityRescue(signal, researchPath, risk);
-        _replayExecution.CountedAsWideStopLongExpansion = isWideStopLongExpansionV157;
+        execution.CountedAsObservationFiller = isObservationFiller;
+        execution.CountedAsQualityRescue = IsDailyVolumeQualityRescue(signal, researchPath, risk);
+        execution.CountedAsWideStopLongExpansion = isWideStopLongExpansionV157;
         AppendExecutionDecision(signal, entryCandle, "Execute", executeReason, researchPath, stop, risk, tradeId);
         AppendExecutionEvent(signal, tradeId, entryCandle, "ENTRY_SEND", "ENTRY", researchPath, entry, qty, $"stop={stop:0.########}|target={target:0.########}");
         _replayTradesToday++;
@@ -2613,13 +3036,148 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             _observationConfirmQualityRescueTradesToday++;
         if (isWideStopLongExpansionV157)
             _observationConfirmWideStopLongExpansionTradesToday++;
-        var execution = _replayExecution;
         EnqueueExecutionAction("OpenReplayEntry", async () => await OpenReplayEntryAfterQuotePreflightAsync(execution));
+    }
+
+    private bool TryQueuePendingProtectedSecondaryV216(
+        ReplayExecutionState primary,
+        CandidateSignal signal,
+        OpfCandle entryCandle,
+        string researchPath,
+        decimal stop,
+        decimal risk,
+        out string reason)
+    {
+        lock (_pendingProtectedSecondarySyncV216)
+        {
+            if (_pendingProtectedSecondaryV216 is not null)
+            {
+                reason = $"PendingProtectedSecondaryExistsV216:primary={_pendingProtectedSecondaryV216.PrimaryTradeId}|signal={_pendingProtectedSecondaryV216.Signal.SignalId}";
+                return false;
+            }
+
+            _pendingProtectedSecondaryV216 = new PendingProtectedSecondaryV216(
+                primary.TradeId,
+                signal,
+                entryCandle,
+                researchPath,
+                stop,
+                risk);
+        }
+
+        reason = $"PrimaryNotProtectedDeferredV216:primary={primary.TradeId}|signal={signal.SignalId}|bar={entryCandle.Bar}";
+        return true;
+    }
+
+    private void TryActivatePendingProtectedSecondaryV216(ReplayExecutionState primary)
+    {
+        PendingProtectedSecondaryV216? pending;
+        lock (_pendingProtectedSecondarySyncV216)
+        {
+            if (_pendingProtectedSecondaryV216 is null ||
+                !string.Equals(_pendingProtectedSecondaryV216.PrimaryTradeId, primary.TradeId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            pending = _pendingProtectedSecondaryV216;
+            _pendingProtectedSecondaryV216 = null;
+        }
+
+        if (primary.ExitCompleted || !primary.BracketSubmitted || !HasRequiredWorkingStops(primary) ||
+            primary.EntryFilledQty <= primary.ExitFilledQty)
+        {
+            RejectPendingProtectedSecondaryV216(pending, "PrimaryProtectionUnavailableAfterCallbackV216");
+            return;
+        }
+        if (_lastSeenBar > pending.EntryCandle.Bar + 1)
+        {
+            RejectPendingProtectedSecondaryV216(pending, $"PendingSecondaryExpiredV216:currentBar={_lastSeenBar}|entryBar={pending.EntryCandle.Bar}");
+            return;
+        }
+
+        var reference = CurrentExecutionMarketReference(pending.EntryCandle.Close);
+        if (!TryValidateExecutionQuotePair(reference, out var quoteReason))
+        {
+            RejectPendingProtectedSecondaryV216(pending, $"PendingSecondaryQuoteInvalidV216:{quoteReason}");
+            return;
+        }
+
+        var quote = ExecutionQuoteSnapshot();
+        var entry = pending.Signal.Side == TradeSide.Long ? quote.Ask : quote.Bid;
+        if (entry <= 0m ||
+            (pending.Signal.Side == TradeSide.Long && pending.Stop >= entry) ||
+            (pending.Signal.Side == TradeSide.Short && pending.Stop <= entry))
+        {
+            RejectPendingProtectedSecondaryV216(pending, $"PendingSecondaryInvalidFreshRiskV216:entry={entry:0.########}|stop={pending.Stop:0.########}");
+            return;
+        }
+
+        var risk = Math.Abs(entry - pending.Stop);
+        var freshCandle = pending.EntryCandle with
+        {
+            Open = entry,
+            High = Math.Max(pending.EntryCandle.High, entry),
+            Low = Math.Min(pending.EntryCandle.Low, entry),
+            Close = entry
+        };
+        AppendExecutionEvent(
+            pending.Signal,
+            primary.TradeId,
+            freshCandle,
+            "SECONDARY_PROTECTION_READY_RETRY_V216",
+            "ENTRY",
+            pending.ResearchPath,
+            entry,
+            ReplayOrderQuantity,
+            $"primary={primary.TradeId}|plannedRisk={pending.Risk:0.##}|freshRisk={risk:0.##}|bid={quote.Bid:0.########}|ask={quote.Ask:0.########}");
+        TrySubmitReplayExecution(
+            pending.Signal,
+            freshCandle,
+            pending.ResearchPath,
+            pending.Stop,
+            risk,
+            allowDelayedExpansion: false);
+    }
+
+    private void ExpirePendingProtectedSecondaryV216(OpfCandle candle)
+    {
+        PendingProtectedSecondaryV216? pending = null;
+        lock (_pendingProtectedSecondarySyncV216)
+        {
+            if (_pendingProtectedSecondaryV216 is not null && candle.Bar > _pendingProtectedSecondaryV216.EntryCandle.Bar)
+            {
+                pending = _pendingProtectedSecondaryV216;
+                _pendingProtectedSecondaryV216 = null;
+            }
+        }
+
+        if (pending is not null)
+            RejectPendingProtectedSecondaryV216(pending, $"PendingSecondaryExpiredV216:closedBar={candle.Bar}|entryBar={pending.EntryCandle.Bar}");
+    }
+
+    private void RejectPendingProtectedSecondaryV216(PendingProtectedSecondaryV216 pending, string reason)
+    {
+        AppendExecutionDecision(pending.Signal, pending.EntryCandle, "Skip", reason, pending.ResearchPath, pending.Stop, pending.Risk);
+        AppendExecutionEvent(pending.Signal, pending.PrimaryTradeId, pending.EntryCandle, "SECONDARY_PROTECTION_RETRY_REJECTED_V216", "-", pending.ResearchPath, pending.EntryCandle.Close, 0m, reason);
+    }
+
+    private void ClearPendingProtectedSecondaryV216(string reason)
+    {
+        PendingProtectedSecondaryV216? pending;
+        lock (_pendingProtectedSecondarySyncV216)
+        {
+            pending = _pendingProtectedSecondaryV216;
+            _pendingProtectedSecondaryV216 = null;
+        }
+
+        if (pending is not null)
+            RejectPendingProtectedSecondaryV216(pending, reason);
     }
 
     private async Task OpenReplayEntryAfterQuotePreflightAsync(ReplayExecutionState execution)
     {
-        if (!ReferenceEquals(_replayExecution, execution) || execution.ExitCompleted || execution.EntryOrder is null)
+        if (!IsRegisteredReplayExecution(execution) || execution.ExitCompleted || execution.EntryOrder is null)
             return;
 
         var reference = CurrentExecutionMarketReference(execution.CreatedPrice);
@@ -2633,10 +3191,48 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AbortEntrySubmissionV178(execution, reference, reason);
             return;
         }
-
         var quote = ExecutionQuoteSnapshot();
+        var estimatedFill = execution.Side == TradeSide.Long ? quote.Ask : quote.Bid;
+        var estimatedRisk = EstimatedRepricedRiskPointsV216(execution, estimatedFill);
+        if (IsStrictEntryExcludedRiskV208(estimatedRisk))
+        {
+            var reason = $"EntryQuoteStrictRiskBandExcludedV216:risk={estimatedRisk:0.##}|excluded=({StrictEntryExcludedRiskMinExclusiveV208:0.##},{StrictEntryExcludedRiskMaxInclusiveV208:0.##}]|planned={execution.PlannedRiskPoints:0.##}|bid={quote.Bid:0.########}|ask={quote.Ask:0.########}";
+            AppendExecutionEvent(execution, "ENTRY_QUOTE_STRICT_RISK_BAND_EXCLUDED_V216", "ENTRY", estimatedFill, execution.Quantity, reason);
+            AbortEntrySubmissionV178(execution, estimatedFill, reason);
+            return;
+        }
+        if (execution.MaxAllowedRiskPoints > 0m && estimatedRisk > execution.MaxAllowedRiskPoints &&
+            !IsEntryRiskDriftAccepted(execution, estimatedRisk))
+        {
+            var reason = $"EntryQuoteRiskExceededV216:risk={estimatedRisk:0.##}|max={execution.MaxAllowedRiskPoints:0.##}|planned={execution.PlannedRiskPoints:0.##}|bid={quote.Bid:0.########}|ask={quote.Ask:0.########}";
+            AppendExecutionEvent(execution, "ENTRY_QUOTE_RISK_EXCEEDED_V216", "ENTRY", estimatedFill, execution.Quantity, reason);
+            AbortEntrySubmissionV178(execution, estimatedFill, reason);
+            return;
+        }
+        if (string.Equals(execution.Lane, "Secondary", StringComparison.Ordinal))
+        {
+            var pointValue = _snapshot!.InstrumentProfile.PointValue;
+            var existingRisk = ActiveReplayExecutions()
+                .Where(other => !ReferenceEquals(other, execution))
+                .Sum(other => other.InitialRiskPoints * pointValue * RemainingExecutionQuantity(other));
+            var combinedRisk = existingRisk + estimatedRisk * pointValue * execution.Quantity;
+            if (combinedRisk > 300m)
+            {
+                var reason = $"SecondaryEntryQuoteRiskCapExceededV216:combined={combinedRisk:0.##}|max=300|existing={existingRisk:0.##}|secondary={estimatedRisk * pointValue * execution.Quantity:0.##}";
+                AppendExecutionEvent(execution, "SECONDARY_ENTRY_QUOTE_RISK_CAP_EXCEEDED_V216", "ENTRY", estimatedFill, execution.Quantity, reason);
+                AbortEntrySubmissionV178(execution, estimatedFill, reason);
+                return;
+            }
+        }
+        if (_decisionTapeCalibrationTrackersByKey.TryGetValue(
+                ShadowTradeKey(execution.SignalId, execution.ResearchPath, execution.CreatedBar),
+                out var calibration))
+        {
+            calibration.SetEntryQuote(quote.Bid, quote.Ask);
+            calibration.SetEntryMarketSequence(_decisionTapeMarketSequence);
+        }
         LogExecutionInfo($"EXEC_ENTRY_QUOTE_PREFLIGHT_OK trade={execution.TradeId} reference={reference:0.########} bid={quote.Bid:0.########} ask={quote.Ask:0.########} barLag={barLag}");
-        AppendExecutionEvent(execution, "ENTRY_QUOTE_PREFLIGHT_OK_V178", "ENTRY", reference, execution.Quantity, $"bid={quote.Bid:0.########}|ask={quote.Ask:0.########}|barLag={barLag}");
+        AppendExecutionEvent(execution, "ENTRY_QUOTE_PREFLIGHT_OK_V178", "ENTRY", reference, execution.Quantity, $"bid={quote.Bid:0.########}|ask={quote.Ask:0.########}|barLag={barLag}|marketSequence={_decisionTapeMarketSequence}");
         await OpenOrderAsync(execution.EntryOrder);
     }
 
@@ -2653,11 +3249,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         RollBackNormalTradeCounters(execution);
         LogExecutionInfo($"EXEC_ENTRY_SUBMISSION_ABORTED_V178 trade={execution.TradeId} reason={reason}");
         AppendExecutionEvent(execution, "ENTRY_SUBMISSION_ABORTED_V178", "ENTRY", reference, execution.Quantity, reason);
-        RaiseShowNotification($"Entry was not submitted because execution quotes were not synchronized: {execution.TradeId}. Strategy remains eligible for later signals.", "OPFStrategyV1");
+        RaiseShowNotification($"Entry preflight rejected before order submission: {execution.TradeId}. {reason}. Strategy remains eligible for later signals.", "OPFStrategyV1");
     }
 
     private void TrackRecentReplayExecution(ReplayExecutionState execution)
     {
+        _replayExecutionsByTradeId[execution.TradeId] = execution;
         _recentReplayExecutions.Add(execution);
         var maxStored = Math.Max(ActualMaxVisibleOrders * 3, 12);
         if (_recentReplayExecutions.Count > maxStored)
@@ -2671,6 +3268,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         if (_shadowTradeTrackersByKey.TryGetValue(ShadowTradeKey(signal.SignalId, researchPath, entryCandle.Bar), out var shadow))
             shadow.SetOriginalDecision(decision, reason, tradeId);
+        if (_decisionTapeCalibrationTrackersByKey.TryGetValue(ShadowTradeKey(signal.SignalId, researchPath, entryCandle.Bar), out var calibration))
+        {
+            var quote = ExecutionQuoteSnapshot();
+            calibration.SetEntryQuote(quote.Bid, quote.Ask);
+            calibration.SetEntryMarketSequence(_decisionTapeMarketSequence);
+            calibration.SetOriginalDecision(decision, reason, tradeId);
+        }
 
         var entry = entryCandle.Close;
         var targetR = ActualTargetRFor(signal, researchPath, risk);
@@ -2831,6 +3435,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     }
 
     private int RegimeBars(int bar) => _lastRegimeChangeBar < 0 ? 0 : Math.Max(1, bar - _lastRegimeChangeBar + 1);
+
+    private static bool HasPassedRegimeComponent(ScoreBreakdown score, string componentName)
+    {
+        return score.Components.Any(component =>
+            string.Equals(component.Name, componentName, StringComparison.OrdinalIgnoreCase) && component.Passed);
+    }
 
     private void BufferRichBarFeature(
         OpfCandle candle,
@@ -3330,6 +3940,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private string[] ActualExecutionPathSkipReasons(CandidateSignal signal, string researchPath)
     {
+        if (IsDisabledActualPathV209(signal.Side, researchPath))
+            return new[] { $"ActualPathDisabledV209:side={signal.Side}|path={researchPath}" };
+
+        if (signal.Side == TradeSide.Long &&
+            string.Equals(researchPath, "FailureReverse_RetestFailed", StringComparison.OrdinalIgnoreCase))
+            return new[] { "LongFailureReverseRetestFailedDisabledV208" };
+
         if (IsBreakawayPath(researchPath) &&
             signal.Side == TradeSide.Long)
             return new[] { "BreakawayLongActualDisabledV135" };
@@ -3776,6 +4393,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return Array.Empty<string>();
 
         var reasons = new List<string>();
+        if (IsStrictEntryExcludedRiskV208(risk))
+            reasons.Add($"StrictEntryRiskBandExcludedV208:risk={risk:0.##},excluded=({StrictEntryExcludedRiskMinExclusiveV208:0.##},{StrictEntryExcludedRiskMaxInclusiveV208:0.##}]");
         var instrument = _snapshot.InstrumentProfile;
         var isDailyVolumeFloor = IsDailyVolumeFloorAllowed(signal, researchPath);
         var isMainlineVolumeFiller = IsMainlineVolumeFiller(signal, researchPath);
@@ -3895,6 +4514,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         return reasons.ToArray();
     }
 
+    private static bool IsStrictEntryExcludedRiskV208(decimal risk)
+    {
+        return risk > StrictEntryExcludedRiskMinExclusiveV208 && risk <= StrictEntryExcludedRiskMaxInclusiveV208;
+    }
+
     private decimal EstimatedActualRr(CandidateSignal signal, string researchPath, decimal entry, decimal risk)
     {
         var reward = EstimateActualExecutionReward(signal, researchPath, entry, risk);
@@ -3943,6 +4567,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ActualTargetRFor(TradeSide side, string researchPath, decimal risk)
     {
+        if (TryGetActualExitPolicyV209(side, researchPath, out var targetR, out _, out _, risk))
+            return targetR;
+
         if (UsesProtectBreakEvenV186(side, researchPath))
             return ProtectBreakEvenTargetRV186;
 
@@ -3960,9 +4587,109 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private static bool UsesProtectBreakEvenV186(TradeSide side, string researchPath)
     {
+        if (TryGetActualExitPolicyV209(side, researchPath, out _, out var breakEvenTriggerR, out _))
+            return breakEvenTriggerR > 0m;
+
         return !UseLegacyV174StrategyPolicyV204 &&
             IsExecutionEligiblePath(researchPath) &&
             !UsesZoneBirthSplitRunnerV172(side, researchPath);
+    }
+
+    private static bool IsDisabledActualPathV209(TradeSide side, string researchPath)
+    {
+        return (side == TradeSide.Long &&
+                (string.Equals(researchPath, "FailureReverse_RetestFailed", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(researchPath, "ObservationStrict_BullFresh_WideStop1_5R", StringComparison.OrdinalIgnoreCase))) ||
+            (side == TradeSide.Short &&
+                (string.Equals(researchPath, "FailureReverse_ObservationInvalidated", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(researchPath, "FailureReverse_RetestFailed_WideStop1_5R", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(researchPath, "ShadowCandidate", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static bool TryGetActualExitPolicyV209(
+        TradeSide side,
+        string researchPath,
+        out decimal targetR,
+        out decimal breakEvenTriggerR,
+        out int timeStopBars,
+        decimal risk = 0m)
+    {
+        targetR = 0m;
+        breakEvenTriggerR = 0m;
+        timeStopBars = 0;
+
+        if (IsStaticDynamicExitV215(side, researchPath, risk))
+            (targetR, timeStopBars) = (1.5m, 12);
+        else if (side == TradeSide.Short && string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase))
+            (targetR, breakEvenTriggerR, timeStopBars) = (BreakawayShortTargetRV209, BreakawayShortBreakEvenTriggerRV209, ShortPolicyTimeStopBarsV209);
+        else if (side == TradeSide.Long && string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase))
+            (targetR, timeStopBars) = (4m, LongPolicyTimeStopBarsV209);
+        else if (side == TradeSide.Long && string.Equals(researchPath, "ObservationConfirm_WideStop1_5R", StringComparison.OrdinalIgnoreCase))
+            (targetR, timeStopBars) = (3m, FastPolicyTimeStopBarsV209);
+        else if (side == TradeSide.Long && string.Equals(researchPath, "ObservationStrict_Other", StringComparison.OrdinalIgnoreCase))
+            (targetR, timeStopBars) = (3m, FastPolicyTimeStopBarsV209);
+        else if (side == TradeSide.Long && string.Equals(researchPath, "AlmostConfirmed", StringComparison.OrdinalIgnoreCase))
+            (targetR, timeStopBars) = (4m, LongPolicyTimeStopBarsV209);
+        else if (side == TradeSide.Short && string.Equals(researchPath, "FailureReverse_ObservationInvalidated_WideStop1_5R", StringComparison.OrdinalIgnoreCase))
+            (targetR, timeStopBars) = (4m, ShortPolicyTimeStopBarsV209);
+
+        return targetR > 0m;
+    }
+
+    private static bool IsStaticDynamicExitV215(TradeSide side, string researchPath, decimal risk)
+    {
+        if (risk <= 0m || risk > 20m)
+            return false;
+        if (side == TradeSide.Long && risk <= 10m)
+            return string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase);
+        return side == TradeSide.Short &&
+            string.Equals(researchPath, "ZoneBirthResearch", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string StaticRiskBandV215(decimal risk)
+    {
+        if (risk <= 10m)
+            return "R10";
+        if (risk <= 20m)
+            return "R20";
+        if (risk <= 30m)
+            return "R30";
+        return "RHigh";
+    }
+
+    private static bool IsStaticSecondaryEligibleV215(TradeSide side, string researchPath, decimal risk)
+    {
+        var key = $"{side}|{researchPath}|{StaticRiskBandV215(risk)}";
+        return key is
+            "Short|FailureReverse_RetestFailed_WideStop1_5R|R10" or
+            "Short|TrendPullbackConfirmed|R30" or
+            "Short|ObservationConfirm_WideStop1_5R|R20" or
+            "Long|ObservationConfirm_WideStop1_5R|R10" or
+            "Short|UnknownRegimeZoneTouch|R10" or
+            "Short|FailureReverse_RetestFailed|R20" or
+            "Long|FailureReverse_ObservationInvalidated_WideStop1_5R|R10" or
+            "Long|BreakawayFvg_Qualified|R10" or
+            "Short|ShadowCandidate|R30" or
+            "Long|AlmostConfirmed|R10" or
+            "Short|ObservationConfirm_WideStop1_5R|R10" or
+            "Short|UnknownRegimeZoneTouch|R30" or
+            "Short|FailureReverse_ObservationInvalidated_WideStop1_5R|R10" or
+            "Long|BreakawayRetest|R10" or
+            "Long|BreakawayRetest|R20" or
+            "Long|ObservationConfirm|R20" or
+            "Long|ObservationStrict_Other_WideStop1_5R|R20" or
+            "Long|AlmostConfirmed|R30" or
+            "Long|FailureReverse_ObservationInvalidated_WideStop1_5R|R20" or
+            "Short|ZoneBirthResearch|R10" or
+            "Long|AlmostConfirmed|R20" or
+            "Long|ObservationConfirm_WideStop1_5R|R20" or
+            "Long|ObservationConfirm_WideStop1_5R|R30" or
+            "Short|FailureReverse_ObservationInvalidated|R20" or
+            "Long|ObservationStrict_Other|R30" or
+            "Short|FailureReverse_ObservationInvalidated_WideStop1_5R|R30" or
+            "Short|ObservationConfirm|R30" or
+            "Short|FailureReverse_ObservationInvalidated_WideStop1_5R|R20" or
+            "Short|BreakawayFvg|R30";
     }
 
     private static decimal AggressiveExpansionTargetR(TradeSide side, string researchPath)
@@ -4032,9 +4759,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void ResetReplayExecutionDailyCounter(DateTime date)
     {
+        RollLiveWeeklyPnlIfNeeded(date);
         if (_replayExecutionDate == date)
             return;
 
+        _deferredContinuations.Clear();
         _replayExecutionDate = date;
         _replayTradesToday = 0;
         _replayExitsToday = 0;
@@ -4097,6 +4826,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         execution.AbnormalProtectiveFillQuarantined = true;
         execution.AbnormalProtectiveFillReason = reason;
+        execution.EmergencyFlattenSubmitted = true;
+        execution.HistoricalVirtualTargetRolesV220.Clear();
+        execution.HistoricalVirtualTargetActivationPendingV220.Clear();
         _replayAbnormalProtectiveFillToday++;
         _lastAbnormalProtectiveFillHudText = $"{execution.CreatedTime:HH:mm} {execution.TradeId} {role} fill={fillPrice:0.##}";
         RollBackNormalTradeCounters(execution);
@@ -4166,6 +4898,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             "BASE_TP" => execution.TargetOrder,
             "RUNNER_SL" => execution.RunnerStopOrder,
             "RUNNER_TP" => execution.RunnerTargetOrder,
+            "TIME_STOP" => execution.TimeStopOrderV208,
             "FLATTEN" => null,
             ReplayStopExitRole => null,
             _ => null
@@ -4196,30 +4929,31 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private async Task HandleReplayTradeAsync(MyTrade trade)
     {
-        if (_replayExecution is null || trade.Order is null)
+        if (trade.Order is null)
             return;
         if (!TryParseExecutionComment(trade.Order.Comment, out var tradeId, out var role))
             return;
-        if (!string.Equals(tradeId, _replayExecution.TradeId, StringComparison.OrdinalIgnoreCase))
+        var execution = FindReplayExecution(tradeId);
+        if (execution is null)
             return;
-        if (!IsExpectedTradeOrder(_replayExecution, role, trade.Order, out var mismatchReason))
+        if (!IsExpectedTradeOrder(execution, role, trade.Order, out var mismatchReason))
         {
             LogExecutionInfo($"EXEC_TRADE_ORDER_MISMATCH trade={tradeId} role={role} {mismatchReason}");
-            AppendExecutionEvent(_replayExecution, "TRADE_ORDER_MISMATCH", role, trade.Price, trade.Volume, mismatchReason);
+            AppendExecutionEvent(execution, "TRADE_ORDER_MISMATCH", role, trade.Price, trade.Volume, mismatchReason);
             return;
         }
 
         var tradeOrder = trade.Order;
         LogExecutionInfo($"EXEC_MYTRADE trade={tradeId} role={role} price={trade.Price:0.########} volume={trade.Volume:0.########} orderExt={tradeOrder.ExtId} orderState={tradeOrder.State} orderType={tradeOrder.Type} orderDir={tradeOrder.Direction} orderPrice={tradeOrder.Price:0.########} orderTrig={tradeOrder.TriggerPrice:0.########} orderUnfilled={tradeOrder.Unfilled:0.########}");
-        AppendExecutionEvent(_replayExecution, "MYTRADE", role, trade.Price, trade.Volume, $"orderExt={tradeOrder.ExtId}|orderState={tradeOrder.State}|orderType={tradeOrder.Type}|orderDir={tradeOrder.Direction}|orderPrice={tradeOrder.Price:0.########}|orderTrig={tradeOrder.TriggerPrice:0.########}|orderUnfilled={tradeOrder.Unfilled:0.########}");
+        AppendExecutionEvent(execution, "MYTRADE", role, trade.Price, trade.Volume, $"orderExt={tradeOrder.ExtId}|orderState={tradeOrder.State}|orderType={tradeOrder.Type}|orderDir={tradeOrder.Direction}|orderPrice={tradeOrder.Price:0.########}|orderTrig={tradeOrder.TriggerPrice:0.########}|orderUnfilled={tradeOrder.Unfilled:0.########}");
 
-        if (_replayExecution.ExitCompleted && role == "ENTRY")
+        if (execution.ExitCompleted && role == "ENTRY")
         {
             var fillQty = Math.Max(0m, trade.Volume);
-            var reason = $"LateEntryAfterCompleted:exitRole={_replayExecution.ExitRole ?? "-"}";
+            var reason = $"LateEntryAfterCompleted:exitRole={execution.ExitRole ?? "-"}";
             LogExecutionInfo($"EXEC_LATE_ENTRY_AFTER_COMPLETED trade={tradeId} price={trade.Price:0.########} volume={fillQty:0.########} reason={reason}");
-            AppendExecutionEvent(_replayExecution, "LATE_ENTRY_AFTER_COMPLETED", "ENTRY", trade.Price, fillQty, reason);
-            await SubmitEmergencyFlattenAsync(fillQty, reason);
+            AppendExecutionEvent(execution, "LATE_ENTRY_AFTER_COMPLETED", "ENTRY", trade.Price, fillQty, reason);
+            await SubmitEmergencyFlattenAsync(execution, fillQty, reason);
             return;
         }
 
@@ -4228,142 +4962,176 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             var fillQty = Math.Max(0m, trade.Volume);
             if (fillQty > 0m)
             {
-                var oldQty = _replayExecution.EntryFilledQty;
-                var oldRawValue = _replayExecution.RawEntryAvgPrice * oldQty;
-                _replayExecution.EntryFilledQty = oldQty + fillQty;
-                _replayExecution.RawEntryAvgPrice = (oldRawValue + trade.Price * fillQty) / _replayExecution.EntryFilledQty;
-                _replayExecution.EntryAvgPrice = _replayExecution.RawEntryAvgPrice;
+                var oldQty = execution.EntryFilledQty;
+                var oldRawValue = execution.RawEntryAvgPrice * oldQty;
+                execution.EntryFilledQty = oldQty + fillQty;
+                execution.RawEntryAvgPrice = (oldRawValue + trade.Price * fillQty) / execution.EntryFilledQty;
+                execution.EntryAvgPrice = execution.RawEntryAvgPrice;
             }
 
             var tolerance = ExecutionFillTolerance();
-            var rawEntryDrift = Math.Abs(_replayExecution.RawEntryAvgPrice - _replayExecution.CreatedPrice);
-            var historicalFavorableFill = IsHistoricalReplayTime(_lastResearchCandle?.Time ?? _replayExecution.CreatedTime) &&
+            var rawEntryDrift = Math.Abs(execution.RawEntryAvgPrice - execution.CreatedPrice);
+            var historicalFavorableFill = IsHistoricalReplayTime(_lastResearchCandle?.Time ?? execution.CreatedTime) &&
                 rawEntryDrift > tolerance &&
-                (_replayExecution.Side == TradeSide.Long
-                    ? _replayExecution.RawEntryAvgPrice < _replayExecution.CreatedPrice
-                    : _replayExecution.RawEntryAvgPrice > _replayExecution.CreatedPrice);
+                (execution.Side == TradeSide.Long
+                    ? execution.RawEntryAvgPrice < execution.CreatedPrice
+                    : execution.RawEntryAvgPrice > execution.CreatedPrice);
             if (historicalFavorableFill)
             {
-                _replayExecution.EntryAvgPrice = _replayExecution.CreatedPrice;
-                var reason = $"HistoricalFavorableEntryNormalizedV180:raw={_replayExecution.RawEntryAvgPrice:0.########}|planned={_replayExecution.CreatedPrice:0.########}|improvement={rawEntryDrift:0.########}|max={tolerance:0.########}";
+                execution.EntryAvgPrice = execution.CreatedPrice;
+                var reason = $"HistoricalFavorableEntryNormalizedV180:raw={execution.RawEntryAvgPrice:0.########}|planned={execution.CreatedPrice:0.########}|improvement={rawEntryDrift:0.########}|max={tolerance:0.########}";
                 LogExecutionInfo($"EXEC_HISTORICAL_FAVORABLE_ENTRY_NORMALIZED_V180 trade={tradeId} {reason}");
-                AppendExecutionEvent(_replayExecution, "HISTORICAL_FAVORABLE_ENTRY_NORMALIZED_V180", "ENTRY", _replayExecution.RawEntryAvgPrice, _replayExecution.EntryFilledQty, reason);
-                if (!_replayExecution.HistoricalFavorableEntryNormalizedV180)
+                AppendExecutionEvent(execution, "HISTORICAL_FAVORABLE_ENTRY_NORMALIZED_V180", "ENTRY", execution.RawEntryAvgPrice, execution.EntryFilledQty, reason);
+                if (!execution.HistoricalFavorableEntryNormalizedV180)
                     RaiseShowNotification($"Historical Replay returned a favorable out-of-range entry for {tradeId}. Strategy accounting is normalized to the planned entry and the position remains active.", "OPFStrategyV1");
-                _replayExecution.HistoricalFavorableEntryNormalizedV180 = true;
+                execution.HistoricalFavorableEntryNormalizedV180 = true;
             }
 
-            var entryDrift = Math.Abs(_replayExecution.EntryAvgPrice - _replayExecution.CreatedPrice);
+            var entryDrift = Math.Abs(execution.EntryAvgPrice - execution.CreatedPrice);
             if (entryDrift > tolerance)
             {
-                var reason = $"EntryFillOutOfRange:fill={_replayExecution.EntryAvgPrice:0.########}|planned={_replayExecution.CreatedPrice:0.########}|drift={entryDrift:0.########}|max={tolerance:0.########}";
+                var reason = $"EntryFillOutOfRange:fill={execution.EntryAvgPrice:0.########}|planned={execution.CreatedPrice:0.########}|drift={entryDrift:0.########}|max={tolerance:0.########}";
                 LogExecutionInfo($"EXEC_ENTRY_FILL_REJECTED trade={tradeId} {reason}");
-                AppendExecutionEvent(_replayExecution, "ENTRY_FILL_REJECTED", "ENTRY", trade.Price, trade.Volume, reason);
-                QuarantineAbnormalEntryV174(_replayExecution, reason);
-                _replayExecution.EmergencyFlattenSubmitted = true;
-                var flattenQty = Math.Max(0m, _replayExecution.EntryFilledQty - _replayExecution.EmergencyFlattenSubmittedQty);
+                AppendExecutionEvent(execution, "ENTRY_FILL_REJECTED", "ENTRY", trade.Price, trade.Volume, reason);
+                QuarantineAbnormalEntryV174(execution, reason);
+                execution.EmergencyFlattenSubmitted = true;
+                var flattenQty = Math.Max(0m, execution.EntryFilledQty - execution.EmergencyFlattenSubmittedQty);
                 if (flattenQty > 0m)
                 {
-                    _replayExecution.EmergencyFlattenSubmittedQty += flattenQty;
-                    await SubmitEmergencyFlattenAsync(flattenQty, reason);
+                    execution.EmergencyFlattenSubmittedQty += flattenQty;
+                    await SubmitEmergencyFlattenAsync(execution, flattenQty, reason);
                 }
                 return;
             }
 
-            if (_replayExecution.EntryAbortPending)
+            if (execution.EntryAbortPending)
             {
-                var flattenQty = Math.Max(0m, _replayExecution.EntryFilledQty - _replayExecution.EmergencyFlattenSubmittedQty);
+                var flattenQty = Math.Max(0m, execution.EntryFilledQty - execution.EmergencyFlattenSubmittedQty);
                 if (flattenQty > 0m)
                 {
-                    var reason = $"LatePartialEntryFillAfterAbort:filled={_replayExecution.EntryFilledQty:0.########}|covered={_replayExecution.EmergencyFlattenSubmittedQty:0.########}";
-                    _replayExecution.EmergencyFlattenSubmittedQty += flattenQty;
-                    await SubmitEmergencyFlattenAsync(flattenQty, reason);
+                    var reason = $"LatePartialEntryFillAfterAbort:filled={execution.EntryFilledQty:0.########}|covered={execution.EmergencyFlattenSubmittedQty:0.########}";
+                    execution.EmergencyFlattenSubmittedQty += flattenQty;
+                    await SubmitEmergencyFlattenAsync(execution, flattenQty, reason);
                 }
                 return;
             }
 
-            if (_replayExecution.EntryFilledQty + 0.0000001m < _replayExecution.Quantity)
+            if (execution.EntryFilledQty + 0.0000001m < execution.Quantity)
             {
-                var reason = $"filled={_replayExecution.EntryFilledQty:0.########}|requested={_replayExecution.Quantity:0.########}|unfilled={tradeOrder.Unfilled:0.########}";
+                var reason = $"filled={execution.EntryFilledQty:0.########}|requested={execution.Quantity:0.########}|unfilled={tradeOrder.Unfilled:0.########}";
                 LogExecutionInfo($"EXEC_ENTRY_PARTIAL_FILL_WAITING trade={tradeId} {reason}");
-                AppendExecutionEvent(_replayExecution, "ENTRY_PARTIAL_FILL_WAITING", "ENTRY", _replayExecution.EntryAvgPrice, _replayExecution.EntryFilledQty, reason);
-                SchedulePartialEntryFinalizeIfNeeded(_replayExecution);
+                AppendExecutionEvent(execution, "ENTRY_PARTIAL_FILL_WAITING", "ENTRY", execution.EntryAvgPrice, execution.EntryFilledQty, reason);
+                SchedulePartialEntryFinalizeIfNeeded(execution);
                 return;
             }
 
-            if (!_replayExecution.BracketSubmitted)
-                await SubmitReplayBracketAsync(_replayExecution);
+            if (!execution.BracketSubmitted)
+                await SubmitReplayBracketAsync(execution);
             return;
         }
 
-        if (IsProtectiveExitRole(role) || role is "FLATTEN" or ReplayStopExitRole)
+        if (IsProtectiveExitRole(role) || role is "FLATTEN" or "TIME_STOP" or ReplayStopExitRole)
         {
-            if (IsProtectiveExitRole(role) && _replayExecution.ProtectiveExitCallbackPendingV187)
+            if (IsProtectiveExitRole(role) && execution.ProtectiveExitCallbackPendingV187)
             {
-                _replayExecution.ProtectiveExitCallbackPendingV187 = false;
-                AppendExecutionEvent(_replayExecution, "PROTECTIVE_EXIT_CALLBACK_RESOLVED_V187", role, trade.Price, trade.Volume, $"orderExt={trade.Order.ExtId}");
+                execution.ProtectiveExitCallbackPendingV187 = false;
+                AppendExecutionEvent(execution, "PROTECTIVE_EXIT_CALLBACK_RESOLVED_V187", role, trade.Price, trade.Volume, $"orderExt={trade.Order.ExtId}");
             }
             var fillQty = Math.Max(0m, trade.Volume);
-            if (_replayExecution.ExitCompleted)
+            var remainingBeforeFill = RemainingExecutionQuantity(execution);
+            var acceptedFillQty = Math.Min(fillQty, remainingBeforeFill);
+            var overfillQty = Math.Max(0m, fillQty - acceptedFillQty);
+            if (execution.ExitCompleted)
             {
                 LogExecutionInfo($"EXEC_DUPLICATE_EXIT_FILL trade={tradeId} role={role} price={trade.Price:0.########} volume={fillQty:0.########}");
-                var duplicateReason = role is "FLATTEN" or ReplayStopExitRole
+                var duplicateReason = role is "FLATTEN" or "TIME_STOP" or ReplayStopExitRole
                     ? "duplicateFlattenIgnored"
                     : "duplicateProtectiveExit";
-                AppendExecutionEvent(_replayExecution, "DUPLICATE_EXIT_FILL", role, trade.Price, fillQty, duplicateReason);
-                MarkProtectionCleanupPending(_replayExecution, $"DuplicateExit:{role}");
-                await CleanupProtectionOrdersAsync(_replayExecution, $"DuplicateExit:{role}");
+                AppendExecutionEvent(execution, "DUPLICATE_EXIT_FILL", role, trade.Price, fillQty, duplicateReason);
+                MarkProtectionCleanupPending(execution, $"DuplicateExit:{role}");
+                await CleanupProtectionOrdersAsync(execution, $"DuplicateExit:{role}");
                 if (IsProtectiveExitRole(role))
-                    await SubmitDuplicateExitFlattenIfNeededAsync(_replayExecution, fillQty, role);
+                    await SubmitDuplicateExitFlattenIfNeededAsync(execution, fillQty, role);
                 return;
             }
 
-            RefreshActiveProtectionObservationFromCurrentBar();
-            if (IsHistoricalReplayProtectiveFillUnreachable(_replayExecution, role, trade.Price, out var unreachableReason))
-                QuarantineAbnormalProtectiveFillV177(_replayExecution, role, trade.Price, unreachableReason);
+            RefreshActiveProtectionObservationFromCurrentBar(execution);
+            if (IsHistoricalReplayProtectiveFillUnreachable(execution, role, trade.Price, out var unreachableReason))
+                QuarantineAbnormalProtectiveFillV177(execution, role, trade.Price, unreachableReason);
 
-            var oldExitQty = _replayExecution.ExitFilledQty;
-            var oldExitValue = _replayExecution.ExitAvgPrice * oldExitQty;
-            _replayExecution.ExitFilledQty += fillQty;
-            if (fillQty > 0m && _replayExecution.ExitFilledQty > 0m)
-                _replayExecution.ExitAvgPrice = (oldExitValue + trade.Price * fillQty) / _replayExecution.ExitFilledQty;
+            var oldExitQty = execution.ExitFilledQty;
+            var oldExitValue = execution.ExitAvgPrice * oldExitQty;
+            execution.ExitFilledQty += acceptedFillQty;
+            if (acceptedFillQty > 0m && execution.ExitFilledQty > 0m)
+                execution.ExitAvgPrice = (oldExitValue + trade.Price * acceptedFillQty) / execution.ExitFilledQty;
 
-            if (_replayExecution.ZoneBirthSplitRunnerV172)
-                AccumulateZoneBirthSplitExitV172(_replayExecution, role, trade.Price, fillQty);
+            if (execution.ZoneBirthSplitRunnerV172)
+                AccumulateZoneBirthSplitExitV172(execution, role, trade.Price, acceptedFillQty);
 
             LogExecutionInfo($"EXEC_EXIT_FILLED trade={tradeId} role={role} price={trade.Price:0.########}");
-            AppendExecutionEvent(_replayExecution, "EXIT_FILLED", role, trade.Price, trade.Volume, string.Empty);
-            if (_replayExecution.HistoricalObservedTargetExitRolesV206.Contains(role))
+            AppendExecutionEvent(execution, "EXIT_FILLED", role, trade.Price, trade.Volume, string.Empty);
+            if (overfillQty > 0m)
             {
-                var expectedTarget = ExpectedExitPrice(_replayExecution, role);
-                LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_FILLED_V206 trade={tradeId} role={role} raw={trade.Price:0.########} expected={expectedTarget:0.########}");
-                AppendExecutionEvent(_replayExecution, "HISTORICAL_OBSERVED_TP_EXIT_FILLED_V206", role, trade.Price, trade.Volume, $"expected={expectedTarget:0.########}|normalizedByHistoricalReplayValidation");
+                var reason = $"ExitFillExceedsRemainingV220:fill={fillQty:0.########}|accepted={acceptedFillQty:0.########}|overfill={overfillQty:0.########}|entry={execution.EntryFilledQty:0.########}|logicalExit={execution.ExitFilledQty:0.########}";
+                AppendExecutionEvent(execution, "EXIT_FILL_EXCEEDS_REMAINING_V220", role, trade.Price, overfillQty, reason);
+                MarkProtectionCleanupPending(execution, reason);
+                await CleanupProtectionOrdersAsync(execution, reason);
+                SetLiveReadinessBlocked("ExitOverfill", $"Protective exits exceeded the filled entry quantity for {execution.TradeId}. {reason}. Verify and flatten the account manually.");
+                NotifyLiveIssue($"ExitOverfill:{execution.TradeId}", $"Protective exits exceeded the entry quantity. trade={execution.TradeId}, role={role}, overfill={overfillQty:0.########}. Trading is blocked pending account verification.");
+                return;
             }
-            if (_replayExecution.ZoneBirthSplitRunnerV172 && role == "BASE_TP")
-                ScheduleZoneBirthRunnerBreakEvenAfterBaseTargetV173(_replayExecution, trade.Price);
-            await TryCancelExecutionOrderAsync(_replayExecution.EntryOrder, "ExitFilledCancelEntry");
-
-            var completeQty = _replayExecution.AbnormalEntryQuarantined ||
-                _replayExecution.EntryAbortPending ||
-                _replayExecution.AbnormalSafetyFlattenV182
-                ? _replayExecution.EntryFilledQty
-                : _replayExecution.BracketQty > 0m ? _replayExecution.BracketQty : _replayExecution.Quantity;
-            if (_replayExecution.ExitFilledQty + 0.0000001m < completeQty)
+            if (execution.AbnormalProtectiveFillQuarantined && RemainingExecutionQuantity(execution) > 0m)
             {
-                if (_replayExecution.AbnormalEntryQuarantined && role == "FLATTEN")
+                var reason = $"AbnormalProtectiveFillResidualV220:{role}|remaining={RemainingExecutionQuantity(execution):0.########}";
+                MarkProtectionCleanupPending(execution, reason);
+                await CleanupProtectionOrdersAsync(execution, reason);
+                await SubmitEmergencyFlattenAsync(execution, RemainingExecutionQuantity(execution), reason);
+                return;
+            }
+            if (execution.HistoricalObservedTargetExitRolesV206.Contains(role))
+            {
+                var expectedTarget = ExpectedExitPrice(execution, role);
+                LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_FILLED_V206 trade={tradeId} role={role} raw={trade.Price:0.########} expected={expectedTarget:0.########}");
+                AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_FILLED_V206", role, trade.Price, trade.Volume, $"expected={expectedTarget:0.########}|normalizedByHistoricalReplayValidation");
+
+                var completedLegStop = role == "BASE_TP"
+                    ? execution.StopOrder
+                    : role == "RUNNER_TP"
+                        ? execution.RunnerStopOrder
+                        : null;
+                if (IsWorkingExecutionOrder(completedLegStop))
                 {
-                    AppendExecutionEvent(_replayExecution, "QUARANTINE_FLATTEN_PARTIAL_WAIT", "FLATTEN", trade.Price, completeQty - _replayExecution.ExitFilledQty, "existingFlattenOrderRetained");
-                    ScheduleEmergencyFlattenResidualCheck(_replayExecution, "PartialFlattenFill");
+                    var workingLegStop = completedLegStop!;
+                    LogExecutionInfo($"EXEC_HISTORICAL_SPLIT_TARGET_LEG_STOP_CANCEL_SENT_V224 trade={tradeId} role={role} stopExt={workingLegStop.ExtId}");
+                    AppendExecutionEvent(execution, "HISTORICAL_SPLIT_TARGET_LEG_STOP_CANCEL_SENT_V224", role, workingLegStop.TriggerPrice, workingLegStop.QuantityToFill, $"stopExt={workingLegStop.ExtId}|stopState={workingLegStop.State}");
+                    await TryCancelExecutionOrderAsync(workingLegStop, $"HistoricalSplitTargetLeg:{role}");
+                }
+            }
+            if (execution.ZoneBirthSplitRunnerV172 && role == "BASE_TP")
+                ScheduleZoneBirthRunnerBreakEvenAfterBaseTargetV173(execution, trade.Price);
+            await TryCancelExecutionOrderAsync(execution.EntryOrder, "ExitFilledCancelEntry");
+
+            var completeQty = execution.AbnormalEntryQuarantined ||
+                execution.EntryAbortPending ||
+                execution.AbnormalSafetyFlattenV182
+                ? execution.EntryFilledQty
+                : execution.BracketQty > 0m ? execution.BracketQty : execution.Quantity;
+            if (execution.ExitFilledQty + 0.0000001m < completeQty)
+            {
+                if (execution.AbnormalEntryQuarantined && role == "FLATTEN")
+                {
+                    AppendExecutionEvent(execution, "QUARANTINE_FLATTEN_PARTIAL_WAIT", "FLATTEN", trade.Price, completeQty - execution.ExitFilledQty, "existingFlattenOrderRetained");
+                    ScheduleEmergencyFlattenResidualCheck(execution, "PartialFlattenFill");
                 }
                 return;
             }
 
-            if (_replayExecution.EntryAbortPending &&
-                (_replayExecution.EntryOrder is null || !IsDoneOrder(_replayExecution.EntryOrder)))
+            if (execution.EntryAbortPending &&
+                (execution.EntryOrder is null || !IsDoneOrder(execution.EntryOrder)))
                 return;
 
-            var finalExitPrice = _replayExecution.ExitAvgPrice > 0m ? _replayExecution.ExitAvgPrice : trade.Price;
-            await FinalizeCompletedExecutionExitAsync(_replayExecution, finalExitPrice, role);
+            var finalExitPrice = execution.ExitAvgPrice > 0m ? execution.ExitAvgPrice : trade.Price;
+            await FinalizeCompletedExecutionExitAsync(execution, finalExitPrice, role);
         }
     }
 
@@ -4505,7 +5273,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
         var commission = Math.Round(quantity * _actualCommissionPerContractRoundTrip, 2);
         var net = gross - commission;
+        var tradingDay = GlobexTradingDayKey(execution.CreatedTime);
+        RollLiveWeeklyPnlIfNeeded(tradingDay);
+        var weeklyGateWasActive = IsWeeklyLongLossGateActive(out _);
         _liveAccountDailyNetPnlDollars += net;
+        _liveAccountWeeklyNetPnlDollars += net;
+        if (execution.Side == TradeSide.Long)
+            _liveLongWeeklyNetPnlDollars += net;
+        TriggerWeeklyLongLossGateIfNeeded();
 
         _researchLogger?.AppendLiveAccountPnl(
             _snapshot.SnapshotId,
@@ -4527,9 +5302,115 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
         {
-            var tradingDay = GlobexTradingDayKey(execution.CreatedTime);
             NotifyLiveIssue($"DailyLoss:{tradingDay:yyyyMMdd}", $"Trading-day net loss limit reached: {_liveAccountDailyNetPnlDollars:0.##} USD (limit -{_actualDailyLossLimitDollars:0.##}). New Actual entries are blocked for {tradingDay:yyyy-MM-dd}.");
         }
+        if (!weeklyGateWasActive && IsWeeklyLongLossGateActive(out var weeklyLongLossReason))
+        {
+            AppendExecutionEvent(execution, "WEEKLY_LONG_LOSS_GATE_TRIGGERED_V219", "-", exitPrice, quantity, weeklyLongLossReason);
+            NotifyLiveIssue(
+                $"WeeklyLongLoss:{_liveAccountPnlWeekStart:yyyyMMdd}",
+                $"Weekly Long gate triggered for {_liveAccountPnlWeekStart:yyyy-MM-dd}: account net {_liveAccountWeeklyNetPnlDollars:0.##} USD, Long net {_liveLongWeeklyNetPnlDollars:0.##} USD, limit -{_actualWeeklyLongLossLimitDollars:0.##}. Existing positions remain protected; new Long entries are blocked until next week while Short entries remain eligible.");
+        }
+    }
+
+    private bool IsWeeklyLongLossGateActive(out string reason)
+    {
+        reason = _weeklyLongLossGateTriggered
+            ? $"WeeklyLongLossV219:week={_liveAccountPnlWeekStart:yyyy-MM-dd}|accountNet={_liveAccountWeeklyNetPnlDollars:0.##}|longNet={_liveLongWeeklyNetPnlDollars:0.##}|limit={_actualWeeklyLongLossLimitDollars:0.##}|trigger={_weeklyLongLossGateTrigger}"
+            : string.Empty;
+        return _weeklyLongLossGateTriggered;
+    }
+
+    private void TriggerWeeklyLongLossGateIfNeeded()
+    {
+        if (_weeklyLongLossGateTriggered || _actualWeeklyLongLossLimitDollars <= 0m)
+            return;
+
+        var accountHit = _liveAccountWeeklyNetPnlDollars <= -_actualWeeklyLongLossLimitDollars;
+        var longHit = _liveLongWeeklyNetPnlDollars <= -_actualWeeklyLongLossLimitDollars;
+        if (!accountHit && !longHit)
+            return;
+
+        _weeklyLongLossGateTriggered = true;
+        _weeklyLongLossGateTrigger = accountHit && longHit ? "Both" : accountHit ? "Account" : "Long";
+    }
+
+    private void RollLiveWeeklyPnlIfNeeded(DateTime tradingDay)
+    {
+        var weekStart = TradingWeekStart(tradingDay);
+        if (_liveAccountPnlWeekStart == weekStart)
+            return;
+
+        var previous = _liveAccountPnlWeekStart;
+        RestoreLiveWeeklyNetPnl(tradingDay);
+        LogLiveReadinessInfo($"LIVE_TRADING_WEEK_ROLLOVER previous={(previous == DateTime.MinValue ? "-" : previous.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture))} current={weekStart:yyyy-MM-dd}");
+    }
+
+    private void RestoreLiveWeeklyNetPnl(DateTime tradingDay)
+    {
+        _liveAccountPnlWeekStart = TradingWeekStart(tradingDay);
+        _liveAccountWeeklyNetPnlDollars = 0m;
+        _liveLongWeeklyNetPnlDollars = 0m;
+        _weeklyLongLossGateTriggered = false;
+        _weeklyLongLossGateTrigger = string.Empty;
+        try
+        {
+            var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            var directory = Path.Combine(root, "ATAS", "StrategyLogs", "OPFStrategyV1");
+            if (Directory.Exists(directory))
+            {
+                var restoredTradeIds = new HashSet<string>(StringComparer.Ordinal);
+                var restoredTrades = new List<(DateTime ExitTime, int Sequence, string Side, decimal Net)>();
+                var sequence = 0;
+                foreach (var file in Directory.EnumerateFiles(directory, "*_live_account_pnl.csv"))
+                {
+                    foreach (var line in File.ReadLines(file).Skip(1))
+                    {
+                        var fields = line.Split(',');
+                        var tradeId = fields.Length > 6 ? fields[6].Trim('"') : string.Empty;
+                        if (fields.Length < 18 ||
+                            string.IsNullOrWhiteSpace(tradeId) ||
+                            !restoredTradeIds.Add(tradeId) ||
+                            !DateTime.TryParse(fields[8].Trim('"'), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var exitTime) ||
+                            TradingWeekStart(GlobexTradingDayKey(exitTime)) != _liveAccountPnlWeekStart ||
+                            !decimal.TryParse(fields[16], NumberStyles.Number, CultureInfo.InvariantCulture, out var net))
+                        {
+                            continue;
+                        }
+
+                        restoredTrades.Add((exitTime, sequence++, fields[9].Trim('"'), net));
+                    }
+                }
+
+                foreach (var trade in restoredTrades.OrderBy(x => x.ExitTime).ThenBy(x => x.Sequence))
+                {
+                    _liveAccountWeeklyNetPnlDollars += trade.Net;
+                    if (string.Equals(trade.Side, "Long", StringComparison.OrdinalIgnoreCase))
+                        _liveLongWeeklyNetPnlDollars += trade.Net;
+                    TriggerWeeklyLongLossGateIfNeeded();
+                }
+            }
+
+            _liveAccountWeeklyNetPnlDollars = Math.Round(_liveAccountWeeklyNetPnlDollars, 2);
+            _liveLongWeeklyNetPnlDollars = Math.Round(_liveLongWeeklyNetPnlDollars, 2);
+            LogLiveReadinessInfo($"LIVE_TRADING_WEEK_NET_RESTORED week={_liveAccountPnlWeekStart:yyyy-MM-dd} accountNet={_liveAccountWeeklyNetPnlDollars:0.##} longNet={_liveLongWeeklyNetPnlDollars:0.##}");
+            if (IsWeeklyLongLossGateActive(out _))
+            {
+                NotifyLiveIssue(
+                    $"WeeklyLongLoss:{_liveAccountPnlWeekStart:yyyyMMdd}",
+                    $"Restored weekly state blocks new Long entries: account net {_liveAccountWeeklyNetPnlDollars:0.##} USD, Long net {_liveLongWeeklyNetPnlDollars:0.##} USD, limit -{_actualWeeklyLongLossLimitDollars:0.##}. Short entries remain eligible.");
+            }
+        }
+        catch (Exception ex)
+        {
+            SetLiveReadinessBlocked("WeeklyPnlRestoreFailed", $"Could not restore this week's live account PnL: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static DateTime TradingWeekStart(DateTime tradingDay)
+    {
+        var daysFromMonday = ((int)tradingDay.DayOfWeek + 6) % 7;
+        return tradingDay.Date.AddDays(-daysFromMonday);
     }
 
     private void RestoreLiveDailyNetPnl(DateTime date)
@@ -4646,7 +5527,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         var remaining = fillQty;
-        var baseRemaining = Math.Max(0m, ZoneBirthSplitRunnerV172LegQuantity - execution.BaseExitFilledQty);
+        var baseRemaining = Math.Max(0m, ZoneBirthSplitRunnerV172BaseQuantity - execution.BaseExitFilledQty);
         if (baseRemaining > 0m)
         {
             var baseQty = Math.Min(baseRemaining, remaining);
@@ -4732,7 +5613,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             if (drift > tolerance)
                 reasons.Add($"Abnormal{exitRole}Fill:drift={drift:0.##},max={tolerance:0.##}");
         }
-        else if (!string.Equals(exitRole, ReplayStopExitRole, StringComparison.OrdinalIgnoreCase))
+        else if (!string.Equals(exitRole, ReplayStopExitRole, StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(exitRole, "TIME_STOP", StringComparison.OrdinalIgnoreCase))
         {
             reasons.Add($"AbnormalExitRole:{exitRole}");
         }
@@ -4740,6 +5622,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var entryIsAbnormal = entryDrift > tolerance;
         var isExitRoleNormal = string.Equals(exitRole, "TP", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(exitRole, "SL", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(exitRole, "TIME_STOP", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(exitRole, ReplayStopExitRole, StringComparison.OrdinalIgnoreCase);
         var canNormalizeReplayExit = !entryIsAbnormal &&
             !execution.AbnormalProtectiveFillQuarantined &&
@@ -4799,6 +5682,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return execution.RunnerStop > 0m ? execution.RunnerStop : execution.Stop;
         if (string.Equals(exitRole, ReplayStopExitRole, StringComparison.OrdinalIgnoreCase))
             return execution.GlobexCloseoutReferencePriceV184;
+        if (string.Equals(exitRole, "TIME_STOP", StringComparison.OrdinalIgnoreCase))
+            return execution.TimeStopReferencePriceV209;
         return 0m;
     }
 
@@ -4873,31 +5758,39 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void UpdateActiveProtectionObservation(decimal marketPrice)
     {
-        if (_replayExecution is null || _replayExecution.ExitCompleted || marketPrice <= 0m)
+        if (marketPrice <= 0m)
             return;
 
-        _replayExecution.ObserveProtectivePrice(marketPrice);
-        _replayExecution.UpdateActualExcursion(marketPrice);
+        foreach (var execution in ActiveReplayExecutions())
+        {
+            execution.ObserveProtectivePrice(marketPrice);
+            execution.UpdateActualExcursion(marketPrice);
+        }
     }
 
-    private void RefreshActiveProtectionObservationFromCurrentBar()
+    private void RefreshActiveProtectionObservationFromCurrentBar(ReplayExecutionState execution)
     {
-        if (_replayExecution is null || _replayExecution.ExitCompleted || _lastSeenBar < 0)
+        if (execution.ExitCompleted || _lastSeenBar < 0)
             return;
 
         var candle = GetCandle(_lastSeenBar);
         if (candle is not null)
-            _replayExecution.ObserveProtectiveRange(candle.Low, candle.High);
+            execution.ObserveProtectiveRange(candle.Low, candle.High);
     }
 
     private void ScheduleHistoricalReplayAccountFlatReconciliationIfNeeded(OpfCandle candle)
     {
-        var execution = _replayExecution;
-        if (!IsHistoricalReplayTime(candle.Time) ||
-            !IsReplayExecutionActive(execution) ||
-            execution!.AccountFlatReconciliationPending ||
+        if (!IsHistoricalReplayTime(candle.Time) || GetCurrentAccountPosition() != 0m)
+            return;
+
+        foreach (var execution in ActiveReplayExecutions())
+            ScheduleHistoricalReplayAccountFlatReconciliationIfNeeded(execution, candle);
+    }
+
+    private void ScheduleHistoricalReplayAccountFlatReconciliationIfNeeded(ReplayExecutionState execution, OpfCandle candle)
+    {
+        if (execution.AccountFlatReconciliationPending ||
             execution.EntryFilledQty <= execution.ExitFilledQty ||
-            GetCurrentAccountPosition() != 0m ||
             CountWorkingProtectionOrders(execution) > 0)
         {
             return;
@@ -4959,7 +5852,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var legAlreadyFilled = role.StartsWith("BASE_", StringComparison.Ordinal)
             ? execution.BaseExitFilledQty
             : execution.RunnerExitFilledQty;
-        var missingQty = Math.Max(0m, ZoneBirthSplitRunnerV172LegQuantity - legAlreadyFilled);
+        var requiredQty = role.StartsWith("BASE_", StringComparison.Ordinal)
+            ? ZoneBirthSplitRunnerV172BaseQuantity
+            : ZoneBirthSplitRunnerV172RunnerQuantity;
+        var missingQty = Math.Max(0m, requiredQty - legAlreadyFilled);
         missingQty = Math.Min(missingQty, Math.Max(0m, execution.EntryFilledQty - execution.ExitFilledQty));
         if (missingQty <= 0m)
             return;
@@ -5027,7 +5923,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             LogExecutionInfo($"EXEC_PROTECTION_SUBMIT_FAIL trade={execution.TradeId} {message}");
             AppendExecutionEvent(execution, "PROTECTION_SUBMIT_FAIL", role, order.Price > 0m ? order.Price : order.TriggerPrice, order.QuantityToFill, message);
             NotifyLiveIssue($"ProtectionSubmitFail:{execution.TradeId}:{role}", $"Protection order submission failed for {execution.TradeId}. role={role}. Emergency flatten is being submitted.");
-            await SubmitEmergencyFlattenAsync(RemainingExecutionQuantity(execution), $"ProtectionSubmitFailed:{role}");
+            await SubmitEmergencyFlattenAsync(execution, RemainingExecutionQuantity(execution), $"ProtectionSubmitFailed:{role}");
             return false;
         }
     }
@@ -5049,7 +5945,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             var reason = $"ProtectionQuotePreflightFailed:barLag={barLag}|reference={reference:0.########}|entry={entry:0.########}|drift={entryDrift:0.########}|max={tolerance:0.########}|{quoteReason}";
             QuarantineProtectionSetupV178(execution, reference, reason);
             execution.EmergencyFlattenSubmitted = true;
-            await SubmitEmergencyFlattenAsync(qty, reason);
+            await SubmitEmergencyFlattenAsync(execution, qty, reason);
             return;
         }
 
@@ -5058,6 +5954,34 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         AppendExecutionEvent(execution, "PROTECTION_QUOTE_PREFLIGHT_OK_V178", "-", reference, qty, $"bid={quote.Bid:0.########}|ask={quote.Ask:0.########}|barLag={barLag}");
 
         RepriceExecutionBracketFromFill(execution);
+        if (string.Equals(execution.Lane, "Secondary", StringComparison.Ordinal))
+        {
+            var pointValue = _snapshot!.InstrumentProfile.PointValue;
+            var existingRisk = ActiveReplayExecutions()
+                .Where(other => !ReferenceEquals(other, execution))
+                .Sum(other => other.InitialRiskPoints * pointValue * RemainingExecutionQuantity(other));
+            var combinedRisk = existingRisk + execution.InitialRiskPoints * pointValue * qty;
+            if (combinedRisk > 300m)
+            {
+                var reason = $"SecondaryActualRiskCapExceededV215:combined={combinedRisk:0.##}|max=300|existing={existingRisk:0.##}|secondary={execution.InitialRiskPoints * pointValue * qty:0.##}";
+                LogExecutionInfo($"EXEC_SECONDARY_ACTUAL_RISK_CAP_EXCEEDED_V215 trade={execution.TradeId} {reason}");
+                AppendExecutionEvent(execution, "SECONDARY_ACTUAL_RISK_CAP_EXCEEDED_V215", "ENTRY", execution.EntryAvgPrice, qty, reason);
+                IsolateAbnormalSafetyFlattenV182(execution, reason);
+                execution.EmergencyFlattenSubmitted = true;
+                await SubmitEmergencyFlattenAsync(execution, qty, reason);
+                return;
+            }
+        }
+        if (IsStrictEntryExcludedRiskV208(execution.InitialRiskPoints))
+        {
+            var reason = $"EntryFilledStrictRiskBandExcludedV208:risk={execution.InitialRiskPoints:0.##}|excluded=({StrictEntryExcludedRiskMinExclusiveV208:0.##},{StrictEntryExcludedRiskMaxInclusiveV208:0.##}]|planned={execution.PlannedRiskPoints:0.##}";
+            LogExecutionInfo($"EXEC_ENTRY_FILLED_STRICT_RISK_BAND_EXCLUDED_V208 trade={execution.TradeId} {reason}");
+            AppendExecutionEvent(execution, "ENTRY_FILLED_STRICT_RISK_BAND_EXCLUDED_V208", "ENTRY", execution.EntryAvgPrice, qty, reason);
+            IsolateAbnormalSafetyFlattenV182(execution, reason);
+            execution.EmergencyFlattenSubmitted = true;
+            await SubmitEmergencyFlattenAsync(execution, qty, reason);
+            return;
+        }
         if (execution.MaxAllowedRiskPoints > 0m && execution.InitialRiskPoints > execution.MaxAllowedRiskPoints)
         {
             if (IsEntryFillRiskDriftAccepted(execution))
@@ -5073,13 +5997,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 AppendExecutionEvent(execution, "ENTRY_FILLED_RISK_EXCEEDED", "ENTRY", execution.EntryAvgPrice, qty, reason);
                 IsolateAbnormalSafetyFlattenV182(execution, reason);
                 execution.EmergencyFlattenSubmitted = true;
-                await SubmitEmergencyFlattenAsync(qty, reason);
+                await SubmitEmergencyFlattenAsync(execution, qty, reason);
                 return;
             }
         }
 
         execution.StartProtectionObservation(execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice);
-        if (UsesZoneBirthSplitRunnerV172(execution.Side, execution.ResearchPath))
+        if (!execution.IsDeferredContinuation && UsesZoneBirthSplitRunnerV172(execution.Side, execution.ResearchPath))
         {
             if (qty == ZoneBirthSplitRunnerV172TotalQuantity)
             {
@@ -5134,18 +6058,16 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(execution, "TP_SUPPRESSED", "TP", execution.Target, qty, $"slState={sl.State}|slUnfilled={sl.Unfilled:0.########}");
             execution.BracketSubmitted = true;
             ScheduleProtectionLossCheckIfNeeded("BracketSubmittedAfterImmediateSL");
+            TryActivatePendingProtectedSecondaryV216(execution);
             return;
         }
         if (IsHistoricalReplayTime(_lastResearchCandle?.Time ?? execution.CreatedTime))
         {
             var intendedTarget = execution.Target;
-            var dormantTarget = HistoricalDormantTargetPriceV181(execution, intendedTarget);
-            tp.Price = dormantTarget;
-            if (!await OpenProtectionOrderAsync(execution, tp, "TP"))
-                return;
-            RegisterHistoricalDormantTargetV181(execution, "TP", intendedTarget, dormantTarget, tp);
+            RegisterHistoricalVirtualTargetV220(execution, "TP", intendedTarget, tp);
             execution.BracketSubmitted = true;
-            ScheduleProtectionLossCheckIfNeeded("BracketSubmittedHistoricalDormantTargetV181");
+            ScheduleProtectionLossCheckIfNeeded("BracketSubmittedHistoricalVirtualTargetV220");
+            TryActivatePendingProtectedSecondaryV216(execution);
             return;
         }
         if (!await OpenProtectionOrderAsync(execution, tp, "TP"))
@@ -5161,6 +6083,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
         execution.BracketSubmitted = true;
         ScheduleProtectionLossCheckIfNeeded("BracketSubmitted");
+        TryActivatePendingProtectedSecondaryV216(execution);
     }
 
     private async Task SubmitZoneBirthSplitBracketV172Async(ReplayExecutionState execution)
@@ -5184,6 +6107,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         LogExecutionInfo($"EXEC_ZONEBIRTH_SPLIT_V173_READY trade={execution.TradeId} baseOco={execution.OcoGroup} runnerOco={execution.RunnerOcoGroup} stop={execution.Stop:0.########} baseTarget={execution.Target:0.########} runnerTarget={execution.RunnerTarget:0.########}");
         AppendExecutionEvent(execution, "ZONEBIRTH_SPLIT_V173_READY", "-", execution.EntryAvgPrice, execution.BracketQty, $"baseOco={execution.OcoGroup}|runnerOco={execution.RunnerOcoGroup}|stop={execution.Stop:0.########}|baseTarget={execution.Target:0.########}|runnerTarget={execution.RunnerTarget:0.########}");
         ScheduleProtectionLossCheckIfNeeded("SplitBracketSubmittedV173");
+        TryActivatePendingProtectedSecondaryV216(execution);
     }
 
     private async Task<bool> SubmitZoneBirthSplitLegV172Async(ReplayExecutionState execution, bool runner)
@@ -5194,6 +6118,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var stopRole = $"{prefix}_SL";
         var targetRole = $"{prefix}_TP";
         var targetPrice = runner ? execution.RunnerTarget : execution.Target;
+        var legQuantity = runner ? ZoneBirthSplitRunnerV172RunnerQuantity : ZoneBirthSplitRunnerV172BaseQuantity;
         var stop = new Order
         {
             Portfolio = Portfolio,
@@ -5202,7 +6127,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             Direction = exitDirection,
             TriggerPriceType = ReplayStopTriggerPriceType,
             TriggerPrice = execution.Stop,
-            QuantityToFill = ZoneBirthSplitRunnerV172LegQuantity,
+            QuantityToFill = legQuantity,
             TimeInForce = ReplayTimeInForce,
             OCOGroup = oco,
             Comment = $"OPF|{execution.TradeId}|{stopRole}|{execution.SignalId}",
@@ -5215,7 +6140,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             Type = OrderTypes.Limit,
             Direction = exitDirection,
             Price = targetPrice,
-            QuantityToFill = ZoneBirthSplitRunnerV172LegQuantity,
+            QuantityToFill = legQuantity,
             TimeInForce = ReplayTimeInForce,
             OCOGroup = oco,
             Comment = $"OPF|{execution.TradeId}|{targetRole}|{execution.SignalId}",
@@ -5235,100 +6160,123 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
         if (!await OpenProtectionOrderAsync(execution, stop, stopRole))
             return false;
-        LogExecutionInfo($"EXEC_{stopRole}_SENT trade={execution.TradeId} stop={execution.Stop:0.########} qty={ZoneBirthSplitRunnerV172LegQuantity:0.########}");
-        AppendExecutionEvent(execution, $"{stopRole}_SENT", stopRole, execution.Stop, ZoneBirthSplitRunnerV172LegQuantity, oco ?? string.Empty);
+        LogExecutionInfo($"EXEC_{stopRole}_SENT trade={execution.TradeId} stop={execution.Stop:0.########} qty={legQuantity:0.########}");
+        AppendExecutionEvent(execution, $"{stopRole}_SENT", stopRole, execution.Stop, legQuantity, oco ?? string.Empty);
         if (IsDoneOrder(stop))
         {
             LogExecutionInfo($"EXEC_{targetRole}_SUPPRESSED trade={execution.TradeId} stopState={stop.State}");
-            AppendExecutionEvent(execution, $"{targetRole}_SUPPRESSED", targetRole, targetPrice, ZoneBirthSplitRunnerV172LegQuantity, $"stopState={stop.State}");
+            AppendExecutionEvent(execution, $"{targetRole}_SUPPRESSED", targetRole, targetPrice, legQuantity, $"stopState={stop.State}");
             return true;
         }
 
         if (IsHistoricalReplayTime(_lastResearchCandle?.Time ?? execution.CreatedTime))
         {
-            var dormantTarget = HistoricalDormantTargetPriceV181(execution, targetPrice);
-            target.Price = dormantTarget;
-            if (!await OpenProtectionOrderAsync(execution, target, targetRole))
-                return false;
-            RegisterHistoricalDormantTargetV181(execution, targetRole, targetPrice, dormantTarget, target);
+            RegisterHistoricalVirtualTargetV220(execution, targetRole, targetPrice, target);
             return true;
         }
 
         if (!await OpenProtectionOrderAsync(execution, target, targetRole))
             return false;
-        LogExecutionInfo($"EXEC_{targetRole}_SENT trade={execution.TradeId} target={targetPrice:0.########} qty={ZoneBirthSplitRunnerV172LegQuantity:0.########}");
-        AppendExecutionEvent(execution, $"{targetRole}_SENT", targetRole, targetPrice, ZoneBirthSplitRunnerV172LegQuantity, oco ?? string.Empty);
+        LogExecutionInfo($"EXEC_{targetRole}_SENT trade={execution.TradeId} target={targetPrice:0.########} qty={legQuantity:0.########}");
+        AppendExecutionEvent(execution, $"{targetRole}_SENT", targetRole, targetPrice, legQuantity, oco ?? string.Empty);
         if (IsDoneOrder(target))
             await TryCancelExecutionOrderAsync(stop, $"Immediate{targetRole}");
         return true;
     }
 
-    private void RegisterHistoricalDormantTargetV181(ReplayExecutionState execution, string role, decimal intendedTarget, decimal dormantTarget, Order order)
+    private void RegisterHistoricalVirtualTargetV220(ReplayExecutionState execution, string role, decimal intendedTarget, Order order)
     {
-        if (!execution.HistoricalDormantTargetRolesV181.Add(role))
+        if (!execution.HistoricalVirtualTargetRolesV220.Add(role))
             return;
 
-        LogExecutionInfo($"EXEC_HISTORICAL_DORMANT_TP_SENT_V181 trade={execution.TradeId} role={role} intended={intendedTarget:0.########} dormant={dormantTarget:0.########} ext={order.ExtId}");
-        AppendExecutionEvent(execution, $"{role}_SENT", role, dormantTarget, order.QuantityToFill, $"HistoricalDormantTargetV181|intended={intendedTarget:0.########}|ext={order.ExtId}");
-        AppendExecutionEvent(execution, "HISTORICAL_DORMANT_TP_SENT_V181", role, dormantTarget, order.QuantityToFill, $"intended={intendedTarget:0.########}|ext={order.ExtId}|activateAfterObservedTargetTouch");
+        LogExecutionInfo($"EXEC_HISTORICAL_VIRTUAL_TP_ARMED_V220 trade={execution.TradeId} role={role} intended={intendedTarget:0.########} qty={order.QuantityToFill:0.########}");
+        AppendExecutionEvent(execution, $"{role}_ARMED_V220", role, intendedTarget, order.QuantityToFill, "HistoricalVirtualTargetV220|noRestingLimit");
+        AppendExecutionEvent(execution, "HISTORICAL_VIRTUAL_TP_ARMED_V220", role, intendedTarget, order.QuantityToFill, "activateMarketExitAfterObservedTargetTouch|noRestingLimit");
     }
 
-    private void ScheduleHistoricalDormantTargetsV181()
+    private void ScheduleHistoricalVirtualTargetsV220()
     {
-        var execution = _replayExecution;
-        if (execution is null || execution.ExitCompleted || !execution.BracketSubmitted ||
-            execution.HistoricalDormantTargetRolesV181.Count == 0 ||
+        foreach (var execution in ActiveReplayExecutions())
+            ScheduleHistoricalVirtualTargetsV220(execution);
+    }
+
+    private void ScheduleHistoricalVirtualTargetsV220(ReplayExecutionState execution)
+    {
+        if (execution.ExitCompleted || !execution.BracketSubmitted ||
+            execution.HistoricalVirtualTargetRolesV220.Count == 0 ||
             !IsHistoricalReplayTime(_lastResearchCandle?.Time ?? execution.CreatedTime))
         {
             return;
         }
 
-        foreach (var role in execution.HistoricalDormantTargetRolesV181.ToArray())
+        foreach (var role in execution.HistoricalVirtualTargetRolesV220.ToArray())
         {
-            if (execution.HistoricalDormantTargetActivationPendingV181.Contains(role))
+            if (execution.HistoricalVirtualTargetActivationPendingV220.Contains(role))
                 continue;
 
             var targetPrice = ExpectedExitPrice(execution, role);
             if (!HistoricalTargetObservedV180(execution, role, targetPrice))
                 continue;
 
-            execution.HistoricalDormantTargetActivationPendingV181.Add(role);
-            EnqueueExecutionAction($"HistoricalDormantTargetActivate:{role}", async () =>
+            execution.HistoricalVirtualTargetActivationPendingV220.Add(role);
+            EnqueueExecutionAction($"HistoricalVirtualTargetActivateV220:{role}", async () =>
             {
                 try
                 {
-                    if (execution.ExitCompleted || !execution.HistoricalDormantTargetRolesV181.Contains(role))
+                    if (execution.ExitCompleted || !execution.HistoricalVirtualTargetRolesV220.Contains(role))
                         return;
 
-                    var target = TargetOrderForRoleV180(execution, role);
-                    if (target is null || IsDoneOrder(target) || !IsWorkingExecutionOrder(target))
+                    var intendedTarget = ExpectedExitPrice(execution, role);
+                    if (execution.ProtectiveExitCallbackPendingV187)
                     {
-                        execution.HistoricalDormantTargetRolesV181.Remove(role);
+                        LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_DEFERRED_V207 trade={execution.TradeId} role={role} target={intendedTarget:0.########} reason=ProtectiveExitCallbackPending");
+                        AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_DEFERRED_V207", role, intendedTarget, TargetOrderForRoleV180(execution, role)?.QuantityToFill ?? 0m, "ProtectiveExitCallbackPendingV187");
                         return;
                     }
 
-                    var intendedTarget = ExpectedExitPrice(execution, role);
+                    var currentCandle = _lastResearchCandle;
+                    var sameLegStop = role == "RUNNER_TP" ? execution.RunnerStop : execution.Stop;
+                    var sameBarStopTouched = currentCandle is not null && sameLegStop > 0m &&
+                        (execution.Side == TradeSide.Long
+                            ? currentCandle.Low <= sameLegStop
+                            : currentCandle.High >= sameLegStop);
+                    if (sameBarStopTouched)
+                    {
+                        execution.HistoricalVirtualTargetRolesV220.Remove(role);
+                        LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_SUPPRESSED_STOP_TOUCH_V207 trade={execution.TradeId} role={role} target={intendedTarget:0.########} stop={sameLegStop:0.########} low={currentCandle!.Low:0.########} high={currentCandle.High:0.########}");
+                        AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_SUPPRESSED_STOP_TOUCH_V207", role, intendedTarget, TargetOrderForRoleV180(execution, role)?.QuantityToFill ?? 0m, $"stop={sameLegStop:0.########}|low={currentCandle.Low:0.########}|high={currentCandle.High:0.########}|StopFirst");
+                        return;
+                    }
+
+                    var target = TargetOrderForRoleV180(execution, role);
+                    var exitQuantity = RemainingTargetRoleQuantityV220(execution, role);
+                    if (target is null || exitQuantity <= 0m)
+                    {
+                        execution.HistoricalVirtualTargetRolesV220.Remove(role);
+                        return;
+                    }
+
                     var observedTargetExit = new Order
                     {
                         Portfolio = Portfolio,
                         Security = Security,
                         Type = OrderTypes.Market,
-                        Direction = target.Direction,
-                        QuantityToFill = target.Unfilled > 0m ? target.Unfilled : target.QuantityToFill,
+                        Direction = execution.Side == TradeSide.Long ? OrderDirections.Sell : OrderDirections.Buy,
+                        QuantityToFill = exitQuantity,
                         TimeInForce = ReplayTimeInForce,
+                        OCOGroup = role == "RUNNER_TP" ? execution.RunnerOcoGroup : execution.OcoGroup,
                         Comment = target.Comment,
                         AutoCancel = false
                     };
-                    LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_SEND_V206 trade={execution.TradeId} role={role} target={intendedTarget:0.########} dormantExt={target.ExtId} qty={observedTargetExit.QuantityToFill:0.########}");
-                    AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_SEND_V206", role, intendedTarget, observedTargetExit.QuantityToFill, $"dormantExt={target.ExtId}|ObservedTargetTouch|orderType=Market");
+                    LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_SEND_V220 trade={execution.TradeId} role={role} target={intendedTarget:0.########} qty={observedTargetExit.QuantityToFill:0.########}");
+                    AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_SEND_V220", role, intendedTarget, observedTargetExit.QuantityToFill, "ObservedTargetTouch|orderType=Market|noRestingLimit");
                     SetTargetOrderForRoleV181(execution, role, observedTargetExit);
                     execution.HistoricalObservedTargetExitRolesV206.Add(role);
-                    execution.HistoricalDormantTargetRolesV181.Remove(role);
+                    execution.HistoricalVirtualTargetRolesV220.Remove(role);
                     if (!await OpenProtectionOrderAsync(execution, observedTargetExit, role))
                         return;
-                    await TryCancelExecutionOrderAsync(target, $"HistoricalObservedTargetExitV206:{role}");
-                    LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_SENT_V206 trade={execution.TradeId} role={role} target={intendedTarget:0.########} ext={observedTargetExit.ExtId}");
-                    AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_SENT_V206", role, intendedTarget, observedTargetExit.QuantityToFill, $"ext={observedTargetExit.ExtId}|ObservedTargetTouch|orderType=Market");
+                    LogExecutionInfo($"EXEC_HISTORICAL_OBSERVED_TP_EXIT_SENT_V220 trade={execution.TradeId} role={role} target={intendedTarget:0.########} ext={observedTargetExit.ExtId}");
+                    AppendExecutionEvent(execution, "HISTORICAL_OBSERVED_TP_EXIT_SENT_V220", role, intendedTarget, observedTargetExit.QuantityToFill, $"ext={observedTargetExit.ExtId}|ObservedTargetTouch|orderType=Market|noRestingLimit");
                 }
                 catch (Exception ex)
                 {
@@ -5339,10 +6287,20 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 }
                 finally
                 {
-                    execution.HistoricalDormantTargetActivationPendingV181.Remove(role);
+                    execution.HistoricalVirtualTargetActivationPendingV220.Remove(role);
                 }
             });
         }
+    }
+
+    private static decimal RemainingTargetRoleQuantityV220(ReplayExecutionState execution, string role)
+    {
+        return role switch
+        {
+            "BASE_TP" => Math.Max(0m, ZoneBirthSplitRunnerV172BaseQuantity - execution.BaseExitFilledQty),
+            "RUNNER_TP" => Math.Max(0m, ZoneBirthSplitRunnerV172RunnerQuantity - execution.RunnerExitFilledQty),
+            _ => RemainingExecutionQuantity(execution)
+        };
     }
 
     private static bool HistoricalTargetObservedV180(ReplayExecutionState execution, string role, decimal targetPrice)
@@ -5365,15 +6323,6 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         };
     }
 
-    private decimal HistoricalDormantTargetPriceV181(ReplayExecutionState execution, decimal intendedTarget)
-    {
-        var raw = execution.Side == TradeSide.Long
-            ? intendedTarget + HistoricalDormantTargetOffsetPointsV181
-            : intendedTarget - HistoricalDormantTargetOffsetPointsV181;
-        var tick = _snapshot?.InstrumentProfile.TickSize ?? 0.25m;
-        return AlignToTick(Math.Max(tick, raw), tick);
-    }
-
     private static void SetTargetOrderForRoleV181(ReplayExecutionState execution, string role, Order order)
     {
         if (role is "TP" or "BASE_TP")
@@ -5384,12 +6333,38 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private static bool IsEntryFillRiskDriftAccepted(ReplayExecutionState execution)
     {
+        return IsEntryRiskDriftAccepted(execution, execution.InitialRiskPoints);
+    }
+
+    private static bool IsEntryRiskDriftAccepted(ReplayExecutionState execution, decimal risk)
+    {
         if (IsBreakawayPath(execution.ResearchPath))
             return false;
         if (IsObservationConfirmPath(execution.ResearchPath) && execution.Side == TradeSide.Long)
             return false;
         return execution.PlannedRiskPoints <= execution.MaxAllowedRiskPoints &&
-            execution.InitialRiskPoints <= execution.MaxAllowedRiskPoints + EntryFillRiskDriftTolerancePoints;
+            risk <= execution.MaxAllowedRiskPoints + EntryFillRiskDriftTolerancePoints;
+    }
+
+    private decimal EstimatedRepricedRiskPointsV216(ReplayExecutionState execution, decimal entry)
+    {
+        if (_snapshot is null || entry <= 0m)
+            return execution.PlannedRiskPoints;
+
+        var minRisk = Math.Max(_snapshot.InstrumentProfile.MinStopPoints, _snapshot.InstrumentProfile.TickSize);
+        var stop = execution.Stop;
+        if (execution.Side == TradeSide.Long)
+        {
+            if (stop >= entry || entry - stop < minRisk)
+                stop = entry - minRisk;
+        }
+        else if (stop <= entry || stop - entry < minRisk)
+        {
+            stop = entry + minRisk;
+        }
+
+        stop = AlignToTick(stop, _snapshot.InstrumentProfile.TickSize);
+        return Math.Abs(entry - stop);
     }
 
     private void RepriceExecutionBracketFromFill(ReplayExecutionState execution)
@@ -5451,15 +6426,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void ScheduleProtectionCleanupIfNeeded(string reason)
     {
-        var execution = _replayExecution;
-        if (!NeedsProtectionCleanup(execution))
-            return;
-
-        EnqueueExecutionAction($"ProtectionCleanup:{reason}", async () =>
+        foreach (var execution in _replayExecutionsByTradeId.Values.Where(NeedsProtectionCleanup).ToArray())
         {
-            if (NeedsProtectionCleanup(execution))
-                await CleanupProtectionOrdersAsync(execution!, reason);
-        });
+            EnqueueExecutionAction($"ProtectionCleanup:{execution.TradeId}:{reason}", async () =>
+            {
+                if (NeedsProtectionCleanup(execution))
+                    await CleanupProtectionOrdersAsync(execution, reason);
+            });
+        }
     }
 
     private void ScheduleZoneBirthRunnerBreakEvenAfterBaseTargetV173(ReplayExecutionState execution, decimal baseTargetFillPrice)
@@ -5476,7 +6450,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var entry = execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice;
         var breakEvenStop = AlignToTick(entry, _snapshot.InstrumentProfile.TickSize);
         var marketPrice = _lastResearchCandle?.Close ?? baseTargetFillPrice;
-        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BASE_TP_TRIGGERED", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"bar={execution.RunnerBreakEvenTriggerBar}|baseTargetFill={baseTargetFillPrice:0.########}|market={marketPrice:0.########}");
+        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BASE_TP_TRIGGERED", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172RunnerQuantity, $"bar={execution.RunnerBreakEvenTriggerBar}|baseTargetFill={baseTargetFillPrice:0.########}|market={marketPrice:0.########}");
 
         var tick = _snapshot.InstrumentProfile.TickSize;
         var marketValid = execution.Side == TradeSide.Long
@@ -5485,13 +6459,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (!marketValid)
         {
             LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_BE_SKIPPED trade={execution.TradeId} market={marketPrice:0.########} stop={breakEvenStop:0.########}");
-            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_SKIPPED_MARKET_CROSSED", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"market={marketPrice:0.########}|tick={tick:0.########}");
+            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_SKIPPED_MARKET_CROSSED", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172RunnerQuantity, $"market={marketPrice:0.########}|tick={tick:0.########}");
             return;
         }
 
         if (execution.Side == TradeSide.Long ? breakEvenStop <= execution.RunnerStop : breakEvenStop >= execution.RunnerStop)
         {
-            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_NOOP", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"current={execution.RunnerStop:0.########}");
+            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_NOOP", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172RunnerQuantity, $"current={execution.RunnerStop:0.########}");
             return;
         }
 
@@ -5511,7 +6485,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             newStop.TriggerPrice = execution.RunnerPendingStop;
             newStop.TriggerPriceType = ReplayStopTriggerPriceType;
             LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_BE_MODIFY_SEND trade={execution.TradeId} old={oldStop.TriggerPrice:0.########} new={newStop.TriggerPrice:0.########} triggerBar={execution.RunnerBreakEvenTriggerBar}");
-            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_MODIFY_SEND", "RUNNER_SL", newStop.TriggerPrice, ZoneBirthSplitRunnerV172LegQuantity, $"old={oldStop.TriggerPrice:0.########}|triggerBar={execution.RunnerBreakEvenTriggerBar}");
+            AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_MODIFY_SEND", "RUNNER_SL", newStop.TriggerPrice, ZoneBirthSplitRunnerV172RunnerQuantity, $"old={oldStop.TriggerPrice:0.########}|triggerBar={execution.RunnerBreakEvenTriggerBar}");
             try
             {
                 await ModifyOrderAsync(oldStop, newStop);
@@ -5521,7 +6495,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             {
                 execution.RunnerBreakEvenPending = false;
                 LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_BE_MODIFY_FAIL trade={execution.TradeId} err={ex.GetType().Name}:{ex.Message}");
-                AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_MODIFY_FAIL", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172LegQuantity, $"{ex.GetType().Name}:{ex.Message}");
+                AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_MODIFY_FAIL", "RUNNER_SL", breakEvenStop, ZoneBirthSplitRunnerV172RunnerQuantity, $"{ex.GetType().Name}:{ex.Message}");
                 throw;
             }
         });
@@ -5529,10 +6503,17 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void ScheduleProtectBreakEvenV186(decimal marketPrice)
     {
-        var execution = _replayExecution;
-        var currentBar = _lastResearchCandle?.Bar ?? _lastSeenBar;
-        if (_snapshot is null || execution is null || execution.ExitCompleted || execution.ZoneBirthSplitRunnerV172 ||
-            !UsesProtectBreakEvenV186(execution.Side, execution.ResearchPath) || !execution.BracketSubmitted ||
+        foreach (var execution in ActiveReplayExecutions())
+            ScheduleProtectBreakEvenV186(execution, marketPrice);
+    }
+
+    private void ScheduleProtectBreakEvenV186(ReplayExecutionState execution, decimal marketPrice)
+    {
+        var currentBar = Math.Max(_lastSeenBar, _lastResearchCandle?.Bar ?? -1);
+        if (_snapshot is null || execution.ExitCompleted || execution.ZoneBirthSplitRunnerV172 ||
+            (!execution.IsDeferredContinuation &&
+             (!UsesProtectBreakEvenV186(execution.Side, execution.ResearchPath) ||
+              IsStaticDynamicExitV215(execution.Side, execution.ResearchPath, execution.PlannedRiskPoints))) || !execution.BracketSubmitted ||
             execution.ProtectBreakEvenEvaluatedV186 || execution.ProtectBreakEvenPendingV186 ||
             execution.ProtectBreakEvenAppliedV186 || execution.ProtectBreakEvenLastMarketCrossedBarV187 == currentBar ||
             !IsWorkingExecutionOrder(execution.StopOrder))
@@ -5541,9 +6522,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         var entry = execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice;
+        var triggerR = ProtectBreakEvenTriggerRFor(execution);
         var triggerPrice = execution.Side == TradeSide.Long
-            ? entry + execution.InitialRiskPoints * ProtectBreakEvenTriggerRV186
-            : entry - execution.InitialRiskPoints * ProtectBreakEvenTriggerRV186;
+            ? entry + execution.InitialRiskPoints * triggerR
+            : entry - execution.InitialRiskPoints * triggerR;
         var triggerObserved = execution.ProtectionObservationStarted &&
             (execution.Side == TradeSide.Long
                 ? execution.ProtectiveObservedHigh >= triggerPrice
@@ -5551,10 +6533,20 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (!triggerObserved)
             return;
 
-        execution.ProtectBreakEvenTriggerBarV186 = _lastResearchCandle?.Bar;
+        if (RequiresNextBarBreakEvenV209(execution) && !execution.ProtectBreakEvenTriggerBarV186.HasValue)
+        {
+            execution.ProtectBreakEvenTriggerBarV186 = currentBar;
+            AppendExecutionEvent(execution, "PROTECT_BE_ARMED_NEXT_BAR_V209", "SL", entry, execution.BracketQty, $"triggerR={triggerR:0.##}|trigger={triggerPrice:0.########}|triggerBar={currentBar}");
+            return;
+        }
+        if (RequiresNextBarBreakEvenV209(execution) && execution.ProtectBreakEvenTriggerBarV186.HasValue &&
+            currentBar <= execution.ProtectBreakEvenTriggerBarV186.Value)
+            return;
+
+        execution.ProtectBreakEvenTriggerBarV186 ??= currentBar;
         var breakEvenStop = AlignToTick(entry, _snapshot.InstrumentProfile.TickSize);
         var reference = CurrentExecutionMarketReference(marketPrice);
-        AppendExecutionEvent(execution, "PROTECT_BE1R_TRIGGERED_V186", "SL", breakEvenStop, execution.BracketQty, $"trigger={triggerPrice:0.########}|reference={reference:0.########}|bar={execution.ProtectBreakEvenTriggerBarV186}");
+        AppendExecutionEvent(execution, ProtectBreakEvenEventName(execution, "TRIGGERED"), "SL", breakEvenStop, execution.BracketQty, $"triggerR={triggerR:0.##}|trigger={triggerPrice:0.########}|reference={reference:0.########}|bar={execution.ProtectBreakEvenTriggerBarV186}");
 
         var tick = _snapshot.InstrumentProfile.TickSize;
         var marketValid = execution.Side == TradeSide.Long
@@ -5563,14 +6555,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (!marketValid)
         {
             execution.ProtectBreakEvenLastMarketCrossedBarV187 = currentBar;
-            AppendExecutionEvent(execution, "PROTECT_BE1R_SKIPPED_MARKET_CROSSED_V186", "SL", breakEvenStop, execution.BracketQty, $"reference={reference:0.########}|tick={tick:0.########}");
+            AppendExecutionEvent(execution, ProtectBreakEvenEventName(execution, "SKIPPED_MARKET_CROSSED"), "SL", breakEvenStop, execution.BracketQty, $"reference={reference:0.########}|tick={tick:0.########}");
             return;
         }
 
         execution.ProtectBreakEvenEvaluatedV186 = true;
         if (execution.Side == TradeSide.Long ? breakEvenStop <= execution.Stop : breakEvenStop >= execution.Stop)
         {
-            AppendExecutionEvent(execution, "PROTECT_BE1R_NOOP_V186", "SL", breakEvenStop, execution.BracketQty, $"current={execution.Stop:0.########}");
+            AppendExecutionEvent(execution, ProtectBreakEvenEventName(execution, "NOOP"), "SL", breakEvenStop, execution.BracketQty, $"current={execution.Stop:0.########}");
             return;
         }
 
@@ -5588,8 +6580,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             var newStop = oldStop.Clone();
             newStop.TriggerPrice = execution.ProtectPendingStopV186;
             newStop.TriggerPriceType = ReplayStopTriggerPriceType;
-            LogExecutionInfo($"EXEC_PROTECT_BE1R_V186_MODIFY_SEND trade={execution.TradeId} old={oldStop.TriggerPrice:0.########} new={newStop.TriggerPrice:0.########} triggerBar={execution.ProtectBreakEvenTriggerBarV186}");
-            AppendExecutionEvent(execution, "PROTECT_BE1R_MODIFY_SEND_V186", "SL", newStop.TriggerPrice, execution.BracketQty, $"old={oldStop.TriggerPrice:0.########}|triggerBar={execution.ProtectBreakEvenTriggerBarV186}");
+            var modifySendEvent = ProtectBreakEvenEventName(execution, "MODIFY_SEND");
+            LogExecutionInfo($"EXEC_{modifySendEvent} trade={execution.TradeId} old={oldStop.TriggerPrice:0.########} new={newStop.TriggerPrice:0.########} triggerBar={execution.ProtectBreakEvenTriggerBarV186}");
+            AppendExecutionEvent(execution, modifySendEvent, "SL", newStop.TriggerPrice, execution.BracketQty, $"old={oldStop.TriggerPrice:0.########}|triggerBar={execution.ProtectBreakEvenTriggerBarV186}");
             try
             {
                 await ModifyOrderAsync(oldStop, newStop);
@@ -5598,11 +6591,34 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             catch (Exception ex)
             {
                 execution.ProtectBreakEvenPendingV186 = false;
-                LogExecutionInfo($"EXEC_PROTECT_BE1R_V186_MODIFY_FAIL trade={execution.TradeId} err={ex.GetType().Name}:{ex.Message}");
-                AppendExecutionEvent(execution, "PROTECT_BE1R_MODIFY_FAILED_V186", "SL", breakEvenStop, execution.BracketQty, $"{ex.GetType().Name}:{ex.Message}");
+                var modifyFailedEvent = ProtectBreakEvenEventName(execution, "MODIFY_FAILED");
+                LogExecutionInfo($"EXEC_{modifyFailedEvent} trade={execution.TradeId} err={ex.GetType().Name}:{ex.Message}");
+                AppendExecutionEvent(execution, modifyFailedEvent, "SL", breakEvenStop, execution.BracketQty, $"{ex.GetType().Name}:{ex.Message}");
                 throw;
             }
         });
+    }
+
+    private static decimal ProtectBreakEvenTriggerRFor(ReplayExecutionState execution)
+    {
+        if (TryGetActualExitPolicyV209(execution.Side, execution.ResearchPath, out _, out var triggerR, out _) && triggerR > 0m)
+            return triggerR;
+        return ProtectBreakEvenTriggerRV186;
+    }
+
+    private static bool RequiresNextBarBreakEvenV209(ReplayExecutionState execution)
+    {
+        return execution.IsDeferredContinuation ||
+            (execution.Side == TradeSide.Short &&
+             string.Equals(execution.ResearchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ProtectBreakEvenEventName(ReplayExecutionState execution, string action)
+    {
+        return execution.Side == TradeSide.Short &&
+               string.Equals(execution.ResearchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase)
+            ? $"PROTECT_BE1_5R_{action}_V209"
+            : $"PROTECT_BE1R_{action}_V186";
     }
 
     private void TryMarkProtectBreakEvenV186Applied(ReplayExecutionState execution, Order order, string source)
@@ -5616,8 +6632,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         execution.StopOrder = order;
         execution.ProtectBreakEvenPendingV186 = false;
         execution.ProtectBreakEvenAppliedV186 = true;
-        LogExecutionInfo($"EXEC_PROTECT_BE1R_V186_APPLIED trade={execution.TradeId} stop={execution.Stop:0.########} src={source}");
-        AppendExecutionEvent(execution, "PROTECT_BE1R_APPLIED_V186", "SL", execution.Stop, execution.BracketQty, $"src={source}|triggerBar={execution.ProtectBreakEvenTriggerBarV186}");
+        var appliedEvent = ProtectBreakEvenEventName(execution, "APPLIED");
+        LogExecutionInfo($"EXEC_{appliedEvent} trade={execution.TradeId} stop={execution.Stop:0.########} src={source}");
+        AppendExecutionEvent(execution, appliedEvent, "SL", execution.Stop, execution.BracketQty, $"src={source}|triggerBar={execution.ProtectBreakEvenTriggerBarV186}");
     }
 
     private void TryMarkZoneBirthRunnerBreakEvenV173Applied(ReplayExecutionState execution, Order order, string source)
@@ -5632,16 +6649,84 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         execution.RunnerBreakEvenPending = false;
         execution.RunnerBreakEvenApplied = true;
         LogExecutionInfo($"EXEC_ZONEBIRTH_RUNNER_V173_BE_APPLIED trade={execution.TradeId} stop={execution.RunnerStop:0.########} src={source}");
-        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_APPLIED", "RUNNER_SL", execution.RunnerStop, ZoneBirthSplitRunnerV172LegQuantity, $"src={source}|triggerBar={execution.RunnerBreakEvenTriggerBar}");
+        AppendExecutionEvent(execution, "ZONEBIRTH_RUNNER_V173_BE_APPLIED", "RUNNER_SL", execution.RunnerStop, ZoneBirthSplitRunnerV172RunnerQuantity, $"src={source}|triggerBar={execution.RunnerBreakEvenTriggerBar}");
+    }
+
+    private void SchedulePolicyTimeStopV209(OpfCandle candle)
+    {
+        foreach (var execution in ActiveReplayExecutions())
+            SchedulePolicyTimeStopV209(execution, candle);
+    }
+
+    private void SchedulePolicyTimeStopV209(ReplayExecutionState execution, OpfCandle candle)
+    {
+        if (execution.IsDeferredContinuation || execution.ZoneBirthSplitRunnerV172 || execution.ExitCompleted ||
+            execution.TimeStopExitPendingV208 || !execution.BracketSubmitted || execution.EntryFilledQty <= 0m ||
+            !TryGetActualExitPolicyV209(execution.Side, execution.ResearchPath, out _, out _, out var maxBars, execution.PlannedRiskPoints) ||
+            candle.Bar - execution.CreatedBar + 1 < maxBars ||
+            IsPolicyProtectiveExitTouchedV209(execution, candle))
+        {
+            return;
+        }
+
+        execution.TimeStopExitPendingV208 = true;
+        execution.TimeStopReferencePriceV209 = candle.Close;
+        AppendExecutionEvent(execution, "POLICY_TIMESTOP_TRIGGERED_V209", "TIME_STOP", candle.Close, RemainingExecutionQuantity(execution), $"bars={candle.Bar - execution.CreatedBar + 1}|max={maxBars}|path={execution.ResearchPath}");
+        EnqueueExecutionAction("PolicyTimeStopV209", async () =>
+        {
+            if (execution.ExitCompleted)
+                return;
+
+            await TryCancelExecutionOrderAsync(execution.StopOrder, "PolicyTimeStopV209");
+            await TryCancelExecutionOrderAsync(execution.TargetOrder, "PolicyTimeStopV209");
+            if (execution.ExitCompleted)
+                return;
+
+            var position = GetCurrentAccountPosition();
+            var qty = Math.Min(Math.Abs(position), RemainingExecutionQuantity(execution));
+            if (qty <= 0m || Portfolio is null || Security is null)
+            {
+                execution.TimeStopExitPendingV208 = false;
+                AppendExecutionEvent(execution, "POLICY_TIMESTOP_SUPPRESSED_V209", "TIME_STOP", candle.Close, 0m, $"position={position:0.########}|contextReady={Portfolio is not null && Security is not null}");
+                return;
+            }
+
+            var order = new Order
+            {
+                Portfolio = Portfolio,
+                Security = Security,
+                Type = OrderTypes.Market,
+                Direction = execution.Side == TradeSide.Long ? OrderDirections.Sell : OrderDirections.Buy,
+                QuantityToFill = qty,
+                TimeInForce = ReplayTimeInForce,
+                Comment = $"OPF|{execution.TradeId}|TIME_STOP|Policy{maxBars}BarsV209",
+                AutoCancel = false
+            };
+            execution.TimeStopOrderV208 = order;
+            AppendExecutionEvent(execution, "POLICY_TIMESTOP_SEND_V209", "TIME_STOP", candle.Close, qty, $"bars={candle.Bar - execution.CreatedBar + 1}|max={maxBars}");
+            await OpenOrderAsync(order);
+        });
+    }
+
+    private static bool IsPolicyProtectiveExitTouchedV209(ReplayExecutionState execution, OpfCandle candle)
+    {
+        return execution.Side == TradeSide.Long
+            ? candle.Low <= execution.Stop || candle.High >= execution.Target
+            : candle.High >= execution.Stop || candle.Low <= execution.Target;
     }
 
     private void ScheduleStaleUnfilledEntryAbortIfNeeded(OpfCandle candle)
     {
-        var execution = _replayExecution;
+        foreach (var execution in ActiveReplayExecutions())
+            ScheduleStaleUnfilledEntryAbortIfNeeded(execution, candle);
+    }
+
+    private void ScheduleStaleUnfilledEntryAbortIfNeeded(ReplayExecutionState execution, OpfCandle candle)
+    {
         if (!IsStaleUnfilledEntry(execution, candle.Bar))
             return;
 
-        execution!.EntryAbortPending = true;
+        execution.EntryAbortPending = true;
         var barsSinceSend = candle.Bar - execution.CreatedBar;
         EnqueueExecutionAction("AbortStaleUnfilledEntry", async () =>
         {
@@ -5680,7 +6765,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         EnqueueExecutionAction("FinalizePartialEntry", async () =>
         {
             execution.PartialEntryFinalizeScheduled = false;
-            if (!ReferenceEquals(_replayExecution, execution) ||
+            if (!IsRegisteredReplayExecution(execution) ||
                 execution.ExitCompleted ||
                 execution.BracketSubmitted ||
                 execution.EntryAbortPending ||
@@ -5706,16 +6791,25 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             execution.BracketQty = filledQty;
             execution.EmergencyFlattenSubmitted = true;
             execution.EmergencyFlattenSubmittedQty += filledQty;
-            await SubmitEmergencyFlattenAsync(filledQty, reason);
+            await SubmitEmergencyFlattenAsync(execution, filledQty, reason);
         });
     }
 
     private void ScheduleGlobexCloseoutIfNeeded(OpfCandle candle)
     {
-        var execution = _replayExecution;
         if (!ActualOrdersEnabled ||
-            !IsGlobexCloseoutLockWindow(candle.Time, out var closeoutReason) ||
-            execution is null ||
+            !IsGlobexCloseoutLockWindow(candle.Time, out var closeoutReason))
+        {
+            return;
+        }
+
+        foreach (var execution in ActiveReplayExecutions())
+            ScheduleGlobexCloseoutIfNeeded(execution, candle, closeoutReason);
+    }
+
+    private void ScheduleGlobexCloseoutIfNeeded(ReplayExecutionState execution, OpfCandle candle, string closeoutReason)
+    {
+        if (
             execution.ExitCompleted ||
             execution.ReplayStopExitPending)
         {
@@ -5725,7 +6819,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         execution.ReplayStopExitPending = true;
         EnqueueExecutionAction("GlobexCloseout", async () =>
         {
-            if (!ReferenceEquals(_replayExecution, execution) || execution.ExitCompleted)
+            if (!IsRegisteredReplayExecution(execution) || execution.ExitCompleted)
                 return;
 
             var reason = $"{closeoutReason}|remaining={RemainingExecutionQuantity(execution):0.########}";
@@ -5764,8 +6858,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
                 return;
             }
 
-            var qty = Math.Abs(position);
-            var direction = position > 0m ? OrderDirections.Sell : OrderDirections.Buy;
+            var qty = Math.Min(Math.Abs(position), RemainingExecutionQuantity(execution));
+            var direction = execution.Side == TradeSide.Long ? OrderDirections.Sell : OrderDirections.Buy;
+            if (qty <= 0m)
+            {
+                execution.ReplayStopExitPending = false;
+                return;
+            }
             var order = new Order
             {
                 Portfolio = Portfolio,
@@ -5782,26 +6881,69 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_FLATTEN_SEND trade={execution.TradeId} dir={direction} qty={qty:0.########} reference={execution.GlobexCloseoutReferencePriceV184:0.########} {reason}");
             AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_FLATTEN_SEND", ReplayStopExitRole, candle.Close, qty, $"dir={direction}|{reason}");
             await OpenOrderAsync(order);
+            ScheduleGlobexCloseoutConfirmationV216(execution, candle);
+        });
+    }
 
-            var confirmDeadline = DateTime.UtcNow.AddSeconds(5);
-            while (DateTime.UtcNow < confirmDeadline && GetCurrentAccountPosition() != 0m)
-                await Task.Delay(100);
+    private void ScheduleGlobexCloseoutConfirmationV216(ReplayExecutionState execution, OpfCandle candle)
+    {
+        _ = DelayGlobexCloseoutConfirmationV216(execution, candle);
+    }
+
+    private async Task DelayGlobexCloseoutConfirmationV216(ReplayExecutionState execution, OpfCandle candle)
+    {
+        await Task.Delay(5000);
+        EnqueueExecutionAction($"GlobexCloseoutConfirmV216:{execution.TradeId}", async () =>
+        {
+            if (!IsRegisteredReplayExecution(execution) || execution.ExitCompleted)
+                return;
 
             var remainingPosition = GetCurrentAccountPosition();
-            if (remainingPosition != 0m)
+            if (remainingPosition == 0m)
             {
-                var unconfirmedReason = $"trade={execution.TradeId}|position={remainingPosition:0.########}|exitCallback={execution.ExitCompleted}";
-                LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_UNCONFIRMED {unconfirmedReason}");
-                AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_UNCONFIRMED", ReplayStopExitRole, candle.Close, Math.Abs(remainingPosition), unconfirmedReason);
-                SetLiveReadinessBlocked("GlobexCloseoutUnconfirmed", $"Globex closeout was not confirmed for {execution.TradeId}. Account position={remainingPosition:0.########}. Verify the account and working orders manually.");
+                var pendingReason = $"trade={execution.TradeId}|position=0|executionRemaining={RemainingExecutionQuantity(execution):0.########}|exitCallback=pending";
+                LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_ACCOUNT_FLAT_CALLBACK_PENDING_V216 {pendingReason}");
+                AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_ACCOUNT_FLAT_CALLBACK_PENDING_V216", ReplayStopExitRole, candle.Close, 0m, pendingReason);
+                if (IsHistoricalReplayTime(candle.Time))
+                    await ReconcileHistoricalGlobexCloseoutV216(execution, candle);
+                else
+                    SetLiveReadinessBlocked("GlobexCloseoutCallbackMissing", $"Globex closeout flattened the account but no fill callback was received for {execution.TradeId}. Verify account PnL and working orders manually.");
+                return;
             }
-            else if (!execution.ExitCompleted)
-            {
-                var pendingReason = $"trade={execution.TradeId}|position=0|exitCallback=pending";
-                LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_ACCOUNT_FLAT_CALLBACK_PENDING {pendingReason}");
-                AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_ACCOUNT_FLAT_CALLBACK_PENDING", ReplayStopExitRole, candle.Close, 0m, pendingReason);
-            }
+
+            var unconfirmedReason = $"trade={execution.TradeId}|position={remainingPosition:0.########}|executionRemaining={RemainingExecutionQuantity(execution):0.########}|exitCallback=false";
+            LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_UNCONFIRMED {unconfirmedReason}");
+            AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_UNCONFIRMED", ReplayStopExitRole, candle.Close, Math.Abs(remainingPosition), unconfirmedReason);
+            SetLiveReadinessBlocked("GlobexCloseoutUnconfirmed", $"Globex closeout was not confirmed for {execution.TradeId}. Account position={remainingPosition:0.########}. Verify the account and working orders manually.");
         });
+    }
+
+    private async Task ReconcileHistoricalGlobexCloseoutV216(ReplayExecutionState execution, OpfCandle candle)
+    {
+        if (execution.ExitCompleted || GetCurrentAccountPosition() != 0m)
+            return;
+
+        var missingQty = RemainingExecutionQuantity(execution);
+        var closeoutOrder = execution.EmergencyFlattenOrder;
+        if (missingQty <= 0m || !IsFilledExecutionOrder(closeoutOrder))
+        {
+            var reason = $"trade={execution.TradeId}|remaining={missingQty:0.########}|orderState={closeoutOrder?.State}|orderUnfilled={closeoutOrder?.Unfilled:0.########}";
+            LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_RECONCILE_UNRESOLVED_V216 {reason}");
+            AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_RECONCILE_UNRESOLVED_V216", ReplayStopExitRole, candle.Close, missingQty, reason);
+            SetLiveReadinessBlocked("GlobexCloseoutReconcileUnresolved", $"Historical Replay account is flat but the Globex closeout order could not be reconciled for {execution.TradeId}.");
+            return;
+        }
+
+        var reference = execution.GlobexCloseoutReferencePriceV184 > 0m
+            ? execution.GlobexCloseoutReferencePriceV184
+            : candle.Close;
+        var oldExitQty = execution.ExitFilledQty;
+        var oldExitValue = execution.ExitAvgPrice * oldExitQty;
+        execution.ExitFilledQty += missingQty;
+        execution.ExitAvgPrice = (oldExitValue + reference * missingQty) / execution.ExitFilledQty;
+        LogExecutionInfo($"EXEC_GLOBEX_CLOSEOUT_RECONCILED_V216 trade={execution.TradeId} reference={reference:0.########} qty={missingQty:0.########}");
+        AppendExecutionEvent(execution, "GLOBEX_CLOSEOUT_RECONCILED_V216", ReplayStopExitRole, reference, missingQty, $"orderExt={closeoutOrder!.ExtId}|state={closeoutOrder.State}");
+        await FinalizeCompletedExecutionExitAsync(execution, execution.ExitAvgPrice, ReplayStopExitRole);
     }
 
     private static bool IsStaleUnfilledEntry(ReplayExecutionState? execution, int currentBar)
@@ -5833,7 +6975,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return;
         }
 
-        if (IsReplayExecutionActive(_replayExecution))
+        if (ActiveReplayExecutions().Count > 0)
             return;
 
         if (_orphanPositionFlattenPending)
@@ -5849,25 +6991,22 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void ScheduleProtectionLossCheckIfNeeded(string reason)
     {
-        var execution = _replayExecution;
-        if (!IsUnprotectedOpenExecution(execution))
-            return;
-
-        EnqueueExecutionAction($"ProtectionLoss:{reason}", async () =>
+        foreach (var execution in ActiveReplayExecutions().Where(IsUnprotectedOpenExecution))
         {
-            await Task.Delay(250);
-            if (!IsUnprotectedOpenExecution(execution))
-                return;
-            if (GetCurrentAccountPosition() == 0m)
-                return;
+            EnqueueExecutionAction($"ProtectionLoss:{execution.TradeId}:{reason}", async () =>
+            {
+                await Task.Delay(250);
+                if (!IsUnprotectedOpenExecution(execution) || GetCurrentAccountPosition() == 0m)
+                    return;
 
-            execution!.EmergencyFlattenSubmitted = true;
-            var remainingQty = RemainingExecutionQuantity(execution);
-            LogExecutionInfo($"EXEC_PROTECTION_LOST_BEFORE_EXIT trade={execution.TradeId} reason={reason} remaining={remainingQty:0.########}");
-            AppendExecutionEvent(execution, "PROTECTION_LOST_BEFORE_EXIT", "-", 0m, remainingQty, reason);
-            NotifyLiveIssue($"ProtectionLost:{execution.TradeId}", $"Stop protection was lost for {execution.TradeId}. An idempotent emergency flatten is being submitted.");
-            await SubmitEmergencyFlattenAsync(remainingQty, $"ProtectionLost:{reason}");
-        });
+                execution.EmergencyFlattenSubmitted = true;
+                var remainingQty = RemainingExecutionQuantity(execution);
+                LogExecutionInfo($"EXEC_PROTECTION_LOST_BEFORE_EXIT trade={execution.TradeId} reason={reason} remaining={remainingQty:0.########}");
+                AppendExecutionEvent(execution, "PROTECTION_LOST_BEFORE_EXIT", "-", 0m, remainingQty, reason);
+                NotifyLiveIssue($"ProtectionLost:{execution.TradeId}", $"Stop protection was lost for {execution.TradeId}. An idempotent emergency flatten is being submitted.");
+                await SubmitEmergencyFlattenAsync(execution, remainingQty, $"ProtectionLost:{reason}");
+            });
+        }
     }
 
     private static bool NeedsProtectionCleanup(ReplayExecutionState? execution)
@@ -5879,6 +7018,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (execution is null || !execution.BracketSubmitted || execution.ExitCompleted ||
             execution.ReplayStopExitPending || execution.EmergencyFlattenSubmitted ||
+            execution.TimeStopExitPendingV208 ||
             execution.ProtectiveExitCallbackPendingV187 ||
             RemainingExecutionQuantity(execution) <= 0m)
         {
@@ -5899,7 +7039,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (execution.EntryFilledQty <= 0m || execution.ExitCompleted)
             return true;
-        if (execution.ProtectiveExitCallbackPendingV187)
+        if (execution.ProtectiveExitCallbackPendingV187 || execution.TimeStopExitPendingV208)
             return true;
         if (!execution.ZoneBirthSplitRunnerV172)
             return IsWorkingExecutionOrder(execution.StopOrder);
@@ -5993,26 +7133,27 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return;
 
         var workingOrder = order!;
+        var execution = ExecutionForOrder(workingOrder);
         try
         {
             await CancelOrderAsync(workingOrder);
             LogExecutionInfo($"EXEC_CANCEL_SENT reason={reason} ext={workingOrder.ExtId}");
-            if (_replayExecution is not null)
-                AppendExecutionEvent(_replayExecution, "CANCEL_SENT", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, reason);
+            if (execution is not null)
+                AppendExecutionEvent(execution, "CANCEL_SENT", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, reason);
         }
         catch (Exception ex)
         {
             if (IsExpectedOcoCancelAlreadyInactive(workingOrder, ex.Message))
             {
                 LogExecutionInfo($"EXEC_CANCEL_ALREADY_INACTIVE reason={reason} ext={workingOrder.ExtId} msg={ex.Message}");
-                if (_replayExecution is not null)
-                    AppendExecutionEvent(_replayExecution, "CANCEL_ALREADY_INACTIVE", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, $"reason={reason}|msg={ex.Message}");
+                if (execution is not null)
+                    AppendExecutionEvent(execution, "CANCEL_ALREADY_INACTIVE", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, $"reason={reason}|msg={ex.Message}");
                 return;
             }
 
             LogExecutionInfo($"EXEC_CANCEL_FAIL reason={reason} ext={workingOrder.ExtId} err={ex.GetType().Name}:{ex.Message}");
-            if (_replayExecution is not null)
-                AppendExecutionEvent(_replayExecution, "CANCEL_FAIL", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, $"reason={reason}|err={ex.GetType().Name}:{ex.Message}");
+            if (execution is not null)
+                AppendExecutionEvent(execution, "CANCEL_FAIL", ParseExecutionRole(workingOrder.Comment), workingOrder.Price > 0m ? workingOrder.Price : workingOrder.TriggerPrice, workingOrder.QuantityToFill, $"reason={reason}|err={ex.GetType().Name}:{ex.Message}");
             NotifyLiveIssue($"CancelException:{workingOrder.ExtId}", $"Order cancel threw an exception. role={ParseExecutionRole(workingOrder.Comment)}, error={ex.GetType().Name}: {ex.Message}");
         }
     }
@@ -6026,7 +7167,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         var position = GetCurrentAccountPosition();
-        var qty = Math.Abs(position);
+        var qty = Math.Min(Math.Abs(position), RemainingExecutionQuantity(execution));
         if (qty <= 0m)
         {
             AppendExecutionEvent(execution, "DUPLICATE_EXIT_FLATTEN_SUPPRESSED", role, 0m, fillQty, "positionFlat");
@@ -6034,7 +7175,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         execution.DuplicateExitFlattenSubmitted = true;
-        await SubmitEmergencyFlattenAsync(qty, $"DuplicateExit:{role}|pos={position:0.########}");
+        await SubmitEmergencyFlattenAsync(execution, qty, $"DuplicateExit:{role}|pos={position:0.########}");
     }
 
     private void ScheduleEmergencyFlattenResidualCheck(ReplayExecutionState execution, string reason)
@@ -6052,7 +7193,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         EnqueueExecutionAction("EmergencyFlattenResidualCheck", async () =>
         {
             execution.EmergencyFlattenResidualCheckPending = false;
-            if (!ReferenceEquals(_replayExecution, execution) || execution.ExitCompleted ||
+            if (!IsRegisteredReplayExecution(execution) || execution.ExitCompleted ||
                 IsWorkingExecutionOrder(execution.EmergencyFlattenOrder))
             {
                 return;
@@ -6066,22 +7207,20 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             execution.EmergencyFlattenOrderSubmitted = false;
             LogExecutionInfo($"EXEC_EMERGENCY_FLATTEN_RESIDUAL trade={execution.TradeId} reason={reason} qty={remainingQty:0.########}");
             AppendExecutionEvent(execution, "EMERGENCY_FLATTEN_RESIDUAL", "FLATTEN", 0m, remainingQty, reason);
-            await SubmitEmergencyFlattenAsync(remainingQty, $"Residual:{reason}");
+            await SubmitEmergencyFlattenAsync(execution, remainingQty, $"Residual:{reason}");
         });
     }
 
-    private async Task SubmitEmergencyFlattenAsync(decimal quantity, string reason)
+    private async Task SubmitEmergencyFlattenAsync(ReplayExecutionState execution, decimal quantity, string reason)
     {
-        var execution = _replayExecution;
-        if (execution is null || Portfolio is null || Security is null)
+        if (Portfolio is null || Security is null)
             return;
-        if (execution.EmergencyFlattenOrderSubmitted && IsWorkingExecutionOrder(execution.EmergencyFlattenOrder))
+        if (execution.EmergencyFlattenOrderSubmitted)
         {
-            AppendExecutionEvent(execution, "EMERGENCY_FLATTEN_SUPPRESSED", "FLATTEN", 0m, quantity, $"alreadySubmitted|reason={reason}");
+            LogExecutionInfo($"EXEC_EMERGENCY_FLATTEN_DUPLICATE_SUPPRESSED_V207 trade={execution.TradeId} reason={reason} qty={quantity:0.########}");
+            AppendExecutionEvent(execution, "EMERGENCY_FLATTEN_DUPLICATE_SUPPRESSED_V207", "FLATTEN", 0m, quantity, $"alreadySubmitted|reason={reason}");
             return;
         }
-        if (execution.EmergencyFlattenOrderSubmitted)
-            execution.EmergencyFlattenOrderSubmitted = false;
 
         var position = GetCurrentAccountPosition();
         if (position == 0m)
@@ -6090,12 +7229,21 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             return;
         }
 
-        var requestedQty = quantity > 0m ? quantity : execution.Quantity;
-        var qty = Math.Min(Math.Abs(position), requestedQty);
+        var requestedQty = quantity > 0m ? quantity : RemainingExecutionQuantity(execution);
+        var qty = Math.Min(Math.Abs(position), Math.Min(requestedQty, RemainingExecutionQuantity(execution)));
         if (qty <= 0m)
             return;
 
-        var direction = position > 0m ? OrderDirections.Sell : OrderDirections.Buy;
+        var expectedSign = execution.Side == TradeSide.Long ? 1 : -1;
+        if (Math.Sign(position) != expectedSign)
+        {
+            var mismatch = $"positionDirectionMismatch|position={position:0.########}|side={execution.Side}|reason={reason}";
+            AppendExecutionEvent(execution, "EMERGENCY_FLATTEN_BLOCKED", "FLATTEN", 0m, qty, mismatch);
+            SetLiveReadinessBlocked("ManagedPositionMismatch", $"Emergency flatten for {execution.TradeId} was blocked because the account position direction does not match the execution. {mismatch}");
+            return;
+        }
+
+        var direction = execution.Side == TradeSide.Long ? OrderDirections.Sell : OrderDirections.Buy;
         var order = new Order
         {
             Portfolio = Portfolio,
@@ -6280,9 +7428,27 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void FinalizeActiveExecutionOnStop()
     {
-        var execution = _replayExecution;
-        if (execution is null || _lastResearchCandle is null || execution.ExitCompleted)
+        if (_lastResearchCandle is null)
             return;
+
+        foreach (var execution in ActiveReplayExecutions())
+            FinalizeActiveExecutionOnStop(execution);
+    }
+
+    private void FinalizeActiveExecutionOnStop(ReplayExecutionState execution)
+    {
+        if (_lastResearchCandle is null || execution.ExitCompleted)
+            return;
+
+        if (execution.ReplayStopExitPending && GetCurrentAccountPosition() == 0m)
+        {
+            AppendExecutionEvent(execution, "STOP_WAITING_FOR_GLOBEX_CALLBACK_V216", ReplayStopExitRole, _lastResearchCandle.Close, RemainingExecutionQuantity(execution), "positionFlat|callbackPending");
+            var callbackDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < callbackDeadline && !execution.ExitCompleted)
+                Task.Delay(100).GetAwaiter().GetResult();
+            if (execution.ExitCompleted)
+                return;
+        }
 
         var remainingQty = RemainingExecutionQuantity(execution);
         LogExecutionInfo($"EXEC_ACTIVE_ON_STOP trade={execution.TradeId} remaining={remainingQty:0.########}");
@@ -6314,7 +7480,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         {
             try
             {
-                SubmitEmergencyFlattenAsync(remainingQty, "StrategyStopped").GetAwaiter().GetResult();
+                SubmitEmergencyFlattenAsync(execution, remainingQty, "StrategyStopped").GetAwaiter().GetResult();
             }
             catch (Exception ex)
             {
@@ -6475,10 +7641,10 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private bool IsActiveExecutionOrder(Order? order)
     {
-        if (order is null || _replayExecution is null)
+        if (order is null)
             return false;
         return TryParseExecutionComment(order.Comment, out var tradeId, out _) &&
-            string.Equals(tradeId, _replayExecution.TradeId, StringComparison.OrdinalIgnoreCase);
+            IsReplayExecutionActive(FindReplayExecution(tradeId));
     }
 
     private static bool IsReplayExecutionActive(ReplayExecutionState? execution)
@@ -6669,14 +7835,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private static bool IsZoneBirthBaseLegExitedV172(ReplayExecutionState execution)
     {
-        return execution.BaseExitFilledQty >= ZoneBirthSplitRunnerV172LegQuantity ||
+        return execution.BaseExitFilledQty >= ZoneBirthSplitRunnerV172BaseQuantity ||
             IsFilledExecutionOrder(execution.StopOrder) ||
             IsFilledExecutionOrder(execution.TargetOrder);
     }
 
     private static bool IsZoneBirthRunnerLegExitedV172(ReplayExecutionState execution)
     {
-        return execution.RunnerExitFilledQty >= ZoneBirthSplitRunnerV172LegQuantity ||
+        return execution.RunnerExitFilledQty >= ZoneBirthSplitRunnerV172RunnerQuantity ||
             IsFilledExecutionOrder(execution.RunnerStopOrder) ||
             IsFilledExecutionOrder(execution.RunnerTargetOrder);
     }
@@ -6766,6 +7932,8 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private ReplayExecutionState? FindReplayExecution(string tradeId)
     {
+        if (_replayExecutionsByTradeId.TryGetValue(tradeId, out var registered))
+            return registered;
         if (_replayExecution is not null && string.Equals(_replayExecution.TradeId, tradeId, StringComparison.OrdinalIgnoreCase))
             return _replayExecution;
 
@@ -6777,6 +7945,29 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         return null;
+    }
+
+    private ReplayExecutionState? ExecutionForOrder(Order? order)
+    {
+        return order is not null &&
+            TryParseExecutionComment(order.Comment, out var tradeId, out _)
+            ? FindReplayExecution(tradeId)
+            : null;
+    }
+
+    private List<ReplayExecutionState> ActiveReplayExecutions()
+    {
+        return _replayExecutionsByTradeId.Values
+            .Where(IsReplayExecutionActive)
+            .OrderBy(x => x.CreatedTime)
+            .ThenBy(x => x.TradeId, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private bool IsRegisteredReplayExecution(ReplayExecutionState execution)
+    {
+        return _replayExecutionsByTradeId.TryGetValue(execution.TradeId, out var registered) &&
+            ReferenceEquals(registered, execution);
     }
 
     private static decimal AlignToTick(decimal value, decimal tick)
@@ -6810,7 +8001,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (researchPath is "StructureConfirmShadow_ConfirmBarStop" or "StructureConfirmShadow_ConfirmBarStop_Min10" or "StructureConfirmShadow_ConfirmBarStop_Wait1" or "StructureConfirmShadow_SwingStop")
             return new RewardEstimate(Math.Round(risk * ReplayTargetR, 2), $"StructureConfirmTargetR:{ReplayTargetR:0.##}");
 
-        if (researchPath is "BreakawayFvg" or "BreakawayFvg_Qualified" or "BreakawayRetest")
+        if (researchPath is "BreakawayFvg" or "BreakawayFvg_Qualified" || IsBreakawayRetestResearchPath(researchPath))
             return new RewardEstimate(Math.Round(risk * ReplayTargetR, 2), $"BreakawayTargetR:{ReplayTargetR:0.##}");
 
         if (researchPath == "ShadowCandidate")
@@ -7087,6 +8278,32 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         _shadowTradeTrackersByKey[key] = tracker;
     }
 
+    private void StartDecisionTapeCalibrationTracking(CandidateSignal signal, OpfCandle entryCandle, string researchPath, decimal stop, decimal risk)
+    {
+        if (!DecisionTapeCalibrationCollection || _snapshot is null || _researchLogger is null || risk <= 0m)
+            return;
+
+        var key = ShadowTradeKey(signal.SignalId, researchPath, entryCandle.Bar);
+        if (_decisionTapeCalibrationTrackersByKey.ContainsKey(key))
+            return;
+
+        var researchTracker = new ResearchTracker(
+            signal,
+            entryCandle.Time,
+            entryCandle.Bar,
+            entryCandle.Close,
+            stop,
+            risk,
+            DecisionTapeCalibrationMaxBars,
+            researchPath);
+        researchTracker.Update(entryCandle);
+        var quote = ExecutionQuoteSnapshot();
+        var tracker = new DecisionTapeCalibrationTracker(key, researchTracker, entryCandle, quote.Bid, quote.Ask);
+        tracker.SetEntryMarketSequence(_decisionTapeMarketSequence);
+        _decisionTapeCalibrationTrackers.Add(tracker);
+        _decisionTapeCalibrationTrackersByKey[key] = tracker;
+    }
+
     private void UpdateShadowTradeTrackers(OpfCandle candle)
     {
         if (_snapshot is null || _shadowTradeTrackers.Count == 0)
@@ -7109,6 +8326,27 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
     }
 
+    private void UpdateDecisionTapeCalibrationTrackers(OpfCandle candle)
+    {
+        if (_snapshot is null || _decisionTapeCalibrationTrackers.Count == 0)
+            return;
+
+        for (var i = _decisionTapeCalibrationTrackers.Count - 1; i >= 0; i--)
+        {
+            var calibration = _decisionTapeCalibrationTrackers[i];
+            if (candle.Bar <= calibration.Tracker.EntryBar)
+                continue;
+
+            calibration.AppendBar(candle);
+            calibration.Tracker.Update(candle);
+            if (calibration.Tracker.IsComplete(candle.Bar) || IsGlobexCloseoutLockWindow(candle.Time, out _))
+            {
+                WriteDecisionTapeCalibration(calibration, candle, calibration.Tracker.IsComplete(candle.Bar) ? "MaxBars" : "GlobexCloseout");
+                RemoveDecisionTapeCalibrationTrackerAt(i);
+            }
+        }
+    }
+
     private void FlushShadowTradeTrackers(string reason)
     {
         if (_snapshot is null || _lastResearchCandle is null)
@@ -7123,11 +8361,30 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
     }
 
+    private void FlushDecisionTapeCalibrationTrackers(string reason)
+    {
+        if (_snapshot is null || _lastResearchCandle is null)
+            return;
+
+        for (var i = _decisionTapeCalibrationTrackers.Count - 1; i >= 0; i--)
+        {
+            WriteDecisionTapeCalibration(_decisionTapeCalibrationTrackers[i], _lastResearchCandle, reason);
+            RemoveDecisionTapeCalibrationTrackerAt(i);
+        }
+    }
+
     private void RemoveShadowTradeTrackerAt(int index)
     {
         var shadow = _shadowTradeTrackers[index];
         _shadowTradeTrackers.RemoveAt(index);
         _shadowTradeTrackersByKey.Remove(shadow.Key);
+    }
+
+    private void RemoveDecisionTapeCalibrationTrackerAt(int index)
+    {
+        var calibration = _decisionTapeCalibrationTrackers[index];
+        _decisionTapeCalibrationTrackers.RemoveAt(index);
+        _decisionTapeCalibrationTrackersByKey.Remove(calibration.Key);
     }
 
     private bool TryResolveShadowTrade(ResearchTracker tracker, OpfCandle candle, bool forceExit, string forceReason, out ShadowTradeResult result)
@@ -7223,6 +8480,141 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             ? tracker.Entry + points
             : tracker.Entry - points;
         return new ShadowTradeResult(policy, exitReason, exitPrice, points, pnlR, exitBar, ambiguous);
+    }
+
+    private void CaptureDecisionTapeMarketTurn(int bar, decimal price)
+    {
+        if (!DecisionTapeCalibrationCollection || _snapshot is null || price <= 0m)
+            return;
+
+        _decisionTapeMarketSequence++;
+        if (_decisionTapeTurnBar < 0)
+        {
+            _decisionTapeTurnBar = bar;
+            _decisionTapeTurnPrice = price;
+            _decisionTapeTurnSequence = _decisionTapeMarketSequence;
+            _decisionTapeTurnDirection = 0;
+            AddDecisionTapeMarketTurn("Start", _decisionTapeTurnSequence, bar, price);
+            return;
+        }
+
+        if (bar != _decisionTapeTurnBar)
+        {
+            AddDecisionTapeMarketTurn("BarEnd", _decisionTapeTurnSequence, _decisionTapeTurnBar, _decisionTapeTurnPrice);
+            _decisionTapeTurnBar = bar;
+            _decisionTapeTurnPrice = price;
+            _decisionTapeTurnSequence = _decisionTapeMarketSequence;
+            _decisionTapeTurnDirection = 0;
+            AddDecisionTapeMarketTurn("BarStart", _decisionTapeTurnSequence, bar, price);
+            return;
+        }
+
+        var direction = price.CompareTo(_decisionTapeTurnPrice);
+        if (direction == 0)
+            return;
+
+        if (_decisionTapeTurnDirection != 0 && direction != _decisionTapeTurnDirection)
+        {
+            AddDecisionTapeMarketTurn(
+                _decisionTapeTurnDirection > 0 ? "TurnHigh" : "TurnLow",
+                _decisionTapeTurnSequence,
+                _decisionTapeTurnBar,
+                _decisionTapeTurnPrice);
+        }
+
+        _decisionTapeTurnDirection = direction;
+        _decisionTapeTurnPrice = price;
+        _decisionTapeTurnSequence = _decisionTapeMarketSequence;
+    }
+
+    private void AddDecisionTapeMarketTurn(string kind, long sequence, int bar, decimal price)
+    {
+        if (_decisionTapeMarketTurns.Count > 0 && _decisionTapeMarketTurns[^1].Sequence == sequence)
+            return;
+        _decisionTapeMarketTurns.Add(new DecisionTapeMarketTurn(sequence, bar, price, kind));
+    }
+
+    private void FlushDecisionTapeMarketTurns()
+    {
+        if (_snapshot is null || _researchLogger is null)
+            return;
+
+        if (_decisionTapeTurnBar >= 0)
+            AddDecisionTapeMarketTurn("End", _decisionTapeMarketSequence, _decisionTapeTurnBar, _decisionTapeTurnPrice);
+
+        foreach (var turn in _decisionTapeMarketTurns)
+        {
+            _researchLogger.AppendDecisionTapeMarketTurn(
+                _snapshot.SnapshotId,
+                turn.Sequence,
+                turn.Bar,
+                turn.Price,
+                turn.Kind);
+        }
+    }
+
+    private void WriteDecisionTapeCalibration(DecisionTapeCalibrationTracker calibration, OpfCandle resolveCandle, string completionReason)
+    {
+        if (_snapshot is null || _researchLogger is null)
+            return;
+
+        var tracker = calibration.Tracker;
+        _researchLogger.AppendDecisionTapeCalibration(
+            _snapshot.SnapshotId,
+            tracker.Signal.SignalId,
+            tracker.EntryTime,
+            tracker.EntryBar,
+            resolveCandle.Time,
+            resolveCandle.Bar,
+            tracker.Signal.Side.ToString(),
+            tracker.Signal.SetupType.ToString(),
+            tracker.ResearchPath,
+            tracker.Signal.RegimeScore.TotalScore,
+            tracker.Signal.SetupQualityScore.TotalScore,
+            tracker.Entry,
+            tracker.Stop,
+            tracker.InitialRiskPoints,
+            calibration.EntryBid,
+            calibration.EntryAsk,
+            calibration.EntryBid > 0m && calibration.EntryAsk > 0m,
+            calibration.EntryMarketSequence,
+            _decisionTapeMarketSequence,
+            ActualTargetRFor(tracker.Signal, tracker.ResearchPath, tracker.InitialRiskPoints),
+            tracker.MfePoints,
+            tracker.MaePoints,
+            tracker.FirstStopBar,
+            tracker.First0_75RBar,
+            tracker.First1RBar,
+            tracker.First1_5RBar,
+            tracker.First2RBar,
+            tracker.First2_5RBar,
+            tracker.First3RBar,
+            tracker.First4RBar,
+            tracker.FirstBreakEvenAfter0_75RBar,
+            tracker.FirstBreakEvenAfter1RBar,
+            tracker.FirstBreakEvenAfter1_5RBar,
+            tracker.First1RLockAfter1_5RBar,
+            tracker.FirstBreakEvenAfter2_5RBar,
+            Math.Max(0, resolveCandle.Bar - tracker.EntryBar),
+            completionReason,
+            calibration.OriginalDecision,
+            calibration.OriginalReason,
+            calibration.OriginalTradeId);
+
+        foreach (var candle in calibration.Bars)
+        {
+            _researchLogger.AppendDecisionTapeCalibrationBar(
+                _snapshot.SnapshotId,
+                tracker.Signal.SignalId,
+                tracker.ResearchPath,
+                tracker.EntryBar,
+                candle.Time,
+                candle.Bar,
+                candle.Open,
+                candle.High,
+                candle.Low,
+                candle.Close);
+        }
     }
 
     private void WriteShadowTrade(ShadowTradeTracker shadow, OpfCandle exitCandle, ShadowTradeResult result)
@@ -7425,10 +8817,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private bool IsTrackerWaitingForActualExit(ResearchTracker tracker)
     {
-        return _replayExecution is not null
-            && !_replayExecution.ExitCompleted
-            && string.Equals(_replayExecution.SignalId, tracker.Signal.SignalId, StringComparison.Ordinal)
-            && string.Equals(_replayExecution.ResearchPath, tracker.ResearchPath, StringComparison.Ordinal);
+        return ActiveReplayExecutions().Any(execution =>
+            string.Equals(execution.SignalId, tracker.Signal.SignalId, StringComparison.Ordinal) &&
+            string.Equals(execution.ResearchPath, tracker.ResearchPath, StringComparison.Ordinal));
     }
 
     private void AppendExitPolicyEvaluations(ResearchTracker tracker, OpfCandle exitCandle)
@@ -7469,7 +8860,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
             string.Equals(researchPath, "ObservationConfirm_WideStop1_5R", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(researchPath, "BreakawayFvg_Qualified", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(researchPath, "BreakawayRetest", StringComparison.OrdinalIgnoreCase) ||
+            IsBreakawayRetestResearchPath(researchPath) ||
             string.Equals(researchPath, "FailureReverse_ObservationInvalidated", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(researchPath, "FailureReverse_RetestFailed", StringComparison.OrdinalIgnoreCase))
         {
@@ -7728,11 +9119,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void UpdateActualExecutionExcursion(OpfCandle candle)
     {
-        if (_replayExecution is null || _replayExecution.ExitCompleted)
-            return;
-
-        _replayExecution.ObserveProtectiveRange(candle.Low, candle.High);
-        _replayExecution.UpdateActualExcursion(candle);
+        foreach (var execution in ActiveReplayExecutions())
+        {
+            execution.ObserveProtectiveRange(candle.Low, candle.High);
+            execution.UpdateActualExcursion(candle);
+        }
     }
 
     private static string ActualOutcomeKey(string signalId, string researchPath)
@@ -8026,6 +9417,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         var hud = new StringBuilder();
         hud.AppendLine("OPF v0.1 Research");
         hud.AppendLine($"Schema: {StrategyVersions.ResearchSchemaVersion}");
+        hud.AppendLine($"RunProfile: {_snapshot?.ActualExecutionSettings.RunProfileId ?? "-"} ({_snapshot?.ActualExecutionSettings.RunMode ?? "-"})");
         hud.AppendLine($"Snapshot: {shortSnapshot}");
         hud.AppendLine($"Bar: {candle.Bar}  Time: {candle.Time:MM-dd HH:mm}");
         hud.AppendLine($"Regime: {regime.Regime}");
@@ -8035,13 +9427,15 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         hud.AppendLine($"Last Change: {_lastRegimeChangeText}");
         hud.AppendLine($"Zones: {_activeZoneCount}  Candidates: {_candidateCount}  Confirmed: {_confirmedCount}");
         hud.AppendLine($"Research: active={_researchTrackers.Count} done={_researchOutcomeCount}");
-        var cleanupCount = _replayExecution is null ? 0 : CountWorkingProtectionOrders(_replayExecution);
+        var activeExecutions = ActiveReplayExecutions();
+        var cleanupCount = _replayExecutionsByTradeId.Values.Sum(CountWorkingProtectionOrders);
         var tradingDay = GlobexTradingDayKey(candle.Time);
         var globexLocked = IsGlobexCloseoutLockWindow(candle.Time, out _);
         hud.AppendLine($"TradingDay: {tradingDay:yyyy-MM-dd}  GlobexGate: {(globexLocked ? "LOCKED" : "OPEN")}");
-        hud.AppendLine($"ActualExec: {(ActualOrdersEnabled ? "ON" : "OFF")} dataOnly={RichBarDataCollectionOnly} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} active={IsReplayExecutionActive(_replayExecution)} pos={GetCurrentAccountPosition():0.##} cleanup={cleanupCount}");
+        hud.AppendLine($"ActualExec: {(ActualOrdersEnabled ? "ON" : "OFF")} dataOnly={RichBarDataCollectionOnly || MicrostructureAuditCollectionOnly || FootprintDataCollectionOnly} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} slots={activeExecutions.Count}/2 pos={GetCurrentAccountPosition():0.##} cleanup={cleanupCount}");
         var dailyTarget = _snapshot?.ExecutionProfile.DailyTargetDollars ?? 0m;
         hud.AppendLine($"Today: TP={_replayTpToday} SL={_replaySlToday} Other={_replayOtherExitToday} NetR={_replayDailyR:0.00} Gross=${_replayDailyPnlDollars:0.##} AccountNet=${_liveAccountDailyNetPnlDollars:0.##} target=${dailyTarget:0.##} loss=${_actualDailyLossLimitDollars:0.##}");
+        hud.AppendLine($"Week: {_liveAccountPnlWeekStart:MM-dd} AccountNet=${_liveAccountWeeklyNetPnlDollars:0.##} LongNet=${_liveLongWeeklyNetPnlDollars:0.##} longGate={(IsWeeklyLongLossGateActive(out _) ? "BLOCKED" : "OPEN")} limit=-${_actualWeeklyLongLossLimitDollars:0.##}");
         var latency = Connector?.LatencyManager;
         TimeSpan? lastMarketDataSilence = latency?.LastMarketDataReceptionTimeUtc is DateTime lastMarketDataUtc
             ? DateTime.UtcNow - lastMarketDataUtc
@@ -8052,7 +9446,11 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (_replayAbnormalProtectiveFillToday > 0)
             hud.AppendLine($"AbnormalProtective: count={_replayAbnormalProtectiveFillToday} last={_lastAbnormalProtectiveFillHudText}");
         hud.AppendLine($"ExecLosses: full={_replayFullLossTradesToday} consec={_replayConsecutiveLossesToday}");
-        hud.AppendLine($"ActiveOrder: {BuildActiveExecutionHudLine(_replayExecution)}");
+        if (activeExecutions.Count == 0)
+            hud.AppendLine("ActiveOrders: -");
+        else
+            foreach (var execution in activeExecutions)
+                hud.AppendLine($"{execution.Lane}: {BuildActiveExecutionHudLine(execution)}");
         hud.AppendLine($"LastOrder: {_lastExecutionHudText}");
         if (_recentExecutionHudItems.Count > 0)
             hud.AppendLine($"RecentOrders: {string.Join(" | ", _recentExecutionHudItems)}");
@@ -8075,7 +9473,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         if (execution.EntryFilledQty <= 0m)
             return $"pending {side} {execution.ResearchPath} E={entry:0.00} fill=0/{execution.Quantity:0.##}";
 
-        return $"{side} {execution.ResearchPath} E={entry:0.00} SL={execution.Stop:0.00} TP={execution.Target:0.00} fill={execution.EntryFilledQty:0.##}/{execution.Quantity:0.##}";
+        return $"{execution.TradeId} {side} {execution.ResearchPath} E={entry:0.00} SL={execution.Stop:0.00} TP={execution.Target:0.00} rem={RemainingExecutionQuantity(execution):0.##}/{execution.Quantity:0.##}";
     }
 
     private static string FormatPassedComponents(ScoreBreakdown score)
@@ -8239,9 +9637,35 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
 
     private sealed record PendingCandidate(CandidateSignal Signal, int MaxConfirmBar);
 
-    private sealed record PendingBreakawayRetest(CandidateSignal Signal, int MaxRetestBar)
+    private sealed record DeferredContinuationCandidate(
+        CandidateSignal Signal,
+        string ResearchPath,
+        decimal Risk,
+        string ParentTradeId,
+        string ShadowKey,
+        long CaptureSequence);
+
+    private static bool IsBreakawayRetestResearchPath(string researchPath)
+    {
+        return researchPath is "BreakawayRetest" or "BreakawayRetest12Research" or "BreakawayRetest18Research";
+    }
+
+    private static string[] BreakawayRetestLogReasons(PendingBreakawayRetest pending, params string[] reasons)
+    {
+        return pending.ResearchOnly
+            ? reasons.Concat(new[] { $"WindowBars={pending.WindowBars}" }).ToArray()
+            : reasons;
+    }
+
+    private sealed record PendingBreakawayRetest(
+        CandidateSignal Signal,
+        int MaxRetestBar,
+        string ResearchPath,
+        int WindowBars,
+        bool ResearchOnly)
     {
         public bool Touched { get; set; }
+        public bool WaitingTouchLogged { get; set; }
     }
 
     private sealed record PendingMainlinePullbackRetest(
@@ -8276,6 +9700,14 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
     {
         public bool Touched { get; set; }
     }
+
+    private sealed record PendingProtectedSecondaryV216(
+        string PrimaryTradeId,
+        CandidateSignal Signal,
+        OpfCandle EntryCandle,
+        string ResearchPath,
+        decimal Stop,
+        decimal Risk);
 
     private sealed record ActualTradeOutcome(
         string TradeId,
@@ -8354,6 +9786,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         public string TradeId { get; }
+        public string Lane { get; set; } = "Primary";
         public string SignalId { get; }
         public TradeSide Side { get; }
         public string ResearchPath { get; }
@@ -8387,11 +9820,13 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public Order? StopOrder { get; set; }
         public Order? TargetOrder { get; set; }
         public bool ZoneBirthSplitRunnerV172 { get; set; }
+        public bool IsDeferredContinuation { get; set; }
+        public string DeferredParentTradeId { get; set; } = string.Empty;
         public string? RunnerOcoGroup { get; set; }
         public Order? RunnerStopOrder { get; set; }
         public Order? RunnerTargetOrder { get; set; }
-        public HashSet<string> HistoricalDormantTargetRolesV181 { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> HistoricalDormantTargetActivationPendingV181 { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> HistoricalVirtualTargetRolesV220 { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> HistoricalVirtualTargetActivationPendingV220 { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> HistoricalObservedTargetExitRolesV206 { get; } = new(StringComparer.OrdinalIgnoreCase);
         public decimal BaseExitFilledQty { get; set; }
         public decimal RunnerExitFilledQty { get; set; }
@@ -8431,6 +9866,7 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public bool ProtectBreakEvenEvaluatedV186 { get; set; }
         public bool ProtectBreakEvenPendingV186 { get; set; }
         public bool ProtectBreakEvenAppliedV186 { get; set; }
+        public bool DeferredBreakEvenArmedV208 { get; set; }
         public int? ProtectBreakEvenTriggerBarV186 { get; set; }
         public decimal ProtectPendingStopV186 { get; set; }
         public int ProtectBreakEvenLastMarketCrossedBarV187 { get; set; } = -1;
@@ -8440,6 +9876,9 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         public int LastProtectionCleanupBar { get; set; } = -1;
         public string ProtectionCleanupReason { get; set; } = string.Empty;
         public bool EmergencyFlattenSubmitted { get; set; }
+        public bool TimeStopExitPendingV208 { get; set; }
+        public Order? TimeStopOrderV208 { get; set; }
+        public decimal TimeStopReferencePriceV209 { get; set; }
         public bool EmergencyFlattenOrderSubmitted { get; set; }
         public Order? EmergencyFlattenOrder { get; set; }
         public decimal EmergencyFlattenReferencePriceV205 { get; set; }
@@ -8595,6 +10034,61 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         }
     }
 
+    private sealed class DecisionTapeCalibrationTracker
+    {
+        private readonly List<OpfCandle> _bars = new();
+
+        public DecisionTapeCalibrationTracker(
+            string key,
+            ResearchTracker tracker,
+            OpfCandle entryCandle,
+            decimal entryBid,
+            decimal entryAsk)
+        {
+            Key = key;
+            Tracker = tracker;
+            EntryBid = entryBid;
+            EntryAsk = entryAsk;
+            _bars.Add(entryCandle);
+        }
+
+        public string Key { get; }
+        public ResearchTracker Tracker { get; }
+        public decimal EntryBid { get; private set; }
+        public decimal EntryAsk { get; private set; }
+        public long EntryMarketSequence { get; private set; }
+        public IReadOnlyList<OpfCandle> Bars => _bars;
+        public string OriginalDecision { get; private set; } = string.Empty;
+        public string OriginalReason { get; private set; } = string.Empty;
+        public string OriginalTradeId { get; private set; } = string.Empty;
+
+        public void SetOriginalDecision(string decision, string reason, string tradeId)
+        {
+            OriginalDecision = decision;
+            OriginalReason = reason;
+            OriginalTradeId = tradeId;
+        }
+
+        public void SetEntryQuote(decimal bid, decimal ask)
+        {
+            EntryBid = bid;
+            EntryAsk = ask;
+        }
+
+        public void SetEntryMarketSequence(long sequence)
+        {
+            EntryMarketSequence = sequence;
+        }
+
+        public void AppendBar(OpfCandle candle)
+        {
+            if (_bars.Count > 0 && _bars[^1].Bar == candle.Bar)
+                _bars[^1] = candle;
+            else
+                _bars.Add(candle);
+        }
+    }
+
     private readonly record struct ShadowTradeResult(
         string Policy,
         string ExitReason,
@@ -8603,6 +10097,12 @@ public sealed class OpeningPullbackFailureStrategy : ChartStrategy
         decimal PnlR,
         int ExitBar,
         bool Ambiguous);
+
+    private readonly record struct DecisionTapeMarketTurn(
+        long Sequence,
+        int Bar,
+        decimal Price,
+        string Kind);
 
     private sealed class ResearchTracker
     {

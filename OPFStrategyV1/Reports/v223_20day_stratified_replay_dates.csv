@@ -1,0 +1,21 @@
+TradingDate,Period,Stratum,SelectionRule
+2026-01-08,2026-01,Low,Lowest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-01-02,2026-01,Middle,Middle-third v2.21 baseline daily Net; SHA256 seed pick
+2026-01-12,2026-01,High,Highest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-02-25,2026-02,Low,Lowest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-02-10,2026-02,Middle,Middle-third v2.21 baseline daily Net; SHA256 seed pick
+2026-02-19,2026-02,High,Highest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-03-04,2026-03,Low,Lowest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-03-10,2026-03,Middle,Middle-third v2.21 baseline daily Net; SHA256 seed pick
+2026-03-17,2026-03,High,Highest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-04-17,2026-04,Low,Lowest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-04-10,2026-04,Middle,Middle-third v2.21 baseline daily Net; SHA256 seed pick
+2026-04-23,2026-04,High,Highest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-05-26,2026-05,Low,Lowest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-05-18,2026-05,Middle,Middle-third v2.21 baseline daily Net; SHA256 seed pick
+2026-05-11,2026-05,High,Highest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-06-29,2026-06,Low,Lowest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-06-24,2026-06,Middle,Middle-third v2.21 baseline daily Net; SHA256 seed pick
+2026-06-23,2026-06,High,Highest-third v2.21 baseline daily Net; SHA256 seed pick
+2026-07-13,2026-07,LowStress,Lowest v2.21 baseline daily Net among remaining July Rich dates
+2026-07-16,2026-07,HighStress,Highest v2.21 baseline daily Net among remaining July Rich dates

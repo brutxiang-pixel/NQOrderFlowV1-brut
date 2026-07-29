@@ -1,0 +1,4 @@
+Period,Trades,BaselineActualGrossDollars,PlannedGrossDollars,CorrectedGrossDollars,CorrectionDelta,CorrectedVsActualDelta,AmbiguousTrades,SessionEndTruncatedTrades,LowerGrossDollars,UpperGrossDollars
+H1,271,790.5,3954.4,2485.0,-1469.4,1694.5,0,2,2485.0,2485.0
+Q4,192,-604.0,1931.58,1388.5,-543.08,1992.5,1,2,1388.5,1476.0
+Combined,463,186.5,5885.98,3873.5,-2012.48,3687.0,1,4,3873.5,3961.0

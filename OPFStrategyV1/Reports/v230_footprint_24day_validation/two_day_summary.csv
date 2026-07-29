@@ -1,0 +1,3 @@
+Snapshot,Passed,Rows,WarmRows,ResearchSchema,ActualConfig,OrderFiles,HeaderMissing,MalformedRows,WindowViolations,WarmPocInvalid,RiskJoinMissing,TouchStates
+OPF-20260727-142502,True,233,233,OPF_RESEARCH_2.30,ACTUAL_EXEC_2.47,0,0,0,0,0,0,Aligned:192|Divergent:28|FlatOrUnknown:13
+OPF-20260727-142707,True,285,285,OPF_RESEARCH_2.30,ACTUAL_EXEC_2.47,0,0,0,0,0,0,Aligned:260|Divergent:10|FlatOrUnknown:11|NoObservedTouch:4

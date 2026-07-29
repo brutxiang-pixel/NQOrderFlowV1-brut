@@ -15,8 +15,16 @@ public sealed class ResearchLogger
     private readonly bool _compact;
     private readonly object _fileWriteSync = new();
     private readonly Dictionary<string, List<string>> _bufferedShadowTradeRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedDecisionTapeCalibrationRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedDecisionTapeCalibrationBarRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedDecisionTapeMarketTurnRows = new();
     private readonly Dictionary<string, List<string>> _bufferedKnnShadowDecisionRows = new();
     private readonly Dictionary<string, List<string>> _bufferedRichBarFeatureRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedMicrostructureAuditRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedMicrostructureAuditSampleRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedFootprintFeatureRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedSweepReclaimCandidateRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedSweepReclaimOutcomeRows = new();
 
     public sealed record ActualOutcome(
         bool ActualVerified,
@@ -64,6 +72,140 @@ public sealed class ResearchLogger
         decimal BearScore,
         string BullComponents,
         string BearComponents);
+
+    public sealed record MicrostructureAuditBar(
+        int Bar,
+        string Source,
+        long FirstSequence,
+        long LastSequence,
+        long FirstSourceSequence,
+        long LastSourceSequence,
+        DateTime? FirstTime,
+        DateTime? LastTime,
+        int EventCount,
+        decimal TotalVolume,
+        decimal BidVolume,
+        decimal AskVolume,
+        decimal UnknownVolume,
+        string DirectionSummary,
+        string DataTypeSummary,
+        int NonMonotonicTimeCount,
+        decimal MinPrice,
+        decimal MaxPrice,
+        decimal MinOriginPrice,
+        decimal MaxOriginPrice,
+        int PriceOriginDifferenceCount,
+        int NonPositivePriceCount,
+        int NonPositiveOriginPriceCount,
+        int QuoteReferenceCount,
+        int QuoteMissingReferenceCount,
+        int QuoteInBandCount,
+        int QuoteOutOfBandCount,
+        int QuoteSideConsistentCount);
+
+    public sealed record MicrostructureAuditSample(
+        int Bar,
+        string Source,
+        long ArrivalSequence,
+        long SourceSequence,
+        DateTime EventTime,
+        decimal Price,
+        decimal OriginPrice,
+        decimal Volume,
+        bool IsBid,
+        bool IsAsk,
+        string Direction,
+        string DataType,
+        string SampleKind);
+
+    public sealed record FootprintCandidateFeature(
+        string SignalId,
+        DateTime DecisionTime,
+        int DecisionBar,
+        string Lane,
+        string Side,
+        string ResearchPath,
+        string ZoneId,
+        decimal ZoneLow,
+        decimal ZoneHigh,
+        long TickSequenceBoundary,
+        DateTime? ReferenceTickTime,
+        bool Tick60WindowComplete,
+        bool FootprintHistory15mComplete,
+        int Tick30Count,
+        decimal BuyVolume30,
+        decimal SellVolume30,
+        decimal UnknownVolume30,
+        int Tick60Count,
+        decimal BuyVolume60,
+        decimal SellVolume60,
+        decimal UnknownVolume60,
+        long? ZoneTouchSequence,
+        DateTime? ZoneTouchTime,
+        decimal ZoneTouchDelta,
+        decimal ZoneTouchPriceChange,
+        decimal ZoneTouchDeltaPerSecond,
+        string PriceDeltaDivergence,
+        decimal PocM5_1,
+        decimal PocM5_2,
+        decimal PocM5_3,
+        decimal PocMigration1,
+        decimal PocMigration2,
+        decimal ZoneVolume,
+        decimal OutsideZoneVolume,
+        int ZoneObservedPriceLevels,
+        int ZoneExpectedPriceLevels,
+        decimal ZoneOccupiedLevelRatio,
+        decimal ZoneMinObservedLevelVolume);
+
+    public sealed record SweepReclaimCandidateFeature(
+        string SignalId,
+        DateTime DecisionTime,
+        int DecisionBar,
+        string Side,
+        int LookbackBars,
+        decimal RangeLow,
+        decimal RangeHigh,
+        decimal SweepExtreme,
+        decimal SweepDepthPoints,
+        decimal DecisionOpen,
+        decimal DecisionHigh,
+        decimal DecisionLow,
+        decimal DecisionClose,
+        decimal ReclaimDistancePoints,
+        int PlannedEntryBar,
+        decimal EstimatedEntry,
+        decimal Stop,
+        decimal EstimatedRiskPoints,
+        bool EstimatedRiskInAuditRange,
+        long TickSequenceBoundary,
+        DateTime? ReferenceTickTime,
+        bool Tick60WindowComplete,
+        int Tick30Count,
+        decimal BuyVolume30,
+        decimal SellVolume30,
+        decimal UnknownVolume30,
+        int Tick60Count,
+        decimal BuyVolume60,
+        decimal SellVolume60,
+        decimal UnknownVolume60);
+
+    public sealed record SweepReclaimOutcome(
+        string SignalId,
+        DateTime? EntryTime,
+        int? EntryBar,
+        decimal Entry,
+        decimal Stop,
+        decimal Target,
+        decimal RiskPoints,
+        DateTime? ExitTime,
+        int? ExitBar,
+        string ExitReason,
+        decimal ExitPrice,
+        int BarsObserved,
+        decimal MfePoints,
+        decimal MaePoints,
+        bool DeterministicOutcome);
 
     public ResearchLogger(string strategyName, string logMode = "Full")
     {
@@ -1022,6 +1164,425 @@ public sealed class ResearchLogger
         }
     }
 
+    public void AppendDecisionTapeCalibration(
+        string snapshotId,
+        string signalId,
+        DateTime entryTime,
+        int entryBar,
+        DateTime resolveTime,
+        int resolveBar,
+        string side,
+        string setupType,
+        string researchPath,
+        decimal regimeScore,
+        decimal setupQualityScore,
+        decimal entry,
+        decimal stop,
+        decimal initialRiskPoints,
+        decimal entryBid,
+        decimal entryAsk,
+        bool entryQuoteValid,
+        long entryMarketSequence,
+        long resolveMarketSequence,
+        decimal targetR,
+        decimal mfePoints,
+        decimal maePoints,
+        int? firstStopBar,
+        int? first0_75RBar,
+        int? first1RBar,
+        int? first1_5RBar,
+        int? first2RBar,
+        int? first2_5RBar,
+        int? first3RBar,
+        int? first4RBar,
+        int? firstBreakEvenAfter0_75RBar,
+        int? firstBreakEvenAfter1RBar,
+        int? firstBreakEvenAfter1_5RBar,
+        int? first1RLockAfter1_5RBar,
+        int? firstBreakEvenAfter2_5RBar,
+        int barsTracked,
+        string completionReason,
+        string originalDecision,
+        string originalReason,
+        string originalTradeId)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_decision_tape_calibration.csv");
+        var row = string.Join(",",
+            ContextValues(snapshotId),
+            Csv(signalId),
+            Csv(entryTime.ToString("O")),
+            entryBar,
+            Csv(resolveTime.ToString("O")),
+            resolveBar,
+            Csv(side),
+            Csv(setupType),
+            Csv(researchPath),
+            regimeScore,
+            setupQualityScore,
+            entry,
+            stop,
+            initialRiskPoints,
+            entryBid,
+            entryAsk,
+            entryQuoteValid,
+            entryMarketSequence,
+            resolveMarketSequence,
+            targetR,
+            mfePoints,
+            maePoints,
+            NullableValue(firstStopBar),
+            NullableValue(first0_75RBar),
+            NullableValue(first1RBar),
+            NullableValue(first1_5RBar),
+            NullableValue(first2RBar),
+            NullableValue(first2_5RBar),
+            NullableValue(first3RBar),
+            NullableValue(first4RBar),
+            NullableValue(firstBreakEvenAfter0_75RBar),
+            NullableValue(firstBreakEvenAfter1RBar),
+            NullableValue(firstBreakEvenAfter1_5RBar),
+            NullableValue(first1RLockAfter1_5RBar),
+            NullableValue(firstBreakEvenAfter2_5RBar),
+            barsTracked,
+            Csv(completionReason),
+            Csv(originalDecision),
+            Csv(originalReason),
+            Csv(originalTradeId));
+        lock (_fileWriteSync)
+        {
+            if (!_bufferedDecisionTapeCalibrationRows.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                _bufferedDecisionTapeCalibrationRows[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
+    public void AppendMicrostructureAudit(string snapshotId, MicrostructureAuditBar audit)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_microstructure_audit_bars.csv");
+        var row = string.Join(",",
+            ContextValues(snapshotId),
+            audit.Bar,
+            Csv(audit.Source),
+            audit.FirstSequence,
+            audit.LastSequence,
+            audit.FirstSourceSequence,
+            audit.LastSourceSequence,
+            Csv(audit.FirstTime?.ToString("O") ?? string.Empty),
+            Csv(audit.LastTime?.ToString("O") ?? string.Empty),
+            audit.EventCount,
+            audit.TotalVolume,
+            audit.BidVolume,
+            audit.AskVolume,
+            audit.UnknownVolume,
+            Csv(audit.DirectionSummary),
+            Csv(audit.DataTypeSummary),
+            audit.NonMonotonicTimeCount,
+            audit.MinPrice,
+            audit.MaxPrice,
+            audit.MinOriginPrice,
+            audit.MaxOriginPrice,
+            audit.PriceOriginDifferenceCount,
+            audit.NonPositivePriceCount,
+            audit.NonPositiveOriginPriceCount,
+            audit.QuoteReferenceCount,
+            audit.QuoteMissingReferenceCount,
+            audit.QuoteInBandCount,
+            audit.QuoteOutOfBandCount,
+            audit.QuoteSideConsistentCount);
+        lock (_fileWriteSync)
+        {
+            if (!_bufferedMicrostructureAuditRows.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                _bufferedMicrostructureAuditRows[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
+    public void AppendMicrostructureAuditSample(string snapshotId, MicrostructureAuditSample sample)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_microstructure_audit_samples.csv");
+        var row = string.Join(",",
+            ContextValues(snapshotId),
+            sample.Bar,
+            Csv(sample.Source),
+            sample.ArrivalSequence,
+            sample.SourceSequence,
+            Csv(sample.EventTime.ToString("O")),
+            sample.Price,
+            sample.OriginPrice,
+            sample.Volume,
+            sample.IsBid,
+            sample.IsAsk,
+            Csv(sample.Direction),
+            Csv(sample.DataType),
+            Csv(sample.SampleKind));
+        lock (_fileWriteSync)
+        {
+            if (!_bufferedMicrostructureAuditSampleRows.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                _bufferedMicrostructureAuditSampleRows[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
+    public void FlushMicrostructureAudit()
+    {
+        Dictionary<string, string[]> buffered;
+        Dictionary<string, string[]> bufferedSamples;
+        lock (_fileWriteSync)
+        {
+            buffered = _bufferedMicrostructureAuditRows.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            _bufferedMicrostructureAuditRows.Clear();
+            bufferedSamples = _bufferedMicrostructureAuditSampleRows.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            _bufferedMicrostructureAuditSampleRows.Clear();
+        }
+
+        var header = ContextHeader("Bar,Source,FirstSequence,LastSequence,FirstSourceSequence,LastSourceSequence,FirstTime,LastTime,EventCount,TotalVolume,BidVolume,AskVolume,UnknownVolume,DirectionSummary,DataTypeSummary,NonMonotonicTimeCount,MinPrice,MaxPrice,MinOriginPrice,MaxOriginPrice,PriceOriginDifferenceCount,NonPositivePriceCount,NonPositiveOriginPriceCount,QuoteReferenceCount,QuoteMissingReferenceCount,QuoteInBandCount,QuoteOutOfBandCount,QuoteSideConsistentCount");
+        foreach (var item in buffered)
+        {
+            EnsureHeader(item.Key, header);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
+
+        var sampleHeader = ContextHeader("Bar,Source,ArrivalSequence,SourceSequence,EventTime,Price,OriginPrice,Volume,IsBid,IsAsk,Direction,DataType,SampleKind");
+        foreach (var item in bufferedSamples)
+        {
+            EnsureHeader(item.Key, sampleHeader);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
+    }
+
+    public void AppendFootprintFeature(string snapshotId, FootprintCandidateFeature feature)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_footprint_candidate_features.csv");
+        var row = string.Join(",",
+            ContextValues(snapshotId),
+            Csv(feature.SignalId),
+            Csv(feature.DecisionTime.ToString("O")),
+            feature.DecisionBar,
+            Csv(feature.Lane),
+            Csv(feature.Side),
+            Csv(feature.ResearchPath),
+            Csv(feature.ZoneId),
+            feature.ZoneLow,
+            feature.ZoneHigh,
+            feature.TickSequenceBoundary,
+            Csv(feature.ReferenceTickTime?.ToString("O") ?? string.Empty),
+            feature.Tick60WindowComplete,
+            feature.FootprintHistory15mComplete,
+            feature.Tick30Count,
+            feature.BuyVolume30,
+            feature.SellVolume30,
+            feature.UnknownVolume30,
+            feature.Tick60Count,
+            feature.BuyVolume60,
+            feature.SellVolume60,
+            feature.UnknownVolume60,
+            feature.ZoneTouchSequence?.ToString() ?? string.Empty,
+            Csv(feature.ZoneTouchTime?.ToString("O") ?? string.Empty),
+            feature.ZoneTouchDelta,
+            feature.ZoneTouchPriceChange,
+            feature.ZoneTouchDeltaPerSecond,
+            Csv(feature.PriceDeltaDivergence),
+            feature.PocM5_1,
+            feature.PocM5_2,
+            feature.PocM5_3,
+            feature.PocMigration1,
+            feature.PocMigration2,
+            feature.ZoneVolume,
+            feature.OutsideZoneVolume,
+            feature.ZoneObservedPriceLevels,
+            feature.ZoneExpectedPriceLevels,
+            feature.ZoneOccupiedLevelRatio,
+            feature.ZoneMinObservedLevelVolume);
+        lock (_fileWriteSync)
+        {
+            if (!_bufferedFootprintFeatureRows.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                _bufferedFootprintFeatureRows[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
+    public void FlushFootprintFeatures()
+    {
+        Dictionary<string, string[]> buffered;
+        lock (_fileWriteSync)
+        {
+            buffered = _bufferedFootprintFeatureRows.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            _bufferedFootprintFeatureRows.Clear();
+        }
+
+        var header = ContextHeader("SignalID,DecisionTime,DecisionBar,Lane,Side,ResearchPath,ZoneID,ZoneLow,ZoneHigh,TickSequenceBoundary,ReferenceTickTime,Tick60WindowComplete,FootprintHistory15mComplete,Tick30Count,BuyVolume30,SellVolume30,UnknownVolume30,Tick60Count,BuyVolume60,SellVolume60,UnknownVolume60,ZoneTouchSequence,ZoneTouchTime,ZoneTouchDelta,ZoneTouchPriceChange,ZoneTouchDeltaPerSecond,PriceDeltaDivergence,PocM5_1,PocM5_2,PocM5_3,PocMigration1,PocMigration2,ZoneVolume,OutsideZoneVolume,ZoneObservedPriceLevels,ZoneExpectedPriceLevels,ZoneOccupiedLevelRatio,ZoneMinObservedLevelVolume");
+        foreach (var item in buffered)
+        {
+            EnsureHeader(item.Key, header);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
+    }
+
+    public void AppendSweepReclaimCandidate(string snapshotId, SweepReclaimCandidateFeature feature)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_sweep_reclaim_candidates.csv");
+        var row = string.Join(",",
+            ContextValues(snapshotId),
+            Csv(feature.SignalId), Csv(feature.DecisionTime.ToString("O")), feature.DecisionBar, Csv(feature.Side), feature.LookbackBars,
+            feature.RangeLow, feature.RangeHigh, feature.SweepExtreme, feature.SweepDepthPoints,
+            feature.DecisionOpen, feature.DecisionHigh, feature.DecisionLow, feature.DecisionClose, feature.ReclaimDistancePoints,
+            feature.PlannedEntryBar, feature.EstimatedEntry, feature.Stop, feature.EstimatedRiskPoints, feature.EstimatedRiskInAuditRange,
+            feature.TickSequenceBoundary, Csv(feature.ReferenceTickTime?.ToString("O") ?? string.Empty), feature.Tick60WindowComplete,
+            feature.Tick30Count, feature.BuyVolume30, feature.SellVolume30, feature.UnknownVolume30,
+            feature.Tick60Count, feature.BuyVolume60, feature.SellVolume60, feature.UnknownVolume60);
+        BufferSweepReclaimRow(_bufferedSweepReclaimCandidateRows, path, row);
+    }
+
+    public void AppendSweepReclaimOutcome(string snapshotId, SweepReclaimOutcome outcome)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_sweep_reclaim_outcomes.csv");
+        var row = string.Join(",",
+            ContextValues(snapshotId),
+            Csv(outcome.SignalId), Csv(outcome.EntryTime?.ToString("O") ?? string.Empty), outcome.EntryBar?.ToString() ?? string.Empty,
+            outcome.Entry, outcome.Stop, outcome.Target, outcome.RiskPoints,
+            Csv(outcome.ExitTime?.ToString("O") ?? string.Empty), outcome.ExitBar?.ToString() ?? string.Empty, Csv(outcome.ExitReason), outcome.ExitPrice,
+            outcome.BarsObserved, outcome.MfePoints, outcome.MaePoints, outcome.DeterministicOutcome);
+        BufferSweepReclaimRow(_bufferedSweepReclaimOutcomeRows, path, row);
+    }
+
+    public void FlushSweepReclaim()
+    {
+        FlushBufferedRows(
+            _bufferedSweepReclaimCandidateRows,
+            ContextHeader("SignalID,DecisionTime,DecisionBar,Side,LookbackBars,RangeLow,RangeHigh,SweepExtreme,SweepDepthPoints,DecisionOpen,DecisionHigh,DecisionLow,DecisionClose,ReclaimDistancePoints,PlannedEntryBar,EstimatedEntry,Stop,EstimatedRiskPoints,EstimatedRiskInAuditRange,TickSequenceBoundary,ReferenceTickTime,Tick60WindowComplete,Tick30Count,BuyVolume30,SellVolume30,UnknownVolume30,Tick60Count,BuyVolume60,SellVolume60,UnknownVolume60"));
+        FlushBufferedRows(
+            _bufferedSweepReclaimOutcomeRows,
+            ContextHeader("SignalID,EntryTime,EntryBar,Entry,Stop,Target,RiskPoints,ExitTime,ExitBar,ExitReason,ExitPrice,BarsObserved,MfePoints,MaePoints,DeterministicOutcome"));
+    }
+
+    private void BufferSweepReclaimRow(Dictionary<string, List<string>> buffer, string path, string row)
+    {
+        lock (_fileWriteSync)
+        {
+            if (!buffer.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                buffer[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
+    private void FlushBufferedRows(Dictionary<string, List<string>> buffer, string header)
+    {
+        Dictionary<string, string[]> buffered;
+        lock (_fileWriteSync)
+        {
+            buffered = buffer.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            buffer.Clear();
+        }
+        foreach (var item in buffered)
+        {
+            EnsureHeader(item.Key, header);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
+    }
+
+    public void FlushDecisionTapeCalibration()
+    {
+        Dictionary<string, string[]> buffered;
+        Dictionary<string, string[]> bufferedBars;
+        Dictionary<string, string[]> bufferedTurns;
+        lock (_fileWriteSync)
+        {
+            buffered = _bufferedDecisionTapeCalibrationRows.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            _bufferedDecisionTapeCalibrationRows.Clear();
+            bufferedBars = _bufferedDecisionTapeCalibrationBarRows.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            _bufferedDecisionTapeCalibrationBarRows.Clear();
+            bufferedTurns = _bufferedDecisionTapeMarketTurnRows.ToDictionary(x => x.Key, x => x.Value.ToArray());
+            _bufferedDecisionTapeMarketTurnRows.Clear();
+        }
+
+        var header = ContextHeader("SignalID,EntryTime,EntryBar,ResolveTime,ResolveBar,Side,SetupType,ResearchPath,RegimeScore,SetupQualityScore,Entry,Stop,InitialRiskPoints,EntryBid,EntryAsk,EntryQuoteValid,EntryMarketSequence,ResolveMarketSequence,TargetR,MFEPoints,MAEPoints,FirstStopBar,First0_75RBar,First1RBar,First1_5RBar,First2RBar,First2_5RBar,First3RBar,First4RBar,FirstBreakEvenAfter0_75RBar,FirstBreakEvenAfter1RBar,FirstBreakEvenAfter1_5RBar,First1RLockAfter1_5RBar,FirstBreakEvenAfter2_5RBar,BarsTracked,CompletionReason,OriginalDecision,OriginalReason,OriginalTradeID");
+        foreach (var item in buffered)
+        {
+            EnsureHeader(item.Key, header);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
+
+        var barHeader = ContextHeader("SignalID,ResearchPath,EntryBar,Time,Bar,RelativeBar,Open,High,Low,Close");
+        foreach (var item in bufferedBars)
+        {
+            EnsureHeader(item.Key, barHeader);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
+
+        var turnHeader = ContextHeader("Sequence,Bar,Price,Kind");
+        foreach (var item in bufferedTurns)
+        {
+            EnsureHeader(item.Key, turnHeader);
+            AppendText(item.Key, string.Join(Environment.NewLine, item.Value) + Environment.NewLine);
+        }
+    }
+
+    public void AppendDecisionTapeMarketTurn(string snapshotId, long sequence, int bar, decimal price, string kind)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_decision_tape_market_turns.csv");
+        var row = string.Join(",", ContextValues(snapshotId), sequence, bar, price, Csv(kind));
+        lock (_fileWriteSync)
+        {
+            if (!_bufferedDecisionTapeMarketTurnRows.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                _bufferedDecisionTapeMarketTurnRows[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
+    public void AppendDecisionTapeCalibrationBar(
+        string snapshotId,
+        string signalId,
+        string researchPath,
+        int entryBar,
+        DateTime time,
+        int bar,
+        decimal open,
+        decimal high,
+        decimal low,
+        decimal close)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_decision_tape_calibration_bars.csv");
+        var row = string.Join(",",
+            ContextValues(snapshotId),
+            Csv(signalId),
+            Csv(researchPath),
+            entryBar,
+            Csv(time.ToString("O")),
+            bar,
+            bar - entryBar,
+            open,
+            high,
+            low,
+            close);
+        lock (_fileWriteSync)
+        {
+            if (!_bufferedDecisionTapeCalibrationBarRows.TryGetValue(path, out var rows))
+            {
+                rows = new List<string>();
+                _bufferedDecisionTapeCalibrationBarRows[path] = rows;
+            }
+            rows.Add(row);
+        }
+    }
+
     public void AppendFunnelEvent(
         string snapshotId,
         DateTime time,
@@ -1225,6 +1786,11 @@ public sealed class ResearchLogger
     private static string Csv(string value)
     {
         return "\"" + value.Replace("\"", "\"\"") + "\"";
+    }
+
+    private static string NullableValue(int? value)
+    {
+        return value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
     }
 
     private static decimal Percent(int count, int total)

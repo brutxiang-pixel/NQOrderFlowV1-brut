@@ -1,0 +1,4 @@
+InitialRiskPoints <= 16.0 AND InitialRiskPoints <= 13.25 AND => expected Gross $8.17, n=597
+InitialRiskPoints <= 16.0 AND InitialRiskPoints > 13.25 AND => expected Gross $-18.72, n=146
+InitialRiskPoints > 16.0 AND RegimeScore <= 70.0 AND => expected Gross $22.49, n=292
+InitialRiskPoints > 16.0 AND RegimeScore > 70.0 AND => expected Gross $142.53, n=25

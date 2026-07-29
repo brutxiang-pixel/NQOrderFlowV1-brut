@@ -314,6 +314,7 @@ namespace NQOrderFlowV1.Strategy
                 TriggerBlockReason.RiskInvalid => "跳过-风险无效",
                 TriggerBlockReason.RiskTicksTooSmall => "跳过-风险过小",
                 TriggerBlockReason.RiskTicksTooLarge => "跳过-风险过大",
+                TriggerBlockReason.DailyGuardBlocked => "跳过-日内风控",
 
                 TriggerBlockReason.LiveOrderPending => "LIVE-等待回报",
                 TriggerBlockReason.LiveOrderError => "LIVE-错误",

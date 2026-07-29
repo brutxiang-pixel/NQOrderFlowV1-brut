@@ -1,0 +1,2 @@
+DailyCap,DailyLoss,DeferredEnabled,DeferredBars,DropLongPaths,DropShortPaths,ExcludedRiskBands,MinSetupQuality,MinEstimatedRR,Trades,Gross,AccountNet,PF,MaxDD,PositiveWeekPct,WorstWeek,SyntheticTrades,CounterfactualGross,DirectAccepted,DeferredAccepted,ActiveBlocked,StaticBlocked,CapBlocked,LossBlocked,DeferredExpired,DeferredGateBlocked
+10,300.0,True,18,{'FailureReverse_RetestFailed'},set(),"[(13.25, 16.0)]",0.0,0.0,888,13066.78,9869.98,1.2535,1202.0,77.78,-598.32,325,1262.53,830,58,384,325,238,157,194,38

@@ -1,0 +1,14 @@
+Rule,RuleCount,H1Trades,H1Gross,H1Net,H1NetDelta,H1PF,H1PositiveWeeks,H1WorstWeek,H1MaxDD,H1PositiveMonths,PositiveDeltaMonths,NegativeDeltaMonths,ChangedIdentities,JulyTrades,JulyNet,JulyNetDelta
+Primary_Short_BreakawayFvg_MinRisk_12+Primary_Long_ObservationConfirm_MinRisk_10,2,798,26616.59,23743.79,469.47,1.7469,23,-645.0,1593.8,6,4,2,194,62,166.97,0.0
+Primary_Short_BreakawayFvg_MinRisk_12+Secondary_Short_ZoneBirthResearch_MinQuality_65,2,861,26672.12,23572.52,298.2,1.7205,22,-665.1,2112.9,6,4,2,21,61,155.57,-11.4
+Primary_Short_BreakawayFvg_MinRisk_12+Secondary_Short_ZoneBirthResearch_MinQuality_70,2,861,26672.12,23572.52,298.2,1.7205,22,-665.1,2112.9,6,4,2,21,61,155.57,-11.4
+Primary_Short_BreakawayFvg_MinRisk_12+Secondary_Short_ZoneBirthResearch_MinQuality_75,2,861,26672.12,23572.52,298.2,1.7205,22,-665.1,2112.9,6,4,2,21,61,155.57,-11.4
+Primary_Short_BreakawayFvg_MinRisk_12+Secondary_Short_ZoneBirthResearch_MinQuality_80,2,861,26672.12,23572.52,298.2,1.7205,22,-665.1,2112.9,6,4,2,21,61,155.57,-11.4
+Primary_Short_BreakawayFvg_MinRisk_12+Secondary_Short_ZoneBirthResearch_MinRisk_10,2,861,26672.12,23572.52,298.2,1.7205,22,-665.1,2112.9,6,4,2,21,61,155.57,-11.4
+Primary_Short_BreakawayFvg_MinRisk_12+Secondary_Short_ZoneBirthResearch_MinRisk_12,2,861,26672.12,23572.52,298.2,1.7205,22,-665.1,2112.9,6,4,2,21,61,155.57,-11.4
+Primary_Long_ObservationConfirm_MinRisk_10+Secondary_Short_ZoneBirthResearch_MinQuality_65,2,797,26184.09,23314.89,40.57,1.733,23,-645.0,1597.9,6,3,3,195,61,155.57,-11.4
+Primary_Long_ObservationConfirm_MinRisk_10+Secondary_Short_ZoneBirthResearch_MinQuality_70,2,797,26184.09,23314.89,40.57,1.733,23,-645.0,1597.9,6,3,3,195,61,155.57,-11.4
+Primary_Long_ObservationConfirm_MinRisk_10+Secondary_Short_ZoneBirthResearch_MinQuality_75,2,797,26184.09,23314.89,40.57,1.733,23,-645.0,1597.9,6,3,3,195,61,155.57,-11.4
+Primary_Long_ObservationConfirm_MinRisk_10+Secondary_Short_ZoneBirthResearch_MinQuality_80,2,797,26184.09,23314.89,40.57,1.733,23,-645.0,1597.9,6,3,3,195,61,155.57,-11.4
+Primary_Long_ObservationConfirm_MinRisk_10+Secondary_Short_ZoneBirthResearch_MinRisk_10,2,797,26184.09,23314.89,40.57,1.733,23,-645.0,1597.9,6,3,3,195,61,155.57,-11.4
+Primary_Long_ObservationConfirm_MinRisk_10+Secondary_Short_ZoneBirthResearch_MinRisk_12,2,797,26184.09,23314.89,40.57,1.733,23,-645.0,1597.9,6,3,3,195,61,155.57,-11.4
