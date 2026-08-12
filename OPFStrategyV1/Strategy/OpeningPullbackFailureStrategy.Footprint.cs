@@ -27,7 +27,10 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private void RecordFootprintTrade(MarketDataArg trade)
     {
-        if ((!FootprintDataCollectionOnly && !SweepReclaimDataCollectionOnly) || trade.Price <= 0m || trade.Volume <= 0m)
+        // Significant-zone activation uses the same bounded 15-minute trade window as
+        // footprint research.  It must remain available in alert-only runs as well,
+        // otherwise every new significant zone remains Observed and cannot be drawn.
+        if ((!FootprintDataCollectionOnly && !SweepReclaimDataCollectionOnly && !EnableResearchLogging) || trade.Price <= 0m || trade.Volume <= 0m)
             return;
 
         var direction = trade.Direction.ToString();

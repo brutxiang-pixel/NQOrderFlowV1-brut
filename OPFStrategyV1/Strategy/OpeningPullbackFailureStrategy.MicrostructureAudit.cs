@@ -31,6 +31,8 @@ public sealed partial class OpeningPullbackFailureStrategy
         base.OnNewTrade(trade);
         RecordMicrostructureEvent("OnNewTrade", trade);
         RecordFootprintTrade(trade);
+        RecordZoneBehaviorTrade(trade);
+        RecordMarketExecutionTapeTrade(trade);
     }
 
     protected override void OnNewTrades(IEnumerable<MarketDataArg> trades)

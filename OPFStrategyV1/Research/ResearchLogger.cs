@@ -25,6 +25,11 @@ public sealed class ResearchLogger
     private readonly Dictionary<string, List<string>> _bufferedFootprintFeatureRows = new();
     private readonly Dictionary<string, List<string>> _bufferedSweepReclaimCandidateRows = new();
     private readonly Dictionary<string, List<string>> _bufferedSweepReclaimOutcomeRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedZoneBehaviorEventRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedZoneBehaviorBarRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedZoneBehaviorPriceLevelRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedMarketExecutionTickRows = new();
+    private readonly Dictionary<string, List<string>> _bufferedMarketExecutionScenarioRows = new();
 
     public sealed record ActualOutcome(
         bool ActualVerified,
@@ -51,6 +56,56 @@ public sealed class ResearchLogger
         int RegimeChangeCount,
         decimal AvgBullScore,
         decimal AvgBearScore);
+
+    public sealed record MarketExecutionScenario(
+        string CandidateId,
+        string SignalId,
+        DateTime DecisionTime,
+        int DecisionBar,
+        string Side,
+        string SetupType,
+        string ResearchPath,
+        decimal PlannedEntry,
+        decimal PlannedStop,
+        decimal PlannedTarget,
+        decimal PlannedRiskPoints,
+        decimal PlannedTargetR,
+        decimal EntryBid,
+        decimal EntryAsk,
+        long MarketSequence,
+        int DailyTradeCount,
+        decimal DailyGrossDollars,
+        decimal DailyAccountNetDollars,
+        decimal WeeklyLongNetDollars,
+        int ActiveTradeCount,
+        bool SecondarySlotOccupied,
+        bool GlobexLocked,
+        string GlobexReason,
+        bool UsOpenBlackout,
+        string UsOpenReason,
+        bool LatencyGateActive,
+        bool DailyTradeLimitReached,
+        bool DailyLossReached,
+        bool WeeklyLongGateActive,
+        string ZoneId,
+        string ZoneType,
+        string ZoneDirection,
+        decimal? ZoneLow,
+        decimal? ZoneHigh,
+        DateTime? ZoneCreatedTime,
+        int? ZoneCreatedBar,
+        int? ZoneTouchOrdinal,
+        DateTime? ZoneLastTouchTime,
+        int? ZoneLastTouchBar,
+        long? ZoneLastTouchMarketSequence,
+        decimal? ZoneCumulativeBuy,
+        decimal? ZoneCumulativeSell,
+        decimal? ZoneCumulativeDelta,
+        decimal? ZoneCumulativeInZoneBuy,
+        decimal? ZoneCumulativeInZoneSell,
+        decimal? ZoneCumulativeInZoneDelta,
+        string Decision,
+        string Reason);
 
     public sealed record RichBarFeature(
         DateTime Time,
@@ -206,6 +261,58 @@ public sealed class ResearchLogger
         decimal MfePoints,
         decimal MaePoints,
         bool DeterministicOutcome);
+
+    public sealed record ZoneBehaviorEvent(
+        string EventId,
+        string ZoneId,
+        string EventType,
+        DateTime Time,
+        int Bar,
+        int TouchOrdinal,
+        string ZoneType,
+        string Direction,
+        decimal ZoneLow,
+        decimal ZoneHigh,
+        long TickSequenceBoundary,
+        DateTime? ReferenceTickTime);
+
+    public sealed record ZoneBehaviorBar(
+        string ZoneId,
+        DateTime Time,
+        int Bar,
+        decimal Open,
+        decimal High,
+        decimal Low,
+        decimal Close,
+        bool Touching,
+        int TouchOrdinal,
+        long TickSequenceBoundary,
+        DateTime? ReferenceTickTime,
+        bool TickDataAvailable,
+        decimal BarBuyVolume,
+        decimal BarSellVolume,
+        decimal BarUnknownVolume,
+        decimal BarZoneBuyVolume,
+        decimal BarZoneSellVolume,
+        decimal BarZoneUnknownVolume,
+        decimal CumulativeBuyVolume,
+        decimal CumulativeSellVolume,
+        decimal CumulativeUnknownVolume,
+        decimal CumulativeZoneBuyVolume,
+        decimal CumulativeZoneSellVolume,
+        decimal CumulativeZoneUnknownVolume,
+        decimal MaxFavorableExcursion,
+        decimal MaxAdverseExcursion);
+
+    public sealed record ZoneBehaviorPriceLevel(
+        string EventId,
+        string ZoneId,
+        decimal Price,
+        decimal BuyVolume,
+        decimal SellVolume,
+        decimal UnknownVolume,
+        long TickSequenceBoundary,
+        DateTime? ReferenceTickTime);
 
     public ResearchLogger(string strategyName, string logMode = "Full")
     {
@@ -1467,6 +1574,82 @@ public sealed class ResearchLogger
             ContextHeader("SignalID,EntryTime,EntryBar,Entry,Stop,Target,RiskPoints,ExitTime,ExitBar,ExitReason,ExitPrice,BarsObserved,MfePoints,MaePoints,DeterministicOutcome"));
     }
 
+    public void AppendZoneBehaviorEvent(string snapshotId, ZoneBehaviorEvent item)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_zone_behavior_events.csv");
+        var row = string.Join(",", ContextValues(snapshotId), Csv(item.EventId), Csv(item.ZoneId), Csv(item.EventType),
+            Csv(item.Time.ToString("O")), item.Bar, item.TouchOrdinal, Csv(item.ZoneType), Csv(item.Direction), item.ZoneLow, item.ZoneHigh,
+            item.TickSequenceBoundary, Csv(item.ReferenceTickTime?.ToString("O") ?? string.Empty));
+        BufferSweepReclaimRow(_bufferedZoneBehaviorEventRows, path, row);
+    }
+
+    public void AppendZoneBehaviorBar(string snapshotId, ZoneBehaviorBar item)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_zone_behavior_bars.csv");
+        var row = string.Join(",", ContextValues(snapshotId), Csv(item.ZoneId), Csv(item.Time.ToString("O")), item.Bar,
+            item.Open, item.High, item.Low, item.Close, item.Touching, item.TouchOrdinal, item.TickSequenceBoundary,
+            Csv(item.ReferenceTickTime?.ToString("O") ?? string.Empty), item.TickDataAvailable,
+            item.BarBuyVolume, item.BarSellVolume, item.BarUnknownVolume, item.BarZoneBuyVolume, item.BarZoneSellVolume, item.BarZoneUnknownVolume,
+            item.CumulativeBuyVolume, item.CumulativeSellVolume, item.CumulativeUnknownVolume,
+            item.CumulativeZoneBuyVolume, item.CumulativeZoneSellVolume, item.CumulativeZoneUnknownVolume,
+            item.MaxFavorableExcursion, item.MaxAdverseExcursion);
+        BufferSweepReclaimRow(_bufferedZoneBehaviorBarRows, path, row);
+    }
+
+    public void AppendZoneBehaviorPriceLevel(string snapshotId, ZoneBehaviorPriceLevel item)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_zone_behavior_price_levels.csv");
+        var row = string.Join(",", ContextValues(snapshotId), Csv(item.EventId), Csv(item.ZoneId), item.Price, item.BuyVolume,
+            item.SellVolume, item.UnknownVolume, item.BuyVolume + item.SellVolume + item.UnknownVolume,
+            item.TickSequenceBoundary, Csv(item.ReferenceTickTime?.ToString("O") ?? string.Empty));
+        BufferSweepReclaimRow(_bufferedZoneBehaviorPriceLevelRows, path, row);
+    }
+
+    public void FlushZoneBehaviorLedger()
+    {
+        FlushBufferedRows(_bufferedZoneBehaviorEventRows,
+            ContextHeader("EventID,ZoneID,EventType,Time,Bar,TouchOrdinal,ZoneType,Direction,ZoneLow,ZoneHigh,TickSequenceBoundary,ReferenceTickTime"));
+        FlushBufferedRows(_bufferedZoneBehaviorBarRows,
+            ContextHeader("ZoneID,Time,Bar,Open,High,Low,Close,Touching,TouchOrdinal,TickSequenceBoundary,ReferenceTickTime,TickDataAvailable,BarBuyVolume,BarSellVolume,BarUnknownVolume,BarZoneBuyVolume,BarZoneSellVolume,BarZoneUnknownVolume,CumulativeBuyVolume,CumulativeSellVolume,CumulativeUnknownVolume,CumulativeZoneBuyVolume,CumulativeZoneSellVolume,CumulativeZoneUnknownVolume,MaxFavorableExcursion,MaxAdverseExcursion"));
+        FlushBufferedRows(_bufferedZoneBehaviorPriceLevelRows,
+            ContextHeader("EventID,ZoneID,Price,BuyVolume,SellVolume,UnknownVolume,TotalVolume,TickSequenceBoundary,ReferenceTickTime"));
+    }
+
+    public void AppendMarketExecutionTick(string snapshotId, long sequence, DateTime m5Time, DateTime tickTime, decimal price, decimal volume, string direction)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_market_execution_ticks.csv");
+        var row = string.Join(",", ContextValues(snapshotId), sequence, Csv(m5Time.ToString("O")), Csv(tickTime.ToString("O")), price, volume, Csv(direction));
+        BufferSweepReclaimRow(_bufferedMarketExecutionTickRows, path, row);
+    }
+
+    public void AppendMarketExecutionScenario(string snapshotId, MarketExecutionScenario scenario)
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_market_execution_scenarios.csv");
+        var row = string.Join(",", ContextValues(snapshotId),
+            Csv(scenario.CandidateId), Csv(scenario.SignalId), Csv(scenario.DecisionTime.ToString("O")), scenario.DecisionBar,
+            Csv(scenario.Side), Csv(scenario.SetupType), Csv(scenario.ResearchPath), scenario.PlannedEntry, scenario.PlannedStop,
+            scenario.PlannedTarget, scenario.PlannedRiskPoints, scenario.PlannedTargetR, scenario.EntryBid, scenario.EntryAsk,
+            scenario.MarketSequence, scenario.DailyTradeCount, scenario.DailyGrossDollars, scenario.DailyAccountNetDollars,
+            scenario.WeeklyLongNetDollars, scenario.ActiveTradeCount, scenario.SecondarySlotOccupied, scenario.GlobexLocked,
+            Csv(scenario.GlobexReason), scenario.UsOpenBlackout, Csv(scenario.UsOpenReason), scenario.LatencyGateActive,
+            scenario.DailyTradeLimitReached, scenario.DailyLossReached, scenario.WeeklyLongGateActive, Csv(scenario.ZoneId),
+            Csv(scenario.ZoneType), Csv(scenario.ZoneDirection), NullableValue(scenario.ZoneLow), NullableValue(scenario.ZoneHigh),
+            NullableDate(scenario.ZoneCreatedTime), NullableValue(scenario.ZoneCreatedBar), NullableValue(scenario.ZoneTouchOrdinal),
+            NullableDate(scenario.ZoneLastTouchTime), NullableValue(scenario.ZoneLastTouchBar), NullableValue(scenario.ZoneLastTouchMarketSequence),
+            NullableValue(scenario.ZoneCumulativeBuy), NullableValue(scenario.ZoneCumulativeSell), NullableValue(scenario.ZoneCumulativeDelta),
+            NullableValue(scenario.ZoneCumulativeInZoneBuy), NullableValue(scenario.ZoneCumulativeInZoneSell), NullableValue(scenario.ZoneCumulativeInZoneDelta),
+            Csv(scenario.Decision), Csv(scenario.Reason));
+        BufferSweepReclaimRow(_bufferedMarketExecutionScenarioRows, path, row);
+    }
+
+    public void FlushMarketExecutionTape()
+    {
+        FlushBufferedRows(_bufferedMarketExecutionTickRows, ContextHeader("Sequence,M5Time,TickTime,Price,Volume,Direction"));
+        FlushMarketExecutionScenarios();
+    }
+
+    private void FlushMarketExecutionScenarios() => FlushBufferedRows(_bufferedMarketExecutionScenarioRows, ContextHeader("CandidateID,SignalID,DecisionTime,DecisionBar,Side,SetupType,ResearchPath,PlannedEntry,PlannedStop,PlannedTarget,PlannedRiskPoints,PlannedTargetR,EntryBid,EntryAsk,MarketSequence,DailyTradeCount,DailyGrossDollars,DailyAccountNetDollars,WeeklyLongNetDollars,ActiveTradeCount,SecondarySlotOccupied,GlobexLocked,GlobexReason,UsOpenBlackout,UsOpenReason,LatencyGateActive,DailyTradeLimitReached,DailyLossReached,WeeklyLongGateActive,ZoneID,ZoneType,ZoneDirection,ZoneLow,ZoneHigh,ZoneCreatedTime,ZoneCreatedBar,ZoneTouchOrdinal,ZoneLastTouchTime,ZoneLastTouchBar,ZoneLastTouchMarketSequence,ZoneCumulativeBuy,ZoneCumulativeSell,ZoneCumulativeDelta,ZoneCumulativeInZoneBuy,ZoneCumulativeInZoneSell,ZoneCumulativeInZoneDelta,Decision,Reason"));
+
     private void BufferSweepReclaimRow(Dictionary<string, List<string>> buffer, string path, string row)
     {
         lock (_fileWriteSync)
@@ -1791,6 +1974,21 @@ public sealed class ResearchLogger
     private static string NullableValue(int? value)
     {
         return value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static string NullableValue(long? value)
+    {
+        return value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static string NullableValue(decimal? value)
+    {
+        return value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static string NullableDate(DateTime? value)
+    {
+        return value?.ToString("O") ?? string.Empty;
     }
 
     private static decimal Percent(int count, int total)

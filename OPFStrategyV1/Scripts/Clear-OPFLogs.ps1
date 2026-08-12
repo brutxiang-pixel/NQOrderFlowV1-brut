@@ -5,7 +5,7 @@ $dir = Join-Path $root 'OPFStrategyV1'
 $legacyLogs = @('NQOrderFlowV1.log', 'NQOrderFlowV1_trades.csv')
 
 if (Test-Path -LiteralPath $dir) {
-    Get-ChildItem -LiteralPath $dir -File | Remove-Item -Force
+    Get-ChildItem -LiteralPath $dir -Force | Remove-Item -Recurse -Force
 }
 else {
     New-Item -ItemType Directory -Path $dir | Out-Null

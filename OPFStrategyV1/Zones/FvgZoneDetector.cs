@@ -3,13 +3,14 @@ using OPFStrategyV1.Core.Versions;
 
 namespace OPFStrategyV1.Zones;
 
-public sealed class FvgZoneDetector : IZoneDetector
+public sealed class FvgZoneDetector : IZoneDetector, IZoneLifecycleEventSource
 {
     private readonly decimal _minGapPoints;
     private readonly decimal _maxGapPoints;
     private readonly decimal _maxSourceCandleRangePoints;
     private readonly List<OpfCandle> _candles = new();
     private readonly List<ZoneState> _zones = new();
+    private readonly List<ZoneLifecycleEvent> _lifecycleEvents = new();
 
     public FvgZoneDetector(decimal minGapPoints, decimal maxGapPoints, decimal maxSourceCandleRangePoints)
     {
@@ -27,6 +28,13 @@ public sealed class FvgZoneDetector : IZoneDetector
             .Where(x => !x.Invalidated)
             .Select(x => x.ToDetectedZone())
             .ToArray();
+    }
+
+    public IReadOnlyList<ZoneLifecycleEvent> DrainLifecycleEvents()
+    {
+        var events = _lifecycleEvents.ToArray();
+        _lifecycleEvents.Clear();
+        return events;
     }
 
     private void DetectNewFvg()
@@ -66,10 +74,17 @@ public sealed class FvgZoneDetector : IZoneDetector
             return;
 
         var zoneId = $"{created.Time:yyyyMMdd-HHmm}-{zoneType}-{created.Bar:000000}";
-        _zones.Add(new ZoneState(zoneId, zoneType, direction, low, high, created.Time, created.Bar));
+        var state = new ZoneState(zoneId, zoneType, direction, low, high, created.Time, created.Bar);
+        _zones.Add(state);
+        _lifecycleEvents.Add(new ZoneLifecycleEvent("Birth", state.ToDetectedZone(), created.Time, created.Bar));
 
         if (_zones.Count > 80)
-            _zones.RemoveRange(0, _zones.Count - 80);
+        {
+            var expired = _zones.Take(_zones.Count - 80).ToArray();
+            foreach (var zone in expired)
+                _lifecycleEvents.Add(new ZoneLifecycleEvent("Expired", zone.ToDetectedZone(), created.Time, created.Bar));
+            _zones.RemoveRange(0, expired.Length);
+        }
     }
 
     private void UpdateZoneStates(OpfCandle candle)
@@ -89,14 +104,20 @@ public sealed class FvgZoneDetector : IZoneDetector
                 if (candle.Low <= mid)
                     zone.Mitigated = true;
                 if (candle.Close < zone.Low)
+                {
+                    _lifecycleEvents.Add(new ZoneLifecycleEvent("Invalidated", zone.ToDetectedZone(), candle.Time, candle.Bar));
                     zone.Invalidated = true;
+                }
             }
             else
             {
                 if (candle.High >= mid)
                     zone.Mitigated = true;
                 if (candle.Close > zone.High)
+                {
+                    _lifecycleEvents.Add(new ZoneLifecycleEvent("Invalidated", zone.ToDetectedZone(), candle.Time, candle.Bar));
                     zone.Invalidated = true;
+                }
             }
         }
     }

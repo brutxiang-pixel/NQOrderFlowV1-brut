@@ -1,0 +1,63 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+STRATEGY = (ROOT / "Strategy" / "OpeningPullbackFailureStrategy.cs").read_text(encoding="utf-8")
+SETTINGS = (ROOT / "Core" / "Configuration" / "ActualExecutionSettings.cs").read_text(encoding="utf-8")
+DEFAULT_CONFIG = (ROOT / "Configs" / "OPFStrategyV1_actual_execution.default.json").read_text(encoding="utf-8")
+AUTO_CONFIG = (ROOT / "Configs" / "OPFStrategyV1_eight_path_auto.json").read_text(encoding="utf-8")
+
+
+def test_default_is_manual_alert_with_requested_global_limits():
+    assert '"ExecutionMode": "ManualAlert"' in DEFAULT_CONFIG
+    assert '"ActualOrderQuantity": 1' in DEFAULT_CONFIG
+    assert '"ActualDailyLossLimitDollars": 200' in DEFAULT_CONFIG
+    assert '"ActualWeeklyLongLossLimitDollars": 0' in DEFAULT_CONFIG
+    assert '"ActualMaxTradesPerDay": 20' in DEFAULT_CONFIG
+    assert "string ExecutionMode" in SETTINGS
+    assert "ActualWeeklyLongLossLimitDollars = settings.ActualWeeklyLongLossLimitDollars < 0m" in SETTINGS
+
+
+def test_execution_policy_has_only_the_eight_approved_paths():
+    expected = {
+        "ObservationConfirm",
+        "ObservationConfirm_WideStop1_5R",
+        "BreakawayFvg",
+        "BreakawayFvg_Qualified",
+        "FailureReverse_ObservationInvalidated_WideStop1_5R",
+        "FailureReverse_RetestFailed",
+        "SignificantZoneFirstTouchLong",
+        "SignificantZoneFirstTouchShort",
+    }
+    for path in expected:
+        assert f'"{path}"' in STRATEGY
+        assert path in AUTO_CONFIG
+    assert "SignificantZonePassiveLimitLong" not in AUTO_CONFIG
+    assert "SignificantZonePassiveLimitShort" not in AUTO_CONFIG
+    assert "RestoredPriorityPath" in STRATEGY
+    assert "TryEmitUnknownRegimeLongManualAlert" not in STRATEGY
+
+
+def test_manual_alert_uses_shared_eight_path_policy():
+    assert "TryEmitManualAlert" in STRATEGY
+    assert "IsRestoredPriorityPathAllowed(signal.Side, researchPath)" in STRATEGY
+    assert "var entry = entryCandle.Close;" in STRATEGY
+    assert "var invalidStopSide = signal.Side == TradeSide.Long ? stop >= entry : stop <= entry;" in STRATEGY
+
+
+def test_first_touch_uses_next_bar_market_execution():
+    assert "SignificantZoneFirstTouchLongPath" in STRATEGY
+    assert "SignificantZoneFirstTouchShortPath" in STRATEGY
+    assert "TryActivateSignificantZoneFirstTouches(bar);" in STRATEGY
+    assert "TrySubmitReplayExecution(signal, entryCandle, path, pending.Entry.InitialStop, risk, allowDelayedExpansion: false);" in STRATEGY
+    assert '"ActualOrderQuantity": 1' in AUTO_CONFIG
+    assert '"ActualMaxTradesPerDay": 20' in AUTO_CONFIG
+    assert '"ActualDailyLossLimitDollars": 200.0' in AUTO_CONFIG
+    assert '"ActualWeeklyLongLossLimitDollars": 0.0' in AUTO_CONFIG
+
+
+if __name__ == "__main__":
+    test_default_is_manual_alert_with_requested_global_limits()
+    test_execution_policy_has_only_the_eight_approved_paths()
+    test_manual_alert_uses_shared_eight_path_policy()
+    test_first_touch_uses_next_bar_market_execution()

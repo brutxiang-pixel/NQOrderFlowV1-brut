@@ -130,6 +130,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private static readonly TimeZoneInfo EasternTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
     private const string ReplayStopExitRole = "SESSION_FLATTEN";
     private const int RichBoundaryBackfillBars = 72;
+    private const string SignificantZoneFirstTouchLongPath = "SignificantZoneFirstTouchLong";
+    private const string SignificantZoneFirstTouchShortPath = "SignificantZoneFirstTouchShort";
+    private const decimal FailureReversePreEntryWideShortMinPenetrationR = 0.25m;
     private readonly IZoneDetector _zoneDetector = new FvgZoneDetector(
         minGapPoints: 0.50m,
         maxGapPoints: 12m,
@@ -153,6 +156,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private readonly List<PendingAggressiveExpansionWait1> _pendingAggressiveExpansionWait1s = new();
     private readonly List<PendingConfirmedRetrace> _pendingConfirmedRetraces = new();
     private readonly List<PendingFailureReverseRetest> _pendingFailureReverseRetests = new();
+    private readonly List<PendingFailureReversePreEntryWideShort> _pendingFailureReversePreEntryWideShorts = new();
+    private readonly SignificantZoneFirstTouchEngine _significantZoneFirstTouchEngine = new();
+    private readonly List<PendingSignificantZoneFirstTouch> _pendingSignificantZoneFirstTouches = new();
     private readonly object _pendingProtectedSecondarySyncV216 = new();
     private PendingProtectedSecondaryV216? _pendingProtectedSecondaryV216;
     private readonly List<ResearchTracker> _researchTrackers = new();
@@ -250,6 +256,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private decimal _actualCommissionPerContractRoundTrip = 1.2m;
     private bool _actualRequireFailureRetest = true;
     private bool _compactResearchLogging;
+    private bool _manualAlertEnabled;
+    private readonly HashSet<string> _manualAlertKeys = new(StringComparer.Ordinal);
     private bool _isStoppingActualExecution;
     private bool _liveReadinessBlocked;
     private string _liveReadinessBlockReason = "Starting";
@@ -301,6 +309,14 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     public bool DecisionTapeCalibrationCollection { get; set; } = true;
 
     [Category("OPF Research")]
+    [DisplayName("Market Execution Tape Data Only")]
+    public bool MarketExecutionTapeDataOnly { get; set; }
+
+    [Category("OPF Research")]
+    [DisplayName("Candidate Scenario Tape Data Only")]
+    public bool CandidateScenarioTapeDataOnly { get; set; }
+
+    [Category("OPF Research")]
     [DisplayName("Microstructure Audit Collection Only")]
     public bool MicrostructureAuditCollectionOnly { get; set; }
 
@@ -312,7 +328,11 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     [DisplayName("Sweep-Reclaim Data Collection Only")]
     public bool SweepReclaimDataCollectionOnly { get; set; }
 
-    private bool ActualOrdersEnabled => EnableReplayOrders && !RichBarDataCollectionOnly && !MicrostructureAuditCollectionOnly && !FootprintDataCollectionOnly && !SweepReclaimDataCollectionOnly;
+    [Category("OPF Research")]
+    [DisplayName("Zone Behavior Ledger Data Collection Only")]
+    public bool ZoneBehaviorLedgerDataOnly { get; set; }
+
+    private bool ActualOrdersEnabled => EnableReplayOrders && !RichBarDataCollectionOnly && !MicrostructureAuditCollectionOnly && !FootprintDataCollectionOnly && !SweepReclaimDataCollectionOnly && !ZoneBehaviorLedgerDataOnly && !MarketExecutionTapeDataOnly && !CandidateScenarioTapeDataOnly;
 
     [Category("OPF Execution")]
     [DisplayName("Actual Execution Paths")]
@@ -372,6 +392,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     {
         base.OnStarted();
 
+        _pendingFailureReversePreEntryWideShorts.Clear();
         _decisionTapeMarketTurns.Clear();
         _decisionTapeMarketSequence = 0;
         _decisionTapeTurnBar = -1;
@@ -387,6 +408,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         InitializeMicrostructureAudit();
         InitializeFootprintCollection();
         InitializeSweepReclaimCollection();
+        InitializeZoneBehaviorLedger();
+        RestoreHistoricalSignificantZones();
+        InitializeMarketExecutionTape();
 
         var resolvedExecutionProfileName = ResolveExecutionProfileName(actualExecutionSettings);
         var profileSelection = ProfileCatalog.Select(InstrumentProfileName, resolvedExecutionProfileName);
@@ -442,6 +466,30 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
                     0,
                     DateTime.UtcNow,
                     "SWEEP_RECLAIM_DATA_COLLECTION_ONLY enabled=true actualOrders=false source=ClosedM5+OnNewTrade label=nextBarOpen/1.5R/12Bars");
+            }
+            if (ZoneBehaviorLedgerDataOnly)
+            {
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    "ZONE_BEHAVIOR_LEDGER_DATA_COLLECTION_ONLY enabled=true actualOrders=false source=ClosedM5+OnNewTrade dom=false");
+            }
+            if (MarketExecutionTapeDataOnly)
+            {
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    "MARKET_EXECUTION_TAPE_DATA_ONLY enabled=true actualOrders=false source=OnNewTrade+candidateScenario+zoneContext");
+            }
+            if (CandidateScenarioTapeDataOnly)
+            {
+                _researchLogger.AppendInfo(
+                    _snapshot.SnapshotId,
+                    0,
+                    DateTime.UtcNow,
+                    "CANDIDATE_SCENARIO_TAPE_DATA_ONLY enabled=true actualOrders=false source=OnNewTrade+candidateScenario+zoneContext tickOutput=false zoneOutput=false");
             }
             if (DecisionTapeCalibrationCollection)
             {
@@ -514,6 +562,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private void ApplyActualExecutionSettings(ActualExecutionSettings settings)
     {
         EnableReplayOrders = settings.EnableActualOrders;
+        _manualAlertEnabled = settings.ManualAlertEnabled;
         ReplayExecutionPath = settings.ActualExecutionPaths;
         ReplayAllowResearchPaths = settings.ActualAllowResearchPaths;
         ReplayOrderQuantity = settings.ActualOrderQuantity;
@@ -554,6 +603,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         MicrostructureAuditCollectionOnly = false;
         FootprintDataCollectionOnly = false;
         SweepReclaimDataCollectionOnly = false;
+        ZoneBehaviorLedgerDataOnly = false;
+        MarketExecutionTapeDataOnly = false;
+        CandidateScenarioTapeDataOnly = false;
         DecisionTapeCalibrationCollection = false;
 
         if (string.Equals(runMode, "FootprintDataOnly", StringComparison.OrdinalIgnoreCase))
@@ -566,6 +618,27 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (string.Equals(runMode, "SweepReclaimDataOnly", StringComparison.OrdinalIgnoreCase))
         {
             SweepReclaimDataCollectionOnly = true;
+            EnableReplayOrders = false;
+            return;
+        }
+
+        if (string.Equals(runMode, "ZoneBehaviorLedgerDataOnly", StringComparison.OrdinalIgnoreCase))
+        {
+            ZoneBehaviorLedgerDataOnly = true;
+            EnableReplayOrders = false;
+            return;
+        }
+
+        if (string.Equals(runMode, "MarketExecutionTapeDataOnly", StringComparison.OrdinalIgnoreCase))
+        {
+            MarketExecutionTapeDataOnly = true;
+            EnableReplayOrders = false;
+            return;
+        }
+
+        if (string.Equals(runMode, "CandidateScenarioTapeDataOnly", StringComparison.OrdinalIgnoreCase))
+        {
+            CandidateScenarioTapeDataOnly = true;
             EnableReplayOrders = false;
             return;
         }
@@ -727,6 +800,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     protected override void OnStopped()
     {
         _isStoppingActualExecution = true;
+        _pendingSignificantZoneFirstTouches.Clear();
+        _pendingFailureReversePreEntryWideShorts.Clear();
         ProcessClosedBar(_lastSeenBar);
         ClearPendingProtectedSecondaryV216("StrategyStopped");
         FinalizeActiveExecutionOnStop();
@@ -741,6 +816,10 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         _researchLogger?.FlushFootprintFeatures();
         FinalizeSweepReclaimCollection();
         _researchLogger?.FlushSweepReclaim();
+        FinalizeZoneBehaviorLedger();
+        _researchLogger?.FlushZoneBehaviorLedger();
+        FlushMarketExecutionScenarios();
+        _researchLogger?.FlushMarketExecutionTape();
         _researchLogger?.FlushShadowTrades();
         _researchLogger?.FlushDecisionTapeCalibration();
         FlushKnnShadowInputs();
@@ -764,8 +843,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         ScheduleProtectBreakEvenV186(value);
         ScheduleHistoricalVirtualTargetsV220();
         ProcessClosedBar(bar - 1);
-        if (isNewBar && EnableDeferredContinuationV209)
-            TryActivateDeferredContinuationV209(bar);
+        if (isNewBar)
+            TryActivateSignificantZoneFirstTouches(bar);
     }
 
     private void ProcessClosedBar(int bar)
@@ -794,9 +873,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         ScheduleProtectionCleanupIfNeeded("ClosedBar");
         ExpirePendingProtectedSecondaryV216(current);
         var zones = _zoneDetector.Update(current);
+        var zoneLifecycleEvents = (_zoneDetector as IZoneLifecycleEventSource)?.DrainLifecycleEvents() ?? Array.Empty<ZoneLifecycleEvent>();
         var regime = _trendScoreEngine.Update(current);
 
         UpdateSweepReclaimCollection(current);
+        UpdateZoneBehaviorLedger(current, zones, zoneLifecycleEvents);
+        UpdateSignificantZones(current, regime, zones);
 
         if (!EnableResearchLogging)
             return;
@@ -831,6 +913,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         EvaluateBreakawayRetests(current);
         EvaluateShadowCandidates(current);
         EvaluateObservationConfirms(current);
+        EvaluateFailureReversePreEntryWideShorts(current);
         EvaluateFailureReverseRetests(current);
         EvaluateStructureConfirmShadows(current);
         EvaluateConfirmBarWait1s(current);
@@ -863,6 +946,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
         if (ShowActualOrderLines)
             DrawActualExecutionLines(context);
+
+        DrawSignificantZones(context);
 
         if (ShowResearchHud)
         {
@@ -1833,6 +1918,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
         _researchLogger?.AppendSignal(failureSignal);
         StartResearchTracking(failureSignal, candle, "FailureReverse_ObservationInvalidated");
+        TryArmFailureReversePreEntryWideShort(sourceSignal, failureSignal, candle);
         if (IsQualifiedFailureReverseLong(failureSignal, candle))
         {
             var risk = Math.Abs(candle.Close - (failureSignal.Zone.Low - 0.50m));
@@ -1852,6 +1938,206 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             StartResearchTracking(qualified, candle, "FailureReverse_LongQualified");
         }
         _pendingFailureReverseRetests.Add(new PendingFailureReverseRetest(failureSignal, candle.Bar + 6));
+    }
+
+    private void TryArmFailureReversePreEntryWideShort(CandidateSignal sourceSignal, CandidateSignal failureSignal, OpfCandle candle)
+    {
+        if (sourceSignal.Zone is null || sourceSignal.Zone.ZoneType != "BullFVG" || failureSignal.Side != TradeSide.Short)
+            return;
+
+        var baseRisk = Math.Abs(candle.Close - (sourceSignal.Zone.High + 0.50m));
+        var wideMultiplier = ActualWideStopMultiplier <= 1m ? 1.5m : ActualWideStopMultiplier;
+        var wideRisk = Math.Round(baseRisk * wideMultiplier, 2);
+        if (wideRisk <= 0m)
+            return;
+
+        var penetrationR = Math.Round(Math.Max(0m, sourceSignal.Zone.Low - candle.Close) / wideRisk, 4);
+        if (penetrationR < FailureReversePreEntryWideShortMinPenetrationR)
+            return;
+
+        var legacyPath = $"FailureReverse_ObservationInvalidated_WideStop{wideMultiplier:0.#}R".Replace(".", "_");
+        var admission = TryEvaluateLegacyFailureReverseWideStopAdmission(
+            failureSignal, candle, legacyPath, candle.Close + wideRisk, wideRisk);
+        if (!admission.LegacyWouldSubmit)
+        {
+            _researchLogger?.AppendInfo(
+                _snapshot?.SnapshotId ?? failureSignal.SnapshotId,
+                candle.Bar,
+                candle.Time,
+                $"FR_PREENTRY_LEGACY_REJECTED signal={failureSignal.SignalId} path={legacyPath} reasons={string.Join("|", admission.Reasons)}");
+            return;
+        }
+
+        _pendingFailureReversePreEntryWideShorts.Add(
+            new PendingFailureReversePreEntryWideShort(failureSignal, candle, penetrationR, admission));
+        _researchLogger?.AppendInfo(
+            _snapshot?.SnapshotId ?? failureSignal.SnapshotId,
+            candle.Bar,
+            candle.Time,
+            $"FAILURE_REVERSE_PREENTRY_ARMED signal={failureSignal.SignalId} path={legacyPath} originBar={candle.Bar} penetrationR={penetrationR:0.####} wideRisk={wideRisk:0.##} legacyPath={admission.LegacyResearchPath} legacyRisk={admission.PlannedRisk:0.##}");
+    }
+
+    private LegacyFailureReverseWideStopAdmission TryEvaluateLegacyFailureReverseWideStopAdmission(
+        CandidateSignal signal,
+        OpfCandle entryCandle,
+        string researchPath,
+        decimal stop,
+        decimal risk)
+    {
+        LegacyFailureReverseWideStopAdmission Reject(params string[] reasons) =>
+            new(false, reasons, researchPath, entryCandle.Close, stop, risk);
+
+        if (!ActualOrdersEnabled || _snapshot is null)
+            return Reject("ActualOrdersDisabledOrSnapshotMissing");
+        if (_isStoppingActualExecution)
+            return Reject("StrategyStopping");
+        if (IsGlobexCloseoutLockWindow(entryCandle.Time, out var globexReason))
+            return Reject(globexReason);
+        if (IsUsCashOpenBlackout(entryCandle.Time, out var openReason))
+            return Reject(openReason);
+        if (IsLiveLatencyBlocked(entryCandle.Time, out var latencyReason))
+            return Reject(latencyReason);
+        if (_liveReadinessBlocked)
+            return Reject($"LiveReadinessBlocked:{_liveReadinessBlockReason}");
+
+        var baselinePathEnabled = string.Equals(researchPath, "FailureReverse_ObservationInvalidated_WideStop1_5R", StringComparison.OrdinalIgnoreCase) &&
+            IsReplayExecutionPathEnabled("FailureReverse_PreEntryConfirmedWideStopShort");
+        if (!baselinePathEnabled && !IsReplayExecutionPathEnabled(researchPath))
+            return Reject("PathDisabled");
+        if (!ReplayAllowResearchPaths && !IsExecutionEligiblePath(researchPath))
+            return Reject("ResearchOnlyPath");
+
+        var strategyReasons = ActualExecutionStrategySkipReasons(signal, researchPath);
+        if (strategyReasons.Length > 0)
+            return Reject(strategyReasons);
+        var pathReasons = ActualExecutionPathSkipReasons(signal, researchPath);
+        if (pathReasons.Length > 0)
+            return Reject(pathReasons);
+        var riskReasons = ActualExecutionRiskSkipReasons(signal, researchPath, entryCandle, risk);
+        if (riskReasons.Length > 0)
+            return Reject(riskReasons);
+        var sameBarReasons = ActualExecutionSameBarSkipReasons(signal, researchPath, entryCandle, stop, risk);
+        if (sameBarReasons.Length > 0 && !IsDailyVolumeSameBarTargetOnlyAllowed(signal, researchPath, sameBarReasons))
+            return Reject(sameBarReasons);
+
+        if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
+            return Reject($"LiveDailyLoss:net={_liveAccountDailyNetPnlDollars:0.##},limit={_actualDailyLossLimitDollars:0.##}");
+        if (signal.Side == TradeSide.Long && IsWeeklyLongLossGateActive(out var weeklyReason))
+            return Reject(weeklyReason);
+        if (ReplayMaxTradesPerDay > 0 && _replayTradesToday >= ReplayMaxTradesPerDay)
+            return Reject($"DailyTradeLimit:max={ReplayMaxTradesPerDay}");
+
+        var profile = _snapshot.ExecutionProfile;
+        if (profile.StopAfterDailyTarget && profile.DailyTargetDollars > 0m && _replayDailyPnlDollars >= profile.DailyTargetDollars)
+            return Reject($"DailyTarget:pnl={_replayDailyPnlDollars:0.##},target={profile.DailyTargetDollars:0.##}");
+        if (profile.DailyLossLimitDollars > 0m && _replayDailyPnlDollars <= -profile.DailyLossLimitDollars)
+            return Reject($"DailyLoss:pnl={_replayDailyPnlDollars:0.##},lossLimit={profile.DailyLossLimitDollars:0.##}");
+        if (ReplayUseFullLossGuard && profile.MaxFullLossTradesPerDay > 0 && _replayFullLossTradesToday >= profile.MaxFullLossTradesPerDay)
+            return Reject($"FullLossLimit:fullLosses={_replayFullLossTradesToday},max={profile.MaxFullLossTradesPerDay}");
+        if (ReplayUseConsecutiveLossGuard && profile.MaxConsecutiveLossesPerDay > 0 && _replayConsecutiveLossesToday >= profile.MaxConsecutiveLossesPerDay)
+            return Reject($"ConsecutiveLossLimit:consecLosses={_replayConsecutiveLossesToday},max={profile.MaxConsecutiveLossesPerDay}");
+
+        var activeExecutions = ActiveReplayExecutions();
+        if (activeExecutions.Count >= 2)
+            return Reject($"ActiveTradeLimit:{string.Join(",", activeExecutions.Select(x => x.TradeId))}");
+        if (activeExecutions.Count == 1)
+        {
+            var primary = activeExecutions[0];
+            var quantity = Math.Max(0m, ReplayOrderQuantity);
+            var combinedRisk = primary.InitialRiskPoints * _snapshot.InstrumentProfile.PointValue * RemainingExecutionQuantity(primary) +
+                risk * _snapshot.InstrumentProfile.PointValue * quantity;
+            if (primary.Side != signal.Side)
+                return Reject($"SecondaryDirectionMismatch:primary={primary.Side}|candidate={signal.Side}");
+            if (!IsStaticSecondaryEligibleV215(signal.Side, researchPath, risk))
+                return Reject($"SecondaryStaticG2Blocked:path={researchPath}|side={signal.Side}|band={StaticRiskBandV215(risk)}");
+            if (combinedRisk > 300m)
+                return Reject($"SecondaryRiskCap:combined={combinedRisk:0.##}|max=300");
+            if (!primary.BracketSubmitted || primary.EntryFilledQty <= primary.ExitFilledQty)
+                return Reject($"SecondaryPrimaryNotProtected:primary={primary.TradeId}");
+        }
+
+        var currentPosition = GetCurrentAccountPosition();
+        if (activeExecutions.Count == 0 && currentPosition != 0m)
+            return Reject($"OrphanPosition:pos={currentPosition:0.########}");
+        if (Portfolio is null || Security is null)
+            return Reject("ContextMissing:portfolioOrSecurityNull");
+        if (ReplayOrderQuantity <= 0m)
+            return Reject("QuantityInvalid");
+
+        return new LegacyFailureReverseWideStopAdmission(true, Array.Empty<string>(), researchPath, entryCandle.Close, stop, risk);
+    }
+
+    private void EvaluateFailureReversePreEntryWideShorts(OpfCandle candle)
+    {
+        if (_snapshot is null || _pendingFailureReversePreEntryWideShorts.Count == 0)
+            return;
+
+        for (var i = _pendingFailureReversePreEntryWideShorts.Count - 1; i >= 0; i--)
+        {
+            var pending = _pendingFailureReversePreEntryWideShorts[i];
+            if (candle.Bar != pending.OriginCandle.Bar + 1)
+            {
+                if (candle.Bar > pending.OriginCandle.Bar + 1)
+                {
+                    _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, pending.Signal.SignalId, candle.Time, candle.Bar,
+                        "FailureReverse_PreEntryConfirmedWideStopShort", new[] { "FailureReversePreEntryConfirmationMissed" });
+                    _pendingFailureReversePreEntryWideShorts.RemoveAt(i);
+                }
+                continue;
+            }
+
+            if (!pending.LegacyAdmission.LegacyWouldSubmit)
+            {
+                _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, pending.Signal.SignalId, candle.Time, candle.Bar,
+                    "FailureReverse_PreEntryConfirmedWideStopShort", new[] { "FR_PREENTRY_TOKEN_INVALID" });
+                _pendingFailureReversePreEntryWideShorts.RemoveAt(i);
+                continue;
+            }
+            if (pending.Signal.Zone is null || candle.Close >= pending.Signal.Zone.Low)
+            {
+                _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, pending.Signal.SignalId, candle.Time, candle.Bar,
+                    "FailureReverse_PreEntryConfirmedWideStopShort", new[] { "FailureReversePreEntryCloseReturnedIntoSourceZone" });
+                _pendingFailureReversePreEntryWideShorts.RemoveAt(i);
+                continue;
+            }
+
+            const string researchPath = "FailureReverse_PreEntryConfirmedWideStopShort";
+            var multiplier = ActualWideStopMultiplier <= 1m ? 1.5m : ActualWideStopMultiplier;
+            var baseRisk = Math.Abs(candle.Close - (pending.Signal.Zone.High + 0.50m));
+            var wideRisk = Math.Round(baseRisk * multiplier, 2);
+            if (wideRisk <= 0m)
+            {
+                _researchLogger?.AppendNoTrade(_snapshot.SnapshotId, pending.Signal.SignalId, candle.Time, candle.Bar,
+                    researchPath, new[] { "FailureReversePreEntryInvalidConfirmationRisk" });
+                _pendingFailureReversePreEntryWideShorts.RemoveAt(i);
+                continue;
+            }
+
+            var confirmed = pending.Signal with
+            {
+                SignalId = $"{pending.Signal.SignalId}-PE1",
+                Time = candle.Time,
+                Bar = candle.Bar,
+                Stage = SignalStage.Triggered,
+                SkipReasons = pending.Signal.SkipReasons.Concat(new[]
+                {
+                    "FailureReversePreEntryConfirmed",
+                    $"OriginBar={pending.OriginCandle.Bar}",
+                    $"PenetrationR={pending.PenetrationR:0.####}",
+                    $"LegacySignalId={pending.LegacySignalId}",
+                    $"LegacyPath={pending.LegacyAdmission.LegacyResearchPath}",
+                    $"LegacyEntry={pending.LegacyAdmission.PlannedEntry:0.########}",
+                    $"LegacyStop={pending.LegacyAdmission.PlannedStop:0.########}",
+                    $"LegacyRisk={pending.LegacyAdmission.PlannedRisk:0.########}"
+                }).ToArray()
+            };
+            var wideStop = candle.Close + wideRisk;
+            _researchLogger?.AppendSignal(confirmed);
+            _researchLogger?.AppendInfo(_snapshot.SnapshotId, candle.Bar, candle.Time,
+                $"FR_PREENTRY_CONFIRM signal={confirmed.SignalId} LegacySignalId={pending.LegacySignalId} LegacyPath={pending.LegacyAdmission.LegacyResearchPath} legacyEntry={pending.LegacyAdmission.PlannedEntry:0.########} legacyStop={pending.LegacyAdmission.PlannedStop:0.########} legacyRisk={pending.LegacyAdmission.PlannedRisk:0.########} confirmEntry={candle.Close:0.########} confirmRisk={wideRisk:0.########}");
+            AddResearchTracker(confirmed, candle, researchPath, wideStop, wideRisk, submitReplayExecution: true);
+            _pendingFailureReversePreEntryWideShorts.RemoveAt(i);
+        }
     }
 
     private void EvaluateFailureReverseRetests(OpfCandle candle)
@@ -2621,6 +2907,70 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         return candle with { High = candle.Open, Low = candle.Open, Close = candle.Open };
     }
 
+    private void TryQueueSignificantZoneFirstTouch(SignificantZone zone, OpfCandle candle, RegimeResult regime)
+    {
+        if (_snapshot is null || _pendingSignificantZoneFirstTouches.Any(x => x.Entry.ZoneId == zone.ZoneId))
+            return;
+
+        var low = Math.Min(zone.InnerBoundary, zone.OuterBoundary);
+        var high = Math.Max(zone.InnerBoundary, zone.OuterBoundary);
+        if (candle.High < low || candle.Low > high)
+            return;
+
+        var participation = CaptureSignificantZoneParticipation(candle, low, high);
+        var evaluation = _significantZoneFirstTouchEngine.Evaluate(zone, candle, participation.HasObservedTrades);
+        if (evaluation.Outcome != SignificantZoneFirstTouchOutcome.Confirmed || evaluation.Entry is null)
+            return;
+
+        var score = zone.Side == TradeSide.Long ? regime.BullTrendScore : regime.BearTrendScore;
+        var signal = new CandidateSignal(
+            $"{candle.Time:yyyyMMdd-HHmm}-SZFT-{candle.Bar:000000}-{zone.ZoneId}",
+            _snapshot.SnapshotId,
+            candle.Time,
+            candle.Bar,
+            zone.Side,
+            SetupType.TrendPullback,
+            SignalStage.Confirmed,
+            null,
+            score,
+            score,
+            new[] { $"SignificantZoneFirstTouch:{zone.ZoneId}", evaluation.Reason });
+        _pendingSignificantZoneFirstTouches.Add(new PendingSignificantZoneFirstTouch(signal, evaluation.Entry));
+        _researchLogger?.AppendInfo(_snapshot.SnapshotId, candle.Bar, candle.Time, $"SIGNIFICANT_ZONE_FIRST_TOUCH_QUEUED zone={zone.ZoneId} side={zone.Side} nextBar={evaluation.Entry.NextEntryBar} stop={evaluation.Entry.InitialStop:0.########}");
+    }
+
+    private void TryActivateSignificantZoneFirstTouches(int bar)
+    {
+        if (_snapshot is null || _pendingSignificantZoneFirstTouches.Count == 0)
+            return;
+
+        var entryCandle = CurrentBarOpenCandleV208(bar);
+        if (entryCandle is null)
+            return;
+
+        for (var i = _pendingSignificantZoneFirstTouches.Count - 1; i >= 0; i--)
+        {
+            var pending = _pendingSignificantZoneFirstTouches[i];
+            if (bar < pending.Entry.NextEntryBar)
+                continue;
+
+            _pendingSignificantZoneFirstTouches.RemoveAt(i);
+            if (bar != pending.Entry.NextEntryBar)
+                continue;
+
+            var signal = pending.Signal with { Time = entryCandle.Time, Bar = entryCandle.Bar };
+            var path = signal.Side == TradeSide.Long ? SignificantZoneFirstTouchLongPath : SignificantZoneFirstTouchShortPath;
+            var risk = Math.Abs(entryCandle.Open - pending.Entry.InitialStop);
+            if (risk <= 0m)
+            {
+                AppendExecutionDecision(signal, entryCandle, "Skip", "FirstTouchInvalidRisk", path, pending.Entry.InitialStop, risk);
+                continue;
+            }
+
+            TrySubmitReplayExecution(signal, entryCandle, path, pending.Entry.InitialStop, risk, allowDelayedExpansion: false);
+        }
+    }
+
     private void TrySubmitReplayExecution(
         CandidateSignal signal,
         OpfCandle entryCandle,
@@ -2631,8 +2981,17 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         bool isDeferredContinuation = false,
         string deferredParentTradeId = "")
     {
-        if (!ActualOrdersEnabled || _snapshot is null)
+        var marketExecutionScenarioId = CaptureMarketExecutionScenario(signal, entryCandle, researchPath, stop, risk);
+        if (TryEmitManualAlert(signal, entryCandle, researchPath, stop, risk))
+        {
+            ResolveMarketExecutionScenario(marketExecutionScenarioId, "ManualAlert", "NoOrderSubmission");
             return;
+        }
+        if (!ActualOrdersEnabled || _snapshot is null)
+        {
+            ResolveMarketExecutionScenario(marketExecutionScenarioId, "DataOnlyObserved", "ActualOrdersDisabled");
+            return;
+        }
         if (_isStoppingActualExecution)
         {
             AppendExecutionDecision(signal, entryCandle, "Skip", "StrategyStopping", researchPath, stop, risk);
@@ -2671,13 +3030,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionDecision(signal, entryCandle, "Skip", "PathDisabled", researchPath, stop, risk);
             return;
         }
-        if (!UseLegacyV174StrategyPolicyV204 &&
-            IsObservationConfirmPath(researchPath) &&
-            signal.Side == TradeSide.Long)
+        if (!IsRestoredPriorityPathAllowed(signal.Side, researchPath))
         {
-            const string reason = "ObservationConfirmLongDirectionGateV185";
-            AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
-            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_OBSERVATION_CONFIRM_LONG_DIRECTION_V185", "-", researchPath, entryCandle.Close, 0m, reason);
+            AppendExecutionDecision(signal, entryCandle, "Skip", "PathDirectionDisabled", researchPath, stop, risk);
             return;
         }
         if (!ReplayAllowResearchPaths && !IsExecutionEligiblePath(researchPath))
@@ -2880,7 +3235,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
         var entry = entryCandle.Close;
         var targetR = isDeferredContinuation ? DeferredContinuationTargetRV208 : ActualTargetRFor(signal, researchPath, risk);
-        var target = TargetFromRisk(signal.Side, entry, risk, targetR);
+        var targetDistance = risk * targetR;
+        var target = signal.Side == TradeSide.Long ? entry + targetDistance : entry - targetDistance;
         var lane = isSecondaryExecution ? "Secondary" : "Primary";
         var tradeId = $"{entryCandle.Time:yyyyMMdd-HHmm}-{signal.Side}-{entryCandle.Bar}{(isSecondaryExecution ? "-S2" : string.Empty)}{(isDeferredContinuation ? "-DEF" : string.Empty)}";
         var maxAllowedRiskPoints = MaxAllowedActualRiskPoints(signal, researchPath, risk);
@@ -2890,6 +3246,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             Security = Security,
             Type = OrderTypes.Market,
             Direction = signal.Side == TradeSide.Long ? OrderDirections.Buy : OrderDirections.Sell,
+            Price = 0m,
             QuantityToFill = qty,
             TimeInForce = ReplayTimeInForce,
             Comment = $"OPF|{tradeId}|ENTRY|{researchPath}|{signal.SignalId}",
@@ -3037,6 +3394,50 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (isWideStopLongExpansionV157)
             _observationConfirmWideStopLongExpansionTradesToday++;
         EnqueueExecutionAction("OpenReplayEntry", async () => await OpenReplayEntryAfterQuotePreflightAsync(execution));
+    }
+
+    private bool TryEmitManualAlert(
+        CandidateSignal signal,
+        OpfCandle entryCandle,
+        string researchPath,
+        decimal stop,
+        decimal risk)
+    {
+        if (!_manualAlertEnabled || _snapshot is null ||
+            !IsRestoredPriorityPathAllowed(signal.Side, researchPath) ||
+            !IsReplayExecutionPathEnabled(researchPath))
+            return false;
+        var entry = entryCandle.Close;
+        var invalidStopSide = signal.Side == TradeSide.Long ? stop >= entry : stop <= entry;
+        if (risk <= 0m || invalidStopSide ||
+            (_snapshot.InstrumentProfile.MaxRiskPointsHard > 0m && risk > _snapshot.InstrumentProfile.MaxRiskPointsHard) ||
+            IsGlobexCloseoutLockWindow(entryCandle.Time, out _) ||
+            IsUsCashOpenBlackout(entryCandle.Time, out _) ||
+            IsLiveLatencyBlocked(entryCandle.Time, out _) || _liveReadinessBlocked ||
+            ActualExecutionStrategySkipReasons(signal, researchPath).Length > 0 ||
+            ActualExecutionRiskSkipReasons(signal, researchPath, entryCandle, risk).Length > 0 ||
+            ActualExecutionSameBarSkipReasons(signal, researchPath, entryCandle, stop, risk).Length > 0 ||
+            GetCurrentAccountPosition() != 0m || ActiveReplayExecutions().Count != 0)
+            return false;
+
+        var key = $"{entryCandle.Time:O}|{signal.Side}|{entry:0.########}";
+        if (!_manualAlertKeys.Add(key))
+            return true;
+
+        var targetR = ReplayTargetR > 0m ? ReplayTargetR : 1.5m;
+        var target = TargetFromRisk(signal.Side, entry, risk, targetR);
+        var quantity = Math.Max(0m, ReplayOrderQuantity);
+        var dollars = risk * _snapshot.InstrumentProfile.PointValue * quantity;
+        var zoneType = signal.Zone?.ZoneType ?? "None";
+        var message = $"MANUAL_ALERT path={researchPath}|side={signal.Side}|market={entry:0.##}|sl={stop:0.##}|tp={target:0.##}|qty={quantity:0.##}|risk={risk:0.##}pt/${dollars:0.##}|score={signal.SetupQualityScore.TotalScore:0.##}|regime={signal.RegimeScore.TotalScore:0.##}|zone={zoneType}";
+        _lastExecutionHudText = message;
+        _recentExecutionHudItems.Enqueue(message);
+        while (_recentExecutionHudItems.Count > 3)
+            _recentExecutionHudItems.Dequeue();
+        AppendExecutionDecision(signal, entryCandle, "ManualAlert", "ManualAlertOnly", researchPath, stop, risk);
+        AppendExecutionEvent(signal, string.Empty, entryCandle, "MANUAL_ALERT", "ENTRY", researchPath, entry, quantity, message);
+        RaiseShowNotification(message, "OPFStrategyV1");
+        return true;
     }
 
     private bool TryQueuePendingProtectedSecondaryV216(
@@ -3704,36 +4105,40 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private static bool IsExecutionEligiblePath(string researchPath)
     {
         return researchPath is
-            "TrendPullbackConfirmed" or
-            "StructureConfirmShadow_ConfirmBarStop" or
-            "StructureConfirmShadow_ConfirmBarStop_Min10" or
-            "StructureConfirmShadow_ConfirmBarStop_Wait1" or
-            "StructureConfirmShadow_SwingStop" or
-            "StructureConfirmShadow" or
-            "BreakawayFvg" or
-            "BreakawayFvg_Qualified" or
-            "BreakawayRetest" or
-            "AlmostConfirmed" or
             "ObservationConfirm" or
             "ObservationConfirm_WideStop1_5R" or
-            "ObservationStrict_BullFresh" or
-            "ObservationStrict_BullFresh_WideStop1_5R" or
-            "ObservationStrict_Other" or
-            "ObservationStrict_Other_WideStop1_5R" or
-            "ShadowCandidate" or
-            "UnknownRegimeZoneTouch" or
-            "ZoneBirthResearch" or
-            "FailureReverse_ObservationInvalidated" or
+            "BreakawayFvg" or
+            "BreakawayFvg_Qualified" or
             "FailureReverse_ObservationInvalidated_WideStop1_5R" or
-            "FailureReverse_LongQualified" or
             "FailureReverse_RetestFailed" or
-            "FailureReverse_RetestFailed_WideStop1_5R";
+            "SignificantZoneFirstTouchLong" or
+            "SignificantZoneFirstTouchShort";
+    }
+
+    private static bool IsRestoredPriorityPathAllowed(TradeSide side, string researchPath)
+    {
+        return researchPath switch
+        {
+            "ObservationConfirm" or "ObservationConfirm_WideStop1_5R" or "BreakawayFvg_Qualified" => true,
+            "BreakawayFvg" => side == TradeSide.Short,
+            "FailureReverse_ObservationInvalidated_WideStop1_5R" or "FailureReverse_RetestFailed" => side == TradeSide.Short,
+            "SignificantZoneFirstTouchLong" => side == TradeSide.Long,
+            "SignificantZoneFirstTouchShort" => side == TradeSide.Short,
+            _ => false
+        };
+    }
+
+    private static bool IsSignificantZoneFirstTouchPath(string researchPath)
+    {
+        return researchPath is SignificantZoneFirstTouchLongPath or SignificantZoneFirstTouchShortPath;
     }
 
     private string[] ActualExecutionStrategySkipReasons(CandidateSignal signal, string researchPath)
     {
         var reasons = new List<string>();
+        var isSignificantZoneFirstTouch = IsSignificantZoneFirstTouchPath(researchPath);
         var isImmediateFailureReverse = IsImmediateFailureReversePath(signal, researchPath);
+        var isFailureReversePreEntry = IsFailureReversePreEntryWideShortPath(signal, researchPath);
         var isObservationConfirm = IsObservationConfirmPath(researchPath);
         var isFailureRetest = IsFailureRetestPath(researchPath);
         var isDailyVolumeFloor = IsDailyVolumeFloorAllowed(signal, researchPath);
@@ -3745,10 +4150,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         var isObservationConfirmWideStopLowRisk = IsObservationConfirmWideStopLowRiskV132Quality(signal, researchPath);
         var isObservationConfirmRisk22 = IsObservationConfirmRisk22V132Quality(signal, researchPath);
         var isAggressiveExpansionV164 = TryGetAggressiveExpansionV164Rules(signal.Side, researchPath, out var aggressiveMinScore, out _, out _);
-        if (_actualRequireTrendRegime && !signal.RegimeScore.Passed && !isImmediateFailureReverse && !isObservationConfirm && !isFailureRetest && !isDailyVolumeFloor && !isMainlineVolumeFiller && !isV122VolumeExpansion && !isBreakawayVolumeExpansion && !isUnknownMicroRiskVolumeExpansion && !isObservationConfirmWideStopVolume && !isObservationConfirmWideStopLowRisk && !isObservationConfirmRisk22 && !isAggressiveExpansionV164)
+        if (_actualRequireTrendRegime && !signal.RegimeScore.Passed && !isSignificantZoneFirstTouch && !isImmediateFailureReverse && !isFailureReversePreEntry && !isObservationConfirm && !isFailureRetest && !isDailyVolumeFloor && !isMainlineVolumeFiller && !isV122VolumeExpansion && !isBreakawayVolumeExpansion && !isUnknownMicroRiskVolumeExpansion && !isObservationConfirmWideStopVolume && !isObservationConfirmWideStopLowRisk && !isObservationConfirmRisk22 && !isAggressiveExpansionV164)
             reasons.Add($"StrategyRegimeNotTrend:score={signal.RegimeScore.TotalScore:0.##}");
 
-        var minSetupQuality = isDailyVolumeFloor
+        var minSetupQuality = isSignificantZoneFirstTouch
+            ? 0m
+            : isDailyVolumeFloor
             ? DailyVolumeFloorMinSetupQualityScore
             : isMainlineVolumeFiller
             ? MainlineVolumeFillerMinSetupQualityScore
@@ -3772,7 +4179,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             ? _actualObservationConfirmMinSetupQualityScore
             : isFailureRetest
                 ? _actualFailureRetestMinSetupQualityScore
-            : isImmediateFailureReverse
+            : isImmediateFailureReverse || isFailureReversePreEntry
                 ? _actualFailureReverseMinSetupQualityScore
                 : _actualMinSetupQualityScore;
         if (minSetupQuality > 0m && signal.SetupQualityScore.TotalScore < minSetupQuality)
@@ -4044,6 +4451,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private static bool IsObservationConfirmWideStopPath(string researchPath)
     {
         return string.Equals(researchPath, "ObservationConfirm_WideStop1_5R", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFailureReversePreEntryWideShortPath(CandidateSignal signal, string researchPath)
+    {
+        return signal.SetupType == SetupType.FailureReverse && signal.Side == TradeSide.Short &&
+            string.Equals(researchPath, "FailureReverse_PreEntryConfirmedWideStopShort", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsFailureRetestPath(string researchPath)
@@ -4393,6 +4806,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return Array.Empty<string>();
 
         var reasons = new List<string>();
+        var isSignificantZoneFirstTouch = IsSignificantZoneFirstTouchPath(researchPath);
         if (IsStrictEntryExcludedRiskV208(risk))
             reasons.Add($"StrictEntryRiskBandExcludedV208:risk={risk:0.##},excluded=({StrictEntryExcludedRiskMinExclusiveV208:0.##},{StrictEntryExcludedRiskMaxInclusiveV208:0.##}]");
         var instrument = _snapshot.InstrumentProfile;
@@ -4479,7 +4893,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
         var reward = EstimateActualExecutionReward(signal, researchPath, entryCandle.Close, risk);
         var estimatedRr = EstimatedActualRr(signal, researchPath, entryCandle.Close, risk);
-        var minEstimatedRr = isAggressiveExpansionV164
+        var minEstimatedRr = isSignificantZoneFirstTouch
+            ? 0m
+            : isAggressiveExpansionV164
             ? aggressiveMinEstimatedRr
             : isObservationConfirmWideStopLowRisk
             ? ObservationConfirmWideStopLowRiskV132MinEstimatedRr
@@ -4632,6 +5048,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             (targetR, timeStopBars) = (4m, LongPolicyTimeStopBarsV209);
         else if (side == TradeSide.Short && string.Equals(researchPath, "FailureReverse_ObservationInvalidated_WideStop1_5R", StringComparison.OrdinalIgnoreCase))
             (targetR, timeStopBars) = (4m, ShortPolicyTimeStopBarsV209);
+        else if (side == TradeSide.Short && string.Equals(researchPath, "FailureReverse_PreEntryConfirmedWideStopShort", StringComparison.OrdinalIgnoreCase))
+            (targetR, timeStopBars) = (4m, ShortPolicyTimeStopBarsV209);
 
         return targetR > 0m;
     }
@@ -4764,6 +5182,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return;
 
         _deferredContinuations.Clear();
+        _pendingSignificantZoneFirstTouches.Clear();
         _replayExecutionDate = date;
         _replayTradesToday = 0;
         _replayExitsToday = 0;
@@ -9432,7 +9851,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         var tradingDay = GlobexTradingDayKey(candle.Time);
         var globexLocked = IsGlobexCloseoutLockWindow(candle.Time, out _);
         hud.AppendLine($"TradingDay: {tradingDay:yyyy-MM-dd}  GlobexGate: {(globexLocked ? "LOCKED" : "OPEN")}");
-        hud.AppendLine($"ActualExec: {(ActualOrdersEnabled ? "ON" : "OFF")} dataOnly={RichBarDataCollectionOnly || MicrostructureAuditCollectionOnly || FootprintDataCollectionOnly} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} slots={activeExecutions.Count}/2 pos={GetCurrentAccountPosition():0.##} cleanup={cleanupCount}");
+        hud.AppendLine($"ActualExec: {(ActualOrdersEnabled ? "ON" : "OFF")} dataOnly={RichBarDataCollectionOnly || MicrostructureAuditCollectionOnly || FootprintDataCollectionOnly || SweepReclaimDataCollectionOnly || ZoneBehaviorLedgerDataOnly || MarketExecutionTapeDataOnly || CandidateScenarioTapeDataOnly} sent={_replayTradesToday}/{ReplayMaxTradesPerDay} exits={_replayExitsToday} slots={activeExecutions.Count}/2 pos={GetCurrentAccountPosition():0.##} cleanup={cleanupCount}");
         var dailyTarget = _snapshot?.ExecutionProfile.DailyTargetDollars ?? 0m;
         hud.AppendLine($"Today: TP={_replayTpToday} SL={_replaySlToday} Other={_replayOtherExitToday} NetR={_replayDailyR:0.00} Gross=${_replayDailyPnlDollars:0.##} AccountNet=${_liveAccountDailyNetPnlDollars:0.##} target=${dailyTarget:0.##} loss=${_actualDailyLossLimitDollars:0.##}");
         hud.AppendLine($"Week: {_liveAccountPnlWeekStart:MM-dd} AccountNet=${_liveAccountWeeklyNetPnlDollars:0.##} LongNet=${_liveLongWeeklyNetPnlDollars:0.##} longGate={(IsWeeklyLongLossGateActive(out _) ? "BLOCKED" : "OPEN")} limit=-${_actualWeeklyLongLossLimitDollars:0.##}");
@@ -9700,6 +10119,27 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     {
         public bool Touched { get; set; }
     }
+
+    private sealed record PendingSignificantZoneFirstTouch(
+        CandidateSignal Signal,
+        SignificantZoneFirstTouchEntry Entry);
+
+    private sealed record PendingFailureReversePreEntryWideShort(
+        CandidateSignal Signal,
+        OpfCandle OriginCandle,
+        decimal PenetrationR,
+        LegacyFailureReverseWideStopAdmission LegacyAdmission)
+    {
+        public string LegacySignalId => Signal.SignalId;
+    }
+
+    private sealed record LegacyFailureReverseWideStopAdmission(
+        bool LegacyWouldSubmit,
+        string[] Reasons,
+        string LegacyResearchPath,
+        decimal PlannedEntry,
+        decimal PlannedStop,
+        decimal PlannedRisk);
 
     private sealed record PendingProtectedSecondaryV216(
         string PrimaryTradeId,

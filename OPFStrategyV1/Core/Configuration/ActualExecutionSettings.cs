@@ -5,6 +5,8 @@ namespace OPFStrategyV1.Core.Configuration;
 public sealed record ActualExecutionSettings(
     string Version,
     bool EnableActualOrders,
+    bool ManualAlertEnabled,
+    string ExecutionMode,
     string ActualExecutionPaths,
     bool ActualAllowResearchPaths,
     decimal ActualOrderQuantity,
@@ -41,15 +43,17 @@ public sealed record ActualExecutionSettings(
     public static ActualExecutionSettings Default()
     {
         return new ActualExecutionSettings(
-            Version: "ACTUAL_EXEC_2.48",
-            EnableActualOrders: true,
-            ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|BreakawayRetest|AlmostConfirmed|ShadowCandidate|TrendPullbackConfirmed|ObservationStrict_Other|ObservationStrict_Other_WideStop1_5R|ObservationStrict_BullFresh_WideStop1_5R|ZoneBirthResearch|FailureReverse_ObservationInvalidated|FailureReverse_ObservationInvalidated_WideStop1_5R|FailureReverse_RetestFailed|FailureReverse_RetestFailed_WideStop1_5R|UnknownRegimeZoneTouch",
+            Version: "ACTUAL_EXEC_2.52",
+            EnableActualOrders: false,
+            ManualAlertEnabled: true,
+            ExecutionMode: "ManualAlert",
+            ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated_WideStop1_5R|FailureReverse_RetestFailed|SignificantZonePassiveLimitLong|SignificantZonePassiveLimitShort",
             ActualAllowResearchPaths: false,
-            ActualOrderQuantity: 3m,
+            ActualOrderQuantity: 1m,
             ActualTargetR: 1.5m,
-            ActualMaxTradesPerDay: 15,
-            ActualDailyLossLimitDollars: 250m,
-            ActualWeeklyLongLossLimitDollars: 500m,
+            ActualMaxTradesPerDay: 20,
+            ActualDailyLossLimitDollars: 200m,
+            ActualWeeklyLongLossLimitDollars: 0m,
             ActualCommissionPerContractRoundTrip: 1.2m,
             ActualUseFullLossGuard: false,
             ActualUseConsecutiveLossGuard: false,
@@ -73,7 +77,7 @@ public sealed record ActualExecutionSettings(
             ActualWideStopMultiplier: 1.5m,
             ActualRrTiers: "1.0|1.2|1.5",
             ResearchLogMode: "Compact",
-            RunProfileId: "ACTUAL_BASELINE",
+            RunProfileId: "EIGHT_PATH_MANUAL_ALERT",
             RunMode: "ActualExecution");
     }
 
@@ -134,7 +138,10 @@ public sealed record ActualExecutionSettings(
             ActualTargetR = settings.ActualTargetR <= 0m ? fallback.ActualTargetR : settings.ActualTargetR,
             ActualMaxTradesPerDay = settings.ActualMaxTradesPerDay <= 0 ? fallback.ActualMaxTradesPerDay : settings.ActualMaxTradesPerDay,
             ActualDailyLossLimitDollars = settings.ActualDailyLossLimitDollars <= 0m ? fallback.ActualDailyLossLimitDollars : settings.ActualDailyLossLimitDollars,
-            ActualWeeklyLongLossLimitDollars = settings.ActualWeeklyLongLossLimitDollars <= 0m ? fallback.ActualWeeklyLongLossLimitDollars : settings.ActualWeeklyLongLossLimitDollars,
+            ExecutionMode = NormalizeExecutionMode(settings.ExecutionMode, settings.EnableActualOrders, settings.ManualAlertEnabled),
+            EnableActualOrders = string.Equals(NormalizeExecutionMode(settings.ExecutionMode, settings.EnableActualOrders, settings.ManualAlertEnabled), "Auto", StringComparison.OrdinalIgnoreCase),
+            ManualAlertEnabled = string.Equals(NormalizeExecutionMode(settings.ExecutionMode, settings.EnableActualOrders, settings.ManualAlertEnabled), "ManualAlert", StringComparison.OrdinalIgnoreCase),
+            ActualWeeklyLongLossLimitDollars = settings.ActualWeeklyLongLossLimitDollars < 0m ? fallback.ActualWeeklyLongLossLimitDollars : settings.ActualWeeklyLongLossLimitDollars,
             ActualCommissionPerContractRoundTrip = settings.ActualCommissionPerContractRoundTrip < 0m ? fallback.ActualCommissionPerContractRoundTrip : settings.ActualCommissionPerContractRoundTrip,
             ActualTimeInForce = string.IsNullOrWhiteSpace(settings.ActualTimeInForce) ? fallback.ActualTimeInForce : settings.ActualTimeInForce,
             ActualStopTriggerType = string.IsNullOrWhiteSpace(settings.ActualStopTriggerType) ? fallback.ActualStopTriggerType : settings.ActualStopTriggerType,
@@ -156,5 +163,14 @@ public sealed record ActualExecutionSettings(
             RunProfileId = string.IsNullOrWhiteSpace(settings.RunProfileId) ? fallback.RunProfileId : settings.RunProfileId,
             RunMode = string.IsNullOrWhiteSpace(settings.RunMode) ? fallback.RunMode : settings.RunMode
         };
+    }
+
+    private static string NormalizeExecutionMode(string? executionMode, bool enableActualOrders, bool manualAlertEnabled)
+    {
+        if (string.Equals(executionMode, "Auto", StringComparison.OrdinalIgnoreCase))
+            return "Auto";
+        if (string.Equals(executionMode, "ManualAlert", StringComparison.OrdinalIgnoreCase))
+            return "ManualAlert";
+        return enableActualOrders && !manualAlertEnabled ? "Auto" : "ManualAlert";
     }
 }
