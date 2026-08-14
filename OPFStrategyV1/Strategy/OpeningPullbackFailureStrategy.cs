@@ -9939,12 +9939,14 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return;
 
         var font = new RenderFont("Consolas", 11);
-        var size = context.MeasureString(hud, font);
         const int padX = 10;
         const int padY = 8;
-
         const int minBoxW = 560;
-        var boxW = Math.Max(minBoxW, (int)Math.Ceiling((double)size.Width) + padX * 2);
+        var maxBoxW = Math.Max(1, ChartArea.Width - padX * 2);
+        var maxLineChars = Math.Max(16, maxBoxW / 8);
+        var boundedHud = WrapHudText(hud, maxLineChars);
+        var size = context.MeasureString(boundedHud, font);
+        var boxW = Math.Min(maxBoxW, Math.Max(Math.Min(minBoxW, maxBoxW), (int)Math.Ceiling((double)size.Width) + padX * 2));
         var boxH = (int)Math.Ceiling((double)size.Height) + padY * 2;
         var x = ChartArea.X + (ChartArea.Width - boxW) / 2;
         var y = ChartArea.Y + 8;
@@ -9952,7 +9954,28 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
         context.FillRectangle(Color.FromArgb(125, 0, 0, 0), rect);
         context.DrawRectangle(new RenderPen(Color.FromArgb(170, 70, 70, 70), 1), rect);
-        context.DrawString(hud, font, Color.DeepSkyBlue, x + padX, y + padY);
+        context.DrawString(boundedHud, font, Color.DeepSkyBlue, x + padX, y + padY);
+    }
+
+    private static string WrapHudText(string value, int maxLineChars)
+    {
+        if (string.IsNullOrEmpty(value) || maxLineChars <= 0)
+            return value;
+
+        var lines = new List<string>();
+        foreach (var line in value.Replace("\r", string.Empty).Split('\n'))
+        {
+            if (line.Length == 0)
+            {
+                lines.Add(string.Empty);
+                continue;
+            }
+
+            for (var start = 0; start < line.Length; start += maxLineChars)
+                lines.Add(line.Substring(start, Math.Min(maxLineChars, line.Length - start)));
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     private void DrawActualExecutionLines(RenderContext context)

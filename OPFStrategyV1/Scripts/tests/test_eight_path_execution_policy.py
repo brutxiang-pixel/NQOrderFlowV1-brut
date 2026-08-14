@@ -59,6 +59,15 @@ def test_chart_manual_alert_mode_overrides_json_execution_mode_after_settings_lo
     assert "_manualAlertEnabled = true;" in STRATEGY[STRATEGY.index("private void ApplyChartExecutionModeOverride"):]
 
 
+def test_hud_wraps_long_manual_alerts_within_chart_width():
+    draw_hud = STRATEGY[STRATEGY.index("private void DrawHud"):]
+    assert "var maxBoxW = Math.Max(1, ChartArea.Width - padX * 2);" in draw_hud
+    assert "var boundedHud = WrapHudText(hud, maxLineChars);" in draw_hud
+    assert "var boxW = Math.Min(maxBoxW" in draw_hud
+    assert "context.DrawString(boundedHud, font" in draw_hud
+    assert "private static string WrapHudText(string value, int maxLineChars)" in STRATEGY
+
+
 def test_first_touch_uses_next_bar_market_execution():
     assert "SignificantZoneFirstTouchLongPath" in STRATEGY
     assert "SignificantZoneFirstTouchShortPath" in STRATEGY
@@ -76,4 +85,5 @@ if __name__ == "__main__":
     test_manual_alert_uses_shared_eight_path_policy()
     test_chart_manual_alert_mode_is_a_visible_execution_setting()
     test_chart_manual_alert_mode_overrides_json_execution_mode_after_settings_load()
+    test_hud_wraps_long_manual_alerts_within_chart_width()
     test_first_touch_uses_next_bar_market_execution()
