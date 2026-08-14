@@ -69,6 +69,16 @@ def test_hud_wraps_long_manual_alerts_within_chart_width():
     assert "context.MeasureString(candidate, font).Width > maxLineWidth" in STRATEGY
 
 
+def test_manual_alert_has_a_dedicated_vertical_decision_card():
+    assert "private sealed record ManualAlertCard(" in STRATEGY
+    assert "_manualAlertCard = new ManualAlertCard(" in STRATEGY
+    assert "DrawManualAlertCard(context, card);" in STRATEGY
+    assert "private void DrawManualAlertCard(RenderContext context, ManualAlertCard card)" in STRATEGY
+    assert 'hud.AppendLine("ManualAlert: see decision card");' in STRATEGY
+    assert "NEW CANDIDATE" in STRATEGY
+    assert "manual decision - no auto order" in STRATEGY
+
+
 def test_first_touch_uses_next_bar_market_execution():
     assert "SignificantZoneFirstTouchLongPath" in STRATEGY
     assert "SignificantZoneFirstTouchShortPath" in STRATEGY
@@ -87,4 +97,5 @@ if __name__ == "__main__":
     test_chart_manual_alert_mode_is_a_visible_execution_setting()
     test_chart_manual_alert_mode_overrides_json_execution_mode_after_settings_load()
     test_hud_wraps_long_manual_alerts_within_chart_width()
+    test_manual_alert_has_a_dedicated_vertical_decision_card()
     test_first_touch_uses_next_bar_market_execution()
