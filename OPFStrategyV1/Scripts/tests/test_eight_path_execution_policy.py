@@ -62,10 +62,11 @@ def test_chart_manual_alert_mode_overrides_json_execution_mode_after_settings_lo
 def test_hud_wraps_long_manual_alerts_within_chart_width():
     draw_hud = STRATEGY[STRATEGY.index("private void DrawHud"):]
     assert "var maxBoxW = Math.Max(1, ChartArea.Width - padX * 2);" in draw_hud
-    assert "var boundedHud = WrapHudText(hud, maxLineChars);" in draw_hud
+    assert "var boundedHud = WrapHudText(context, font, hud, maxBoxW - padX * 2);" in draw_hud
     assert "var boxW = Math.Min(maxBoxW" in draw_hud
     assert "context.DrawString(boundedHud, font" in draw_hud
-    assert "private static string WrapHudText(string value, int maxLineChars)" in STRATEGY
+    assert "private static string WrapHudText(RenderContext context, RenderFont font, string value, int maxLineWidth)" in STRATEGY
+    assert "context.MeasureString(candidate, font).Width > maxLineWidth" in STRATEGY
 
 
 def test_first_touch_uses_next_bar_market_execution():

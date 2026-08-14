@@ -9943,8 +9943,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         const int padY = 8;
         const int minBoxW = 560;
         var maxBoxW = Math.Max(1, ChartArea.Width - padX * 2);
-        var maxLineChars = Math.Max(16, maxBoxW / 8);
-        var boundedHud = WrapHudText(hud, maxLineChars);
+        var boundedHud = WrapHudText(context, font, hud, maxBoxW - padX * 2);
         var size = context.MeasureString(boundedHud, font);
         var boxW = Math.Min(maxBoxW, Math.Max(Math.Min(minBoxW, maxBoxW), (int)Math.Ceiling((double)size.Width) + padX * 2));
         var boxH = (int)Math.Ceiling((double)size.Height) + padY * 2;
@@ -9957,9 +9956,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         context.DrawString(boundedHud, font, Color.DeepSkyBlue, x + padX, y + padY);
     }
 
-    private static string WrapHudText(string value, int maxLineChars)
+    private static string WrapHudText(RenderContext context, RenderFont font, string value, int maxLineWidth)
     {
-        if (string.IsNullOrEmpty(value) || maxLineChars <= 0)
+        if (string.IsNullOrEmpty(value) || maxLineWidth <= 0)
             return value;
 
         var lines = new List<string>();
@@ -9971,8 +9970,24 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
                 continue;
             }
 
-            for (var start = 0; start < line.Length; start += maxLineChars)
-                lines.Add(line.Substring(start, Math.Min(maxLineChars, line.Length - start)));
+            for (var start = 0; start < line.Length;)
+            {
+                var length = line.Length - start;
+                while (length > 1)
+                {
+                    var candidate = line.Substring(start, length);
+                    if (context.MeasureString(candidate, font).Width > maxLineWidth)
+                    {
+                        length--;
+                        continue;
+                    }
+
+                    break;
+                }
+
+                lines.Add(line.Substring(start, length));
+                start += length;
+            }
         }
 
         return string.Join(Environment.NewLine, lines);
