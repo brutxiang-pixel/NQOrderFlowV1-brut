@@ -300,6 +300,10 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     [DisplayName("Enable Actual Orders")]
     public bool EnableReplayOrders { get; set; } = true;
 
+    [Category("OPF Execution")]
+    [DisplayName("Manual Alert Mode")]
+    public bool ManualAlertMode { get; set; }
+
     [Category("OPF Research")]
     [DisplayName("Rich Bar Data Collection Only")]
     public bool RichBarDataCollectionOnly { get; set; }
@@ -405,6 +409,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             out var actualExecutionConfigStatus);
         ApplyActualExecutionSettings(actualExecutionSettings);
         ApplyRunMode(actualExecutionSettings.RunMode);
+        ApplyChartExecutionModeOverride();
         InitializeMicrostructureAudit();
         InitializeFootprintCollection();
         InitializeSweepReclaimCollection();
@@ -595,6 +600,15 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             ReplayTimeInForce = timeInForce;
         if (Enum.TryParse<TriggerPriceType>(settings.ActualStopTriggerType, ignoreCase: true, out var triggerPriceType))
             ReplayStopTriggerPriceType = triggerPriceType;
+    }
+
+    private void ApplyChartExecutionModeOverride()
+    {
+        if (!ManualAlertMode)
+            return;
+
+        EnableReplayOrders = false;
+        _manualAlertEnabled = true;
     }
 
     private void ApplyRunMode(string runMode)

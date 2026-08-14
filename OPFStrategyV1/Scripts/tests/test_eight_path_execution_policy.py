@@ -45,6 +45,20 @@ def test_manual_alert_uses_shared_eight_path_policy():
     assert "var invalidStopSide = signal.Side == TradeSide.Long ? stop >= entry : stop <= entry;" in STRATEGY
 
 
+def test_chart_manual_alert_mode_is_a_visible_execution_setting():
+    assert '[Category("OPF Execution")]\n    [DisplayName("Manual Alert Mode")]\n    public bool ManualAlertMode { get; set; }' in STRATEGY
+
+
+def test_chart_manual_alert_mode_overrides_json_execution_mode_after_settings_load():
+    apply_settings = STRATEGY.index("ApplyActualExecutionSettings(actualExecutionSettings);")
+    apply_run_mode = STRATEGY.index("ApplyRunMode(actualExecutionSettings.RunMode);")
+    manual_override = STRATEGY.index("ApplyChartExecutionModeOverride();")
+    assert manual_override > apply_settings
+    assert manual_override > apply_run_mode
+    assert "EnableReplayOrders = false;" in STRATEGY[STRATEGY.index("private void ApplyChartExecutionModeOverride"):]
+    assert "_manualAlertEnabled = true;" in STRATEGY[STRATEGY.index("private void ApplyChartExecutionModeOverride"):]
+
+
 def test_first_touch_uses_next_bar_market_execution():
     assert "SignificantZoneFirstTouchLongPath" in STRATEGY
     assert "SignificantZoneFirstTouchShortPath" in STRATEGY
@@ -60,4 +74,6 @@ if __name__ == "__main__":
     test_default_is_manual_alert_with_requested_global_limits()
     test_execution_policy_has_only_the_eight_approved_paths()
     test_manual_alert_uses_shared_eight_path_policy()
+    test_chart_manual_alert_mode_is_a_visible_execution_setting()
+    test_chart_manual_alert_mode_overrides_json_execution_mode_after_settings_load()
     test_first_touch_uses_next_bar_market_execution()
