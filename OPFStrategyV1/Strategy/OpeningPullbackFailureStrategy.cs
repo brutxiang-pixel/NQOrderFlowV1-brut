@@ -239,7 +239,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private string _lastAbnormalProtectiveFillHudText = "-";
     private string _lastExecutionHudText = "-";
     private readonly Queue<string> _recentExecutionHudItems = new();
-    private ManualAlertCard? _manualAlertCard;
+    private readonly List<ManualAlertCard> _manualAlertCards = new();
     private bool _actualRequireTrendRegime = true;
     private decimal _actualMinSetupQualityScore = 70m;
     private decimal _actualFailureReverseMinSetupQualityScore = 40m;
@@ -981,16 +981,16 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (ShowResearchHud)
         {
             string hud;
-            ManualAlertCard? card;
+            ManualAlertCard[] cards;
             lock (_renderLock)
             {
                 hud = _hudText;
-                card = _manualAlertCard;
+                cards = _manualAlertCards.ToArray();
             }
 
             DrawHud(context, hud);
-            if (_manualAlertEnabled && card is not null)
-                DrawManualAlertCard(context, card);
+            if (_manualAlertEnabled && cards.Length > 0)
+                DrawManualAlertCards(context, cards);
         }
     }
 
@@ -3471,7 +3471,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             _recentExecutionHudItems.Dequeue();
         lock (_renderLock)
         {
-            _manualAlertCard = new ManualAlertCard(
+            _manualAlertCards.Insert(0, new ManualAlertCard(
                 entryCandle.Time,
                 researchPath,
                 signal.Side,
@@ -3483,7 +3483,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
                 dollars,
                 signal.SetupQualityScore.TotalScore,
                 signal.RegimeScore.TotalScore,
-                zoneType);
+                zoneType));
+            while (_manualAlertCards.Count > 3)
+                _manualAlertCards.RemoveAt(_manualAlertCards.Count - 1);
         }
         AppendExecutionDecision(signal, entryCandle, "ManualAlert", "ManualAlertOnly", researchPath, stop, risk);
         AppendExecutionEvent(signal, string.Empty, entryCandle, "MANUAL_ALERT", "ENTRY", researchPath, entry, quantity, message);
@@ -5258,6 +5260,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         _lastAbnormalProtectiveFillHudText = "-";
         _lastExecutionHudText = "-";
         _recentExecutionHudItems.Clear();
+        lock (_renderLock)
+            _manualAlertCards.Clear();
     }
 
     private void RollGlobexTradingDayIfNeeded(OpfCandle candle)
@@ -10035,45 +10039,54 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         return string.Join(Environment.NewLine, lines);
     }
 
-    private void DrawManualAlertCard(RenderContext context, ManualAlertCard card)
+    private void DrawManualAlertCards(RenderContext context, IReadOnlyList<ManualAlertCard> cards)
     {
         const int margin = 14;
-        const int desiredWidth = 360;
-        const int cardHeight = 180;
+        const int desiredWidth = 290;
+        const int cardHeight = 188;
+        const int cardGap = 8;
         const int pad = 12;
         var width = Math.Min(desiredWidth, Math.Max(240, ChartArea.Width - margin * 2));
-        var x = ChartArea.X + ChartArea.Width - width - margin;
-        var y = ChartArea.Y + margin;
-        var rect = new Rectangle(x, y, width, cardHeight);
-        var sideColor = card.Side == TradeSide.Long ? Color.FromArgb(31, 208, 164) : Color.FromArgb(245, 80, 110);
-        var sideText = card.Side == TradeSide.Long ? "LONG" : "SHORT";
-        var titleFont = new RenderFont("Consolas", 11);
-        var sideFont = new RenderFont("Consolas", 22);
-        var levelFont = new RenderFont("Consolas", 15);
-        var detailFont = new RenderFont("Consolas", 11);
+        var x = ChartArea.X + margin;
+        for (var index = 0; index < cards.Count; index++)
+        {
+            var card = cards[index];
+            var y = ChartArea.Y + margin + index * (cardHeight + cardGap);
+            var rect = new Rectangle(x, y, width, cardHeight);
+            var sideColor = card.Side == TradeSide.Long ? Color.FromArgb(31, 208, 164) : Color.FromArgb(245, 80, 110);
+            var sideText = card.Side == TradeSide.Long ? "LONG" : "SHORT";
+            var title = index == 0 ? "LATEST CANDIDATE" : $"RECENT CANDIDATE {index + 1}";
+            var titleFont = new RenderFont("Consolas", 11);
+            var sideFont = new RenderFont("Consolas", 20);
+            var priceFont = new RenderFont("Consolas", 14);
+            var detailFont = new RenderFont("Consolas", 11);
 
-        context.FillRectangle(Color.FromArgb(220, 17, 29, 39), rect);
-        context.DrawRectangle(new RenderPen(sideColor, 2), rect);
-        context.DrawString($"NEW CANDIDATE  {card.Time:HH:mm}", titleFont, Color.Gainsboro, x + pad, y + 10);
-        context.DrawString(sideText, sideFont, sideColor, x + pad, y + 29);
-        context.DrawString(card.Path.Replace('_', ' '), detailFont, Color.LightSteelBlue, x + pad, y + 57);
-
-        var levelY = y + 82;
-        var levelWidth = (width - pad * 2) / 3;
-        DrawManualAlertLevel(context, "ENTRY", card.Entry, x + pad, levelY, levelFont);
-        DrawManualAlertLevel(context, "STOP", card.Stop, x + pad + levelWidth, levelY, levelFont);
-        DrawManualAlertLevel(context, "TARGET", card.Target, x + pad + levelWidth * 2, levelY, levelFont);
-
-        context.DrawString($"{card.Quantity:0.##} lot | risk {card.RiskPoints:0.##}pt / ${card.RiskDollars:0.##}", detailFont, Color.WhiteSmoke, x + pad, y + 126);
-        context.DrawString($"Quality {card.QualityScore:0} | Regime {card.RegimeScore:0} | {card.ZoneType}", detailFont, Color.LightSteelBlue, x + pad, y + 143);
-        context.DrawString("manual decision - no auto order", detailFont, sideColor, x + pad, y + 160);
+            context.FillRectangle(Color.FromArgb(index == 0 ? 220 : 180, 17, 29, 39), rect);
+            context.DrawRectangle(new RenderPen(sideColor, index == 0 ? 2 : 1), rect);
+            context.DrawString($"{title}  {card.Time:HH:mm}", titleFont, Color.Gainsboro, x + pad, y + 10);
+            context.DrawString(sideText, sideFont, sideColor, x + pad, y + 29);
+            context.DrawString(AbbreviateManualAlertPath(card.Path), detailFont, Color.LightSteelBlue, x + pad, y + 55);
+            DrawManualAlertPriceRow(context, "ENTRY", card.Entry, x + pad, y + 78, priceFont);
+            DrawManualAlertPriceRow(context, "STOP", card.Stop, x + pad, y + 96, priceFont);
+            DrawManualAlertPriceRow(context, "TARGET", card.Target, x + pad, y + 114, priceFont);
+            context.DrawString($"{card.Quantity:0.##} lot | risk {card.RiskPoints:0.##}pt / ${card.RiskDollars:0.##}", detailFont, Color.WhiteSmoke, x + pad, y + 138);
+            context.DrawString($"Quality {card.QualityScore:0} | Regime {card.RegimeScore:0} | {card.ZoneType}", detailFont, Color.LightSteelBlue, x + pad, y + 154);
+            context.DrawString("manual decision - no auto order", detailFont, sideColor, x + pad, y + 170);
+        }
     }
 
-    private static void DrawManualAlertLevel(RenderContext context, string label, decimal price, int x, int y, RenderFont levelFont)
+    private static void DrawManualAlertPriceRow(RenderContext context, string label, decimal price, int x, int y, RenderFont priceFont)
     {
         var labelFont = new RenderFont("Consolas", 9);
         context.DrawString(label, labelFont, Color.SlateGray, x, y);
-        context.DrawString(price.ToString("0.00"), levelFont, Color.WhiteSmoke, x, y + 14);
+        context.DrawString(price.ToString("0.00"), priceFont, Color.WhiteSmoke, x + 76, y - 3);
+    }
+
+    private static string AbbreviateManualAlertPath(string path)
+    {
+        const int maxLength = 32;
+        var display = path.Replace('_', ' ');
+        return display.Length <= maxLength ? display : display[..(maxLength - 3)] + "...";
     }
 
     private void DrawActualExecutionLines(RenderContext context)

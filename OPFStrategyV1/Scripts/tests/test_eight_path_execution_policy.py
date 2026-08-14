@@ -71,11 +71,14 @@ def test_hud_wraps_long_manual_alerts_within_chart_width():
 
 def test_manual_alert_has_a_dedicated_vertical_decision_card():
     assert "private sealed record ManualAlertCard(" in STRATEGY
-    assert "_manualAlertCard = new ManualAlertCard(" in STRATEGY
-    assert "DrawManualAlertCard(context, card);" in STRATEGY
-    assert "private void DrawManualAlertCard(RenderContext context, ManualAlertCard card)" in STRATEGY
+    assert "private readonly List<ManualAlertCard> _manualAlertCards = new();" in STRATEGY
+    assert "_manualAlertCards.Insert(0, new ManualAlertCard(" in STRATEGY
+    assert "while (_manualAlertCards.Count > 3)" in STRATEGY
+    assert "DrawManualAlertCards(context, cards);" in STRATEGY
+    assert "private void DrawManualAlertCards(RenderContext context, IReadOnlyList<ManualAlertCard> cards)" in STRATEGY
+    assert "var x = ChartArea.X + margin;" in STRATEGY
     assert 'hud.AppendLine("ManualAlert: see decision card");' in STRATEGY
-    assert "NEW CANDIDATE" in STRATEGY
+    assert "LATEST CANDIDATE" in STRATEGY
     assert "manual decision - no auto order" in STRATEGY
 
 
