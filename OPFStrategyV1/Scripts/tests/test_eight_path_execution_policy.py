@@ -77,6 +77,11 @@ def test_manual_alert_has_a_dedicated_vertical_decision_card():
     assert "DrawManualAlertCards(context, cards);" in STRATEGY
     assert "private void DrawManualAlertCards(RenderContext context, IReadOnlyList<ManualAlertCard> cards)" in STRATEGY
     assert "var x = ChartArea.X + margin;" in STRATEGY
+    assert "const int topOffset = 60;" in STRATEGY
+    assert "var y = ChartArea.Y + topOffset + index * (cardHeight + cardGap);" in STRATEGY
+    assert 'TimeZoneInfo.FindSystemTimeZoneById("China Standard Time")' in STRATEGY
+    assert "var beijingTime = ToBeijingTime(card.Time);" in STRATEGY
+    assert '{beijingTime:HH:mm} BJT' in STRATEGY
     assert 'hud.AppendLine("ManualAlert: see decision card");' in STRATEGY
     assert "LATEST CANDIDATE" in STRATEGY
     assert "manual decision - no auto order" in STRATEGY

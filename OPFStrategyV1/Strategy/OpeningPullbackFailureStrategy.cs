@@ -128,6 +128,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private static readonly TimeSpan MaxLiveMarketDataSilence = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan LiveLatencyRecoveryPeriod = TimeSpan.FromSeconds(10);
     private static readonly TimeZoneInfo EasternTimeZone = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+    private static readonly TimeZoneInfo BeijingTimeZone = TimeZoneInfo.FindSystemTimeZoneById("China Standard Time");
     private const string ReplayStopExitRole = "SESSION_FLATTEN";
     private const int RichBoundaryBackfillBars = 72;
     private const string SignificantZoneFirstTouchLongPath = "SignificantZoneFirstTouchLong";
@@ -8158,6 +8159,14 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         return TimeZoneInfo.ConvertTimeFromUtc(utc, EasternTimeZone);
     }
 
+    private static DateTime ToBeijingTime(DateTime time)
+    {
+        var utc = time.Kind == DateTimeKind.Utc
+            ? time
+            : DateTime.SpecifyKind(time, DateTimeKind.Utc);
+        return TimeZoneInfo.ConvertTimeFromUtc(utc, BeijingTimeZone);
+    }
+
     private static bool IsUsCashOpenBlackout(DateTime time, out string reason)
     {
         var date = time.Date;
@@ -10042,6 +10051,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private void DrawManualAlertCards(RenderContext context, IReadOnlyList<ManualAlertCard> cards)
     {
         const int margin = 14;
+        const int topOffset = 60;
         const int desiredWidth = 290;
         const int cardHeight = 188;
         const int cardGap = 8;
@@ -10051,11 +10061,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         for (var index = 0; index < cards.Count; index++)
         {
             var card = cards[index];
-            var y = ChartArea.Y + margin + index * (cardHeight + cardGap);
+            var y = ChartArea.Y + topOffset + index * (cardHeight + cardGap);
             var rect = new Rectangle(x, y, width, cardHeight);
             var sideColor = card.Side == TradeSide.Long ? Color.FromArgb(31, 208, 164) : Color.FromArgb(245, 80, 110);
             var sideText = card.Side == TradeSide.Long ? "LONG" : "SHORT";
             var title = index == 0 ? "LATEST CANDIDATE" : $"RECENT CANDIDATE {index + 1}";
+            var beijingTime = ToBeijingTime(card.Time);
             var titleFont = new RenderFont("Consolas", 11);
             var sideFont = new RenderFont("Consolas", 20);
             var priceFont = new RenderFont("Consolas", 14);
@@ -10063,7 +10074,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
             context.FillRectangle(Color.FromArgb(index == 0 ? 220 : 180, 17, 29, 39), rect);
             context.DrawRectangle(new RenderPen(sideColor, index == 0 ? 2 : 1), rect);
-            context.DrawString($"{title}  {card.Time:HH:mm}", titleFont, Color.Gainsboro, x + pad, y + 10);
+            context.DrawString($"{title}  {beijingTime:HH:mm} BJT", titleFont, Color.Gainsboro, x + pad, y + 10);
             context.DrawString(sideText, sideFont, sideColor, x + pad, y + 29);
             context.DrawString(AbbreviateManualAlertPath(card.Path), detailFont, Color.LightSteelBlue, x + pad, y + 55);
             DrawManualAlertPriceRow(context, "ENTRY", card.Entry, x + pad, y + 78, priceFont);
