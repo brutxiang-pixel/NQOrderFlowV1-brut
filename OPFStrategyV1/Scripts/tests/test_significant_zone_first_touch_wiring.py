@@ -17,10 +17,10 @@ def test_first_touch_is_a_grade_untested_reclaim_then_next_bar_entry():
     assert "SignificantZoneFirstTouchShortPath" in STRATEGY
 
 
-def test_first_touch_stop_uses_confirmation_candle_failure_extreme():
-    assert "var stop = zone.Side == TradeSide.Long ? candle.Low - .5m : candle.High + .5m;" in ENGINE
-    assert "zone.OuterBoundary - 1m" not in ENGINE
-    assert "zone.OuterBoundary + 1m" not in ENGINE
+def test_first_touch_stop_uses_zone_outer_boundary():
+    assert "? zone.OuterBoundary - .5m" in ENGINE
+    assert ": zone.OuterBoundary + .5m" in ENGINE
+    assert "candle.Low - .5m : candle.High + .5m" not in ENGINE
 
 
 def test_first_touch_does_not_apply_nearest_structure_rr_gate():
@@ -35,5 +35,5 @@ def test_passive_limit_execution_paths_are_removed():
 
 if __name__ == "__main__":
     test_first_touch_is_a_grade_untested_reclaim_then_next_bar_entry()
-    test_first_touch_stop_uses_confirmation_candle_failure_extreme()
+    test_first_touch_stop_uses_zone_outer_boundary()
     test_passive_limit_execution_paths_are_removed()

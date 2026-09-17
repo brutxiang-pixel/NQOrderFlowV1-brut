@@ -15,6 +15,21 @@
 		<NoWarn>$(NoWarn);MSB3277</NoWarn>
 	</PropertyGroup>
 
+	<!--
+		This project compiles the OPFStrategyV1 strategy source files directly into the same deployed
+		ATAS strategy DLL (NQOrderFlowV1.dll) instead of referencing OPFStrategyV1.dll via ProjectReference.
+		The default SDK implicit Compile glob only excludes this project's own bin/obj folders; it does NOT
+		exclude OPFStrategyV1's own bin/obj, and it does NOT exclude the standalone console test projects
+		under OPFStrategyV1/Scripts/tests (each has its own Program.cs top-level statements and references
+		OPFStrategyV1.csproj via ProjectReference). These must be excluded explicitly, otherwise the build
+		fails with CS8802 (duplicate top-level statements) and CS0579 (duplicate AssemblyInfo attributes).
+	-->
+	<ItemGroup>
+		<Compile Remove="OPFStrategyV1\bin\**\*.cs" />
+		<Compile Remove="OPFStrategyV1\obj\**\*.cs" />
+		<Compile Remove="OPFStrategyV1\Scripts\tests\**\*.cs" />
+		<Compile Remove="OPFStrategyV1\Evidence\**\*.cs" />
+	</ItemGroup>
 	<ItemGroup>
 		<Reference Include="ATAS.DataFeedsCore">
 			<HintPath>$(ATASPlatformDir)\ATAS.DataFeedsCore.dll</HintPath>

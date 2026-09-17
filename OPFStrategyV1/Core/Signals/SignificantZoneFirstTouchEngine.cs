@@ -20,7 +20,9 @@ public sealed class SignificantZoneFirstTouchEngine
         if (!confirmed)
             return new(SignificantZoneFirstTouchOutcome.TouchedRejected, $"ConfirmationFailed:body={body:0.##}|close={candle.Close:0.##}|inner={zone.InnerBoundary:0.##}");
 
-        var stop = zone.Side == TradeSide.Long ? candle.Low - .5m : candle.High + .5m;
+        var stop = zone.Side == TradeSide.Long
+            ? zone.OuterBoundary - .5m
+            : zone.OuterBoundary + .5m;
         var reclaim = Math.Abs(candle.Close - zone.InnerBoundary);
         return new(SignificantZoneFirstTouchOutcome.Confirmed, $"Confirmed:body={body:0.##}|reclaim={reclaim:0.##}", new(zone.ZoneId, zone.Side, candle.Bar, candle.Bar + 1, stop, zone.Strength.Score, reclaim));
     }

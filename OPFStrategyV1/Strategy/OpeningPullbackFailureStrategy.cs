@@ -909,6 +909,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         UpdateSweepReclaimCollection(current);
         UpdateZoneBehaviorLedger(current, zones, zoneLifecycleEvents);
         UpdateSignificantZones(current, regime, zones);
+        UpdateGexIntradayRefresh(current);
 
         if (!EnableResearchLogging)
             return;
