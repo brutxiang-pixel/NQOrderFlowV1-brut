@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\OPFStrategyV1.csproj" />
+    <Reference Include="ATAS.DataFeedsCore">
+      <HintPath>C:\Program Files (x86)\ATAS Platform\ATAS.DataFeedsCore.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,11 @@
+Side,TerminalLabel,Candidates
+Long,Ambiguous,746
+Long,Censored,629
+Long,SL,9290
+Long,TP,3821
+Long,TimeStop,4074
+Short,Ambiguous,640
+Short,Censored,716
+Short,SL,8188
+Short,TP,4504
+Short,TimeStop,2163

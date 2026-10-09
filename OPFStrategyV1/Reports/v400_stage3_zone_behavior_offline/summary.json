@@ -1,0 +1,42 @@
+{
+  "Rows": 883,
+  "CompleteRows": 214,
+  "Features": [
+    {
+      "Feature": "SignedDeltaRatio",
+      "LomoComparableMonths": 6,
+      "SameDirectionMonths": 4,
+      "MedianHighMinusLowNetResponse": 8.625,
+      "JulyHighMinusLowNetResponse": 1.25,
+      "JulyBinsAtLeast30": false,
+      "FollowUpEligible": false
+    },
+    {
+      "Feature": "ZoneVolumeShare",
+      "LomoComparableMonths": 6,
+      "SameDirectionMonths": 4,
+      "MedianHighMinusLowNetResponse": -3.0,
+      "JulyHighMinusLowNetResponse": -30.25,
+      "JulyBinsAtLeast30": false,
+      "FollowUpEligible": false
+    },
+    {
+      "Feature": "FavorableAdvancePoints",
+      "LomoComparableMonths": 5,
+      "SameDirectionMonths": 4,
+      "MedianHighMinusLowNetResponse": 25.125,
+      "JulyHighMinusLowNetResponse": 22.5,
+      "JulyBinsAtLeast30": false,
+      "FollowUpEligible": false
+    },
+    {
+      "Feature": "AdversePenetrationPoints",
+      "LomoComparableMonths": 6,
+      "SameDirectionMonths": 4,
+      "MedianHighMinusLowNetResponse": 4.125,
+      "JulyHighMinusLowNetResponse": -17.25,
+      "JulyBinsAtLeast30": false,
+      "FollowUpEligible": false
+    }
+  ]
+}

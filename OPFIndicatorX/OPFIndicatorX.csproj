@@ -1,0 +1,52 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ATASXDir>C:\Program Files\ATAS X</ATASXDir>
+    <AssemblyName>OPFIndicatorX</AssemblyName>
+    <RootNamespace>OPFIndicatorX</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="ATAS.DataFeedsCore" Version="8.0.15.645">
+      <HintPath>$(ATASXDir)\ATAS.DataFeedsCore.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ATAS.Indicators" Version="8.0.15.645">
+      <HintPath>$(ATASXDir)\ATAS.Indicators.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Rendering">
+      <HintPath>$(ATASXDir)\OFT.Rendering.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Utils.Common">
+      <HintPath>$(ATASXDir)\Utils.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Platform.Core">
+      <HintPath>$(ATASXDir)\OFT.Platform.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.DxFeed">
+      <HintPath>$(ATASXDir)\OFT.DxFeed.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DxFeed.Graal.Net">
+      <HintPath>$(ATASXDir)\DxFeed.Graal.Net.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Core">
+      <HintPath>$(ATASXDir)\OFT.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Models">
+      <HintPath>$(ATASXDir)\OFT.Models.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="CopyToATASX" AfterTargets="Build">
+    <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(APPDATA)\ATAS X\Indicators" OverwriteReadOnlyFiles="true" Condition="Exists('$(APPDATA)\ATAS X\Indicators')" />
+  </Target>
+</Project>

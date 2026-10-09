@@ -1,0 +1,5 @@
+Snapshot,Passed,ScenarioRows,DuplicateCandidateIDs,ScenarioRiskCoverageMissing,ScenarioRiskCoverageExtra,ScenarioInvalidRows,ForbiddenOutputFiles,ActualOrderFiles,EntrySend
+OPF-20260729-095722,True,233,0,0,0,0,0,0,0
+OPF-20260729-095929,True,326,0,0,0,0,0,0,0
+OPF-20260729-100156,True,342,0,0,0,0,0,0,0
+OPF-20260729-100354,True,285,0,0,0,0,0,0,0

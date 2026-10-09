@@ -1,0 +1,2 @@
+Scenario,BaselineTrades,RemovedTrades,BaselineNetDollars,RemovedNetDollars,FrozenGateNetDollars,DirectNetDelta
+FrozenGatesNoReplacement,2047,51,19904.3,-1207.61,21111.91,1207.61

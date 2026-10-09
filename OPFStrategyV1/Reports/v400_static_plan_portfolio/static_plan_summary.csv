@@ -1,0 +1,4 @@
+PortfolioView,Trades,GrossDollars,NetDollars,PF,WorstWeekNet,EvidenceType
+Strict,1148,5730.57,1597.77,1.0203,-2857.98,StaticPlanPortfolio
+LowerBound,1166,6141.09,1943.49,1.0253,-2857.98,StaticPlanPortfolio
+UpperBound,1205,8711.4,4373.4,1.0557,-2857.98,StaticPlanPortfolio

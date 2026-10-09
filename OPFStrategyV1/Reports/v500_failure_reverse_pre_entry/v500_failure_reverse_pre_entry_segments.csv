@@ -1,0 +1,7 @@
+Screen,Trades,NormalNet,GrossPF
+2026-H1:ImmediateActual,69,5711.1,2.8791
+2026-H1:PenetrationR_GE_025,46,4035.4,2.8962
+2026-H1:Depth025_Wait1Outside_NoReentry,27,4192.3,5.0794
+2026-JulyStress:ImmediateActual,4,94.6,1.3225
+2026-JulyStress:PenetrationR_GE_025,3,222.7,2.0937
+2026-JulyStress:Depth025_Wait1Outside_NoReentry,2,337.3,4.361

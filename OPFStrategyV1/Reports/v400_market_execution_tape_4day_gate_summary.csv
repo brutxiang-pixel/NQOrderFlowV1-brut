@@ -1,0 +1,5 @@
+Snapshot,Passed,TickRows,M5Rows,RichM5Rows,TickSequenceErrors,MissingTickWarmupBars,MissingTickNonWarmupBars,TickRichVolumeErrorPct,ScenarioRows,DuplicateCandidateIDs,ScenarioRiskCoverageMissing,ScenarioRiskCoverageExtra,ScenarioInvalidRows,ActualOrderFiles,EntrySend
+OPF-20260729-090912,True,1350497,276,277,0,1,0,0.008293,233,0,0,0,0,0,0
+OPF-20260729-091122,True,1862186,276,277,0,1,0,0.006099,326,0,0,0,0,0,0
+OPF-20260729-091340,True,1478707,276,277,0,1,0,0.070896,342,0,0,0,0,0,0
+OPF-20260729-091546,True,2912483,276,277,0,1,0,0.002048,285,0,0,0,0,0,0
