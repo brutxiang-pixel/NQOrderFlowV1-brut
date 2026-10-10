@@ -2974,6 +2974,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             new[] { $"SignificantZoneFirstTouch:{zone.ZoneId}", evaluation.Reason });
         _pendingSignificantZoneFirstTouches.Add(new PendingSignificantZoneFirstTouch(signal, evaluation.Entry));
         _researchLogger?.AppendInfo(_snapshot.SnapshotId, candle.Bar, candle.Time, $"SIGNIFICANT_ZONE_FIRST_TOUCH_QUEUED zone={zone.ZoneId} side={zone.Side} nextBar={evaluation.Entry.NextEntryBar} stop={evaluation.Entry.InitialStop:0.########}");
+        var queuedPath = zone.Side == TradeSide.Long ? SignificantZoneFirstTouchLongPath : SignificantZoneFirstTouchShortPath;
+        // Gate0: shadow GEX audit only — does not change queue eligibility or later order path.
+        AuditGexCandidate(signal, candle, queuedPath, "Queued");
     }
 
     private void TryActivateSignificantZoneFirstTouches(int bar)
@@ -2997,6 +3000,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
             var signal = pending.Signal with { Time = entryCandle.Time, Bar = entryCandle.Bar };
             var path = signal.Side == TradeSide.Long ? SignificantZoneFirstTouchLongPath : SignificantZoneFirstTouchShortPath;
+            // Gate0: shadow GEX audit on activate — logging only; never HardSkip from tags.
+            AuditGexCandidate(signal, entryCandle, path, "Activated");
             var risk = Math.Abs(entryCandle.Open - pending.Entry.InitialStop);
             if (risk <= 0m)
             {

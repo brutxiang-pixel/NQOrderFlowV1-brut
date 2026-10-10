@@ -4,6 +4,7 @@ using OFT.Rendering.Tools;
 using OPFStrategyV1.Core.MarketData;
 using OPFStrategyV1.Core.Signals;
 using System.Drawing;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 
@@ -14,6 +15,13 @@ public sealed partial class OpeningPullbackFailureStrategy
     private const string GexSnapshotFileName = "OPFStrategyV1_gex_snapshot.json";
     private const string GexSyncStateFileName = "OPFStrategyV1_gex_sync_state.json";
     private const string GexRefreshRequestFileName = "OPFStrategyV1_gex_refresh_request.json";
+
+    /// <summary>
+    /// Gate0 shadow-only: "near wall" distance in NQ/MNQ futures points.
+    /// Used only for SHADOW_NO_SPACE tags; never gates orders. Calibrate in Gate1.
+    /// </summary>
+    private const decimal GexNearWallPoints = 40m;
+
     private GexDailySnapshot _gexSnapshot = GexDailySnapshot.Unavailable("notLoaded");
     private decimal? _gexPreviousCheckClose;
     private DateTime? _gexLastForcedRefreshRequestUtc;
@@ -116,12 +124,184 @@ public sealed partial class OpeningPullbackFailureStrategy
         hud.AppendLine($"GEX Dist: {string.Join(" ", distances)}");
     }
 
-    private void AuditGexCandidate(CandidateSignal signal, OpfCandle candle, string path)
+    /// <summary>
+    /// Gate0 SignificantZone × GEX shadow audit. Writes CSV only; never changes eligibility,
+    /// ManualAlert fire, stops/targets, path priority, or order submission.
+    /// </summary>
+    private void AuditGexCandidate(CandidateSignal signal, OpfCandle candle, string path, string auditPhase = "Candidate")
     {
         if (_snapshot is null || _researchLogger is null)
             return;
-        _researchLogger.AppendGexCandidateAudit(_snapshot.SnapshotId, candle.Time, candle.Bar, signal.SignalId, path, signal.Side, candle.Close, _gexSnapshot);
+
+        var price = candle.Close;
+        var cw = TryGexLevelByTag(price, "GEX-CW");
+        var pw = TryGexLevelByTag(price, "GEX-PW");
+        var zg = TryGexLevelByTag(price, "GEX-ZG");
+        var vt = TryGexLevelByTag(price, "GEX-VT");
+
+        var gexRegime = zg is null
+            ? string.Empty
+            : price >= zg.Price ? "PosGamma" : "NegGamma";
+
+        var prefilterActive = IsGexPrefilterActiveForShadow(cw, pw, zg);
+        var roleFlipState = "Unknown";
+        var tags = new List<string>();
+        var sizeHint = string.Empty;
+
+        // EM fields are not in the current snapshot schema — leave empty; never invent.
+        var emUsedPct = string.Empty;
+        var emRemainingUpper = string.Empty;
+        var emRemainingLower = string.Empty;
+
+        if (!prefilterActive)
+        {
+            // F0 fail: record inactivity only; do not invent soft space/regime tags from missing/stale data.
+            tags.Add("SHADOW_PREFILTER_INACTIVE");
+        }
+        else if (IsSignificantZoneFirstTouchPath(path))
+        {
+            AppendSignificantZoneGexShadowTags(
+                signal.Side,
+                price,
+                gexRegime,
+                cw,
+                pw,
+                emUsedPct,
+                emRemainingUpper,
+                emRemainingLower,
+                roleFlipState,
+                tags,
+                ref sizeHint);
+        }
+
+        _researchLogger.AppendGexCandidateAudit(
+            _snapshot.SnapshotId,
+            candle.Time,
+            candle.Bar,
+            signal.SignalId,
+            path,
+            signal.Side,
+            price,
+            _gexSnapshot,
+            auditPhase,
+            gexRegime,
+            prefilterActive ? "true" : "false",
+            string.Join("|", tags),
+            sizeHint,
+            roleFlipState,
+            DistString(price, cw),
+            DistString(price, pw),
+            DistString(price, zg),
+            DistString(price, vt),
+            PriceString(cw),
+            PriceString(pw),
+            PriceString(zg),
+            PriceString(vt),
+            emUsedPct,
+            emRemainingUpper,
+            emRemainingLower,
+            GexNearWallPoints.ToString(CultureInfo.InvariantCulture));
     }
+
+    /// <summary>
+    /// Minimal F0 for Gate0 soft tags: Status=Ready and CW/PW/ZG present.
+    /// Missing enrich fields (proxy/coverage/convention/window) stay unknown and keep soft tags off
+    /// only when the Ready+levels check fails — we never invent those enrich values.
+    /// </summary>
+    private bool IsGexPrefilterActiveForShadow(GexLevel? cw, GexLevel? pw, GexLevel? zg) =>
+        string.Equals(_gexSnapshot.Status, "Ready", StringComparison.OrdinalIgnoreCase) &&
+        cw is not null &&
+        pw is not null &&
+        zg is not null;
+
+    private static void AppendSignificantZoneGexShadowTags(
+        TradeSide side,
+        decimal price,
+        string gexRegime,
+        GexLevel? cw,
+        GexLevel? pw,
+        string emUsedPct,
+        string emRemainingUpper,
+        string emRemainingLower,
+        string roleFlipState,
+        List<string> tags,
+        ref string sizeHint)
+    {
+        if (side == TradeSide.Long)
+        {
+            if (IsNearUpperSpaceBound(price, cw?.Price, emRemainingUpper))
+                tags.Add("SHADOW_NO_SPACE");
+
+            if (string.Equals(gexRegime, "NegGamma", StringComparison.Ordinal))
+            {
+                tags.Add("SHADOW_NEG_GAMMA_LONG_HALF");
+                sizeHint = "0.5";
+            }
+        }
+        else
+        {
+            if (IsNearLowerSpaceBound(price, pw?.Price, emRemainingLower))
+                tags.Add("SHADOW_NO_SPACE");
+
+            if (TryParseEmUsedPct(emUsedPct, out var used) && used > 70m)
+                tags.Add("SHADOW_NO_SPACE");
+
+            if (string.Equals(gexRegime, "PosGamma", StringComparison.Ordinal))
+                tags.Add("SHADOW_POS_GAMMA_SHORT_STRICT");
+        }
+
+        // Role-flip conflict only when wall state is known from feed. Current snapshot has no wall-state
+        // history → RoleFlipState stays Unknown and we never invent SHADOW_ROLE_FLIP_CONFLICT.
+        if (string.Equals(roleFlipState, "Conflict", StringComparison.OrdinalIgnoreCase))
+            tags.Add("SHADOW_ROLE_FLIP_CONFLICT");
+    }
+
+    private static bool IsNearUpperSpaceBound(decimal price, decimal? callWall, string emRemainingUpper)
+    {
+        if (callWall is decimal cw)
+        {
+            // Headroom to Call Wall (above). Already at/above CW also means no upside space.
+            if (price >= cw || cw - price <= GexNearWallPoints)
+                return true;
+        }
+
+        if (decimal.TryParse(emRemainingUpper, NumberStyles.Number, CultureInfo.InvariantCulture, out var emUpper))
+        {
+            if (price >= emUpper || emUpper - price <= GexNearWallPoints)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsNearLowerSpaceBound(decimal price, decimal? putWall, string emRemainingLower)
+    {
+        if (putWall is decimal pw)
+        {
+            if (price <= pw || price - pw <= GexNearWallPoints)
+                return true;
+        }
+
+        if (decimal.TryParse(emRemainingLower, NumberStyles.Number, CultureInfo.InvariantCulture, out var emLower))
+        {
+            if (price <= emLower || price - emLower <= GexNearWallPoints)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static bool TryParseEmUsedPct(string value, out decimal used) =>
+        decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out used);
+
+    private GexLevel? TryGexLevelByTag(decimal price, string tag) =>
+        GexReferenceLevels(price).FirstOrDefault(x => GexTag(x) == tag);
+
+    private static string DistString(decimal price, GexLevel? level) =>
+        level is null ? string.Empty : (price - level.Price).ToString(CultureInfo.InvariantCulture);
+
+    private static string PriceString(GexLevel? level) =>
+        level is null ? string.Empty : level.Price.ToString(CultureInfo.InvariantCulture);
 
     private static string GexTag(GexLevel level) =>
         level.LevelType.Equals("call_wall", StringComparison.OrdinalIgnoreCase) ? "GEX-CW" :
