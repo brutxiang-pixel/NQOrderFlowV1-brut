@@ -30,6 +30,7 @@ public sealed class ResearchLogger
     private readonly Dictionary<string, List<string>> _bufferedZoneBehaviorPriceLevelRows = new();
     private readonly Dictionary<string, List<string>> _bufferedMarketExecutionTickRows = new();
     private readonly Dictionary<string, List<string>> _bufferedMarketExecutionScenarioRows = new();
+    private readonly Dictionary<string, string> _lastWrittenGexSnapshotShaById = new(StringComparer.Ordinal);
 
     public sealed record ActualOutcome(
         bool ActualVerified,
@@ -853,6 +854,160 @@ public sealed class ResearchLogger
     {
         var path = Path.Combine(_directory, $"{snapshotId}_research.log");
         AppendText(path, $"{time:O} bar={bar} {message}{Environment.NewLine}");
+    }
+
+    /// <summary>
+    /// Gate0 / Stage B: archive the loaded GEX snapshot JSON and levels CSV.
+    /// Rewrites only when the snapshot SHA256 changes for this SnapshotId (LoadGexSnapshot runs every bar).
+    /// Never affects orders.
+    /// </summary>
+    public void AppendGexSnapshot(string snapshotId, DateTime time, GexDailySnapshot gex)
+    {
+        if (string.IsNullOrWhiteSpace(snapshotId))
+            return;
+
+        var sha = gex.Sha256 ?? string.Empty;
+        lock (_fileWriteSync)
+        {
+            if (_lastWrittenGexSnapshotShaById.TryGetValue(snapshotId, out var previous) &&
+                string.Equals(previous, sha, StringComparison.Ordinal) &&
+                !string.IsNullOrEmpty(sha))
+            {
+                return;
+            }
+            _lastWrittenGexSnapshotShaById[snapshotId] = sha;
+        }
+
+        if (!string.IsNullOrWhiteSpace(gex.RawPayload))
+        {
+            var jsonPath = Path.Combine(_directory, $"{snapshotId}_gex_snapshot.json");
+            WriteText(jsonPath, gex.RawPayload);
+        }
+
+        var levelsPath = Path.Combine(_directory, $"{snapshotId}_gex_levels.csv");
+        EnsureHeader(levelsPath, ContextHeader("Time,Status,Detail,DataDate,UpdatedAt,DataAvailableTime,Sha256,LevelCount,LevelType,Price,Label,OpenInterest,Side"));
+        var dataDate = gex.DataDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
+        var updatedAt = gex.UpdatedAt?.ToString("O") ?? string.Empty;
+        var availableAt = gex.DataAvailableTime?.ToString("O") ?? string.Empty;
+        if (gex.Levels.Count == 0)
+        {
+            AppendText(levelsPath,
+                string.Join(",",
+                    ContextValues(snapshotId),
+                    Csv(time.ToString("O")),
+                    Csv(gex.Status),
+                    Csv(gex.Detail),
+                    Csv(dataDate),
+                    Csv(updatedAt),
+                    Csv(availableAt),
+                    Csv(sha),
+                    0,
+                    Csv(string.Empty),
+                    Csv(string.Empty),
+                    Csv(string.Empty),
+                    Csv(string.Empty),
+                    Csv(string.Empty))
+                + Environment.NewLine);
+            return;
+        }
+
+        foreach (var level in gex.Levels)
+        {
+            AppendText(levelsPath,
+                string.Join(",",
+                    ContextValues(snapshotId),
+                    Csv(time.ToString("O")),
+                    Csv(gex.Status),
+                    Csv(gex.Detail),
+                    Csv(dataDate),
+                    Csv(updatedAt),
+                    Csv(availableAt),
+                    Csv(sha),
+                    gex.Levels.Count,
+                    Csv(level.LevelType),
+                    level.Price.ToString(CultureInfo.InvariantCulture),
+                    Csv(level.Label),
+                    level.OpenInterest.ToString(CultureInfo.InvariantCulture),
+                    Csv(level.Side))
+                + Environment.NewLine);
+        }
+    }
+
+    /// <summary>
+    /// Gate0 / Stage B: one row per candidate audit. ShadowTags never gate orders.
+    /// Empty numeric/string fields mean unavailable — callers must not invent levels.
+    /// </summary>
+    public void AppendGexCandidateAudit(
+        string snapshotId,
+        DateTime time,
+        int bar,
+        string signalId,
+        string researchPath,
+        TradeSide side,
+        decimal price,
+        GexDailySnapshot gex,
+        string auditPhase = "Candidate",
+        string gexRegime = "",
+        string prefilterActive = "",
+        string shadowTags = "",
+        string sizeHint = "",
+        string roleFlipState = "",
+        string distCw = "",
+        string distPw = "",
+        string distZg = "",
+        string distVt = "",
+        string cwPrice = "",
+        string pwPrice = "",
+        string zgPrice = "",
+        string vtPrice = "",
+        string emUsedPct = "",
+        string emRemainingUpper = "",
+        string emRemainingLower = "",
+        string nearWallPoints = "")
+    {
+        var path = Path.Combine(_directory, $"{snapshotId}_gex_candidate_audit.csv");
+        EnsureHeader(path, ContextHeader(
+            "Time,Bar,SignalID,ResearchPath,Side,AuditPhase,Price," +
+            "GexStatus,GexDetail,DataDate,UpdatedAt," +
+            "GexRegime,PrefilterActive,ShadowTags,SizeHint,RoleFlipState," +
+            "CwPrice,PwPrice,ZgPrice,VtPrice,DistCw,DistPw,DistZg,DistVt," +
+            "EmUsedPct,EmRemainingUpper,EmRemainingLower,NearWallPoints,LevelCount,Sha256"));
+        var dataDate = gex.DataDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty;
+        var updatedAt = gex.UpdatedAt?.ToString("O") ?? string.Empty;
+        AppendText(path,
+            string.Join(",",
+                ContextValues(snapshotId),
+                Csv(time.ToString("O")),
+                bar,
+                Csv(signalId),
+                Csv(researchPath),
+                Csv(side.ToString()),
+                Csv(auditPhase),
+                price.ToString(CultureInfo.InvariantCulture),
+                Csv(gex.Status),
+                Csv(gex.Detail),
+                Csv(dataDate),
+                Csv(updatedAt),
+                Csv(gexRegime),
+                Csv(prefilterActive),
+                Csv(shadowTags),
+                Csv(sizeHint),
+                Csv(roleFlipState),
+                Csv(cwPrice),
+                Csv(pwPrice),
+                Csv(zgPrice),
+                Csv(vtPrice),
+                Csv(distCw),
+                Csv(distPw),
+                Csv(distZg),
+                Csv(distVt),
+                Csv(emUsedPct),
+                Csv(emRemainingUpper),
+                Csv(emRemainingLower),
+                Csv(nearWallPoints),
+                gex.Levels.Count,
+                Csv(gex.Sha256 ?? string.Empty))
+            + Environment.NewLine);
     }
 
     public void AppendExecutionEvent(
