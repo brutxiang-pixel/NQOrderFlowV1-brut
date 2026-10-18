@@ -40,6 +40,6 @@
 - Release构建：0警告、0错误。
 - OptionsProxyGateTests 71项、IntradayEntryTests 74项、ValidationReplayTests 30项、LiveProtectionFailClosedTests 27项、FeishuNotificationTests 7项全部通过。审计导出合成样本测试通过（2完成、1未完成排除、1重叠、手续费点数正确）；不计为收益证据。
 - 2,845条旧冻结包重放：43条差异全部为旧Allow→OptionsGate:Stale，数据年龄91.285—295.544秒，与当前90秒新鲜度口径一致；其余2,802条一致。旧包缺Schema2独立时间和事件，不能宣称新版数据/候选全链路已通过平台验收。
-- 已备份旧DLL并部署`C:/Users/Administrator/AppData/Roaming/ATAS/Strategies/OPFStrategyV1.dll`。构建/部署SHA256一致：`572E2B34269B068681B97E4D70E77F34407519E354E36A32652721CA9541479F`。
+- 已备份旧DLL，部署位置为`C:/Users/Administrator/AppData/Roaming/ATAS/Strategies/OPFStrategyV1.dll`。初次部署后又完成远端历史合并；以合并后最终构建/部署及`Evidence/Validation/20261019-v2/deployment.json`中的一致SHA256为准。程序集包含Git提交版本信息，提交后重建Hash会变化。
 - 本地验证证据：`OPFStrategyV1/Evidence/Validation/20261019-v2/`；旧DLL备份在`Evidence/DeploymentArchives/20261019-v2-001413/`。旧日志未清理，未发送测试单，未启动/重启ATAS。运行中的进程仍须重启ATAS才能确认加载新程序集。
-- GitHub按大版本提交源码、测试和文档，并保留远端既有提交；提交结果见Git记录。
+- 大版本功能提交`6dbf973`，远端3条提交通过`46d5404`无冲突合并，保留双方历史。GitHub同步后以远端master与本地HEAD一致为验收，不强制推送。
