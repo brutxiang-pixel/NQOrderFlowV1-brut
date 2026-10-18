@@ -1,0 +1,3 @@
+{"Schema":1,"Stage":"Complete","Product":"MNQZ6","Account":"synthetic","Opportunity":{"Signal":"a","Path":"ObservationConfirm","IsLong":true,"Time":"2026-10-19T10:00:00Z","Entry":100,"Stop":90,"Risk":10,"FeePoints":0.6,"FixedPoints":15,"EarlyPoints":0,"ProtectedPoints":0,"LockedPoints":5,"Decision":"Execute"}}
+{"Schema":1,"Stage":"Complete","Product":"MNQZ6","Account":"synthetic","Opportunity":{"Signal":"b","Path":"ESResponseAlignedBreakout","IsLong":true,"Time":"2026-10-19T10:00:10Z","Entry":100.25,"Stop":90,"Risk":10.25,"FeePoints":0.6,"FixedPoints":15.375,"EarlyPoints":0,"ProtectedPoints":0,"LockedPoints":5,"Decision":"Skip","Reason":"ActiveTradeLimit"}}
+{"Schema":1,"Stage":"StoppedIncomplete","Product":"MNQZ6","Account":"synthetic","Opportunity":{"Signal":"c"}}

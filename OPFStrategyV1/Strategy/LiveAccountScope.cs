@@ -12,12 +12,12 @@ public static class LiveAccountScope
         try
         {
             var properties = portfolio.GetType().GetProperties();
-            var identity = properties
-                .Where(property => property.CanRead &&
-                    property.Name is "Id" or "ID" or "Code" or "Name" or "Number" or "AccountId" or "PortfolioId")
-                .Select(property => Convert.ToString(property.GetValue(portfolio), System.Globalization.CultureInfo.InvariantCulture))
+            var identity = new[] { "AccountID", "AccountId", "PortfolioId", "ID", "Id", "Number", "Code", "Name" }
+                .Select(name => properties.FirstOrDefault(property => property.CanRead && property.Name == name))
+                .Where(property => property is not null)
+                .Select(property => Convert.ToString(property!.GetValue(portfolio), System.Globalization.CultureInfo.InvariantCulture))
                 .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
-            return FromIdentity(identity ?? portfolio.ToString());
+            return FromIdentity(identity);
         }
         catch
         {

@@ -10,6 +10,17 @@ namespace OPFStrategyV1.Research;
 
 public sealed class ResearchLogger
 {
+    public sealed record CandidateMicroContext(
+        string SignalId, DateTime Time, int Bar, string Side, string ResearchPath, string ZoneId, string ZoneSource,
+        string ZoneGrade, decimal ZoneScore, string ZoneState, string ShadowState, int ZoneAgeBars, int TouchCount,
+        decimal ZoneDistance, string Expectation, string EventType, string EventSide, decimal RelativeVolume20,
+        decimal DeltaRatio, decimal PriceMoveAtr, decimal CloseLocation, decimal BigTradeThreshold, int BigTradeCount,
+        int BigTradePriceClusters, decimal BigTradeVolume, bool AbsorptionLong, bool AbsorptionShort, string IcebergAvailability);
+
+    public void AppendCandidateMicroContext(string snapshotId, CandidateMicroContext item)
+    {
+        AppendInfo(snapshotId, item.Bar, item.Time, $"CANDIDATE_MICRO_CONTEXT signal={item.SignalId} path={item.ResearchPath} side={item.Side} zone={item.ZoneId} expectation={item.Expectation} spike={item.EventType}:{item.EventSide} iceberg={item.IcebergAvailability}");
+    }
     private readonly string _directory;
     private readonly Dictionary<string, ConfigSnapshot> _snapshots = new();
     private readonly bool _compact;
@@ -321,6 +332,13 @@ public sealed class ResearchLogger
         _directory = Path.Combine(root, "ATAS", "StrategyLogs", strategyName);
         Directory.CreateDirectory(_directory);
         _compact = string.Equals(logMode, "Compact", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal void AppendValidationPacket(string snapshotId, string kind, object packet)
+    {
+        var json = JsonSerializer.Serialize(packet);
+        lock (_fileWriteSync)
+            File.AppendAllText(Path.Combine(_directory, $"{snapshotId}_validation_{kind}.jsonl"), json + Environment.NewLine);
     }
 
     public void WriteConfigSnapshot(ConfigSnapshot snapshot)
@@ -1058,10 +1076,13 @@ public sealed class ResearchLogger
         decimal netPnlDollars,
         decimal dailyNetPnlDollars,
         decimal rawGrossPnlDollars,
-        string pnlSource)
+        string pnlSource,
+        string accountScope = "unresolved",
+        string productCode = "",
+        bool historicalReplay = false)
     {
         var path = Path.Combine(_directory, $"{snapshotId}_live_account_pnl.csv");
-        EnsureHeader(path, ContextHeader("TradeID,EntryTime,ExitTime,Side,Classification,Quantity,EntryPrice,ExitPrice,GrossPnLDollars,CommissionDollars,NetPnLDollars,DailyNetPnLDollars,RawGrossPnLDollars,PnLSource"));
+        EnsureHeader(path, ContextHeader("TradeID,EntryTime,ExitTime,Side,Classification,Quantity,EntryPrice,ExitPrice,GrossPnLDollars,CommissionDollars,NetPnLDollars,DailyNetPnLDollars,RawGrossPnLDollars,PnLSource,AccountScope,ProductCode,HistoricalReplay"));
         AppendText(path,
             string.Join(",",
                 ContextValues(snapshotId),
@@ -1078,7 +1099,10 @@ public sealed class ResearchLogger
                 netPnlDollars,
                 dailyNetPnlDollars,
                 rawGrossPnlDollars,
-                Csv(pnlSource))
+                Csv(pnlSource),
+                Csv(accountScope),
+                Csv(productCode),
+                historicalReplay)
             + Environment.NewLine);
     }
 

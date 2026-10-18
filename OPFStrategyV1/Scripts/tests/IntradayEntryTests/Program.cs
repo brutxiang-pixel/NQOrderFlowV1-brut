@@ -1,0 +1,105 @@
+using OPFStrategyV1.Strategy;
+using OPFStrategyV1.Core.MarketData;
+
+var now = new DateTime(2026, 10, 14, 10, 0, 0, DateTimeKind.Utc);
+void Check(bool value, string name) { if (!value) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); }
+var alignment = new CrossMarketAlignment();
+Check(alignment.Window(300).Reference is null, "no synthetic cross-market warmup");
+for (var second = 0; second <= 300; second++) alignment.Observe(now.AddSeconds(second), 5000m + second, 20000m - second);
+Check(alignment.Window(300).EsMove == 300m && alignment.Window(300).NqMove == -300m && alignment.Window(300).SameDirection == false, "ES NQ five-minute comparison uses same observation window");
+Check(alignment.Window(60).EsRangeFraction == 1m && alignment.Window(60).NqRangeFraction == -1m, "cross-market displacement normalized by own range");
+foreach (var reason in new[] { "OptionsGate:Stale", "OptionsGate:OptionQuotesStale", "ActiveTradeLimit:one,two", "LiveLatencyRecovering:stableMs=1", "SecondaryPrimaryNotActuallyProtectedAtBE" })
+    Check(CandidateAttemptPolicy.CanRetry("Skip", reason), "temporary blocker remains eligible: " + reason);
+foreach (var outcome in new[] { ("Execute", "EntrySend"), ("Skip", "ManualInterventionDetected"), ("ManualAlert", "ManualAlertOnly"), ("Skip", "PathDirectionDisabled"), ("Skip", "OrphanPosition:pos=1") })
+    Check(!CandidateAttemptPolicy.CanRetry(outcome.Item1, outcome.Item2), "terminal outcome cannot auto resend: " + outcome.Item2);
+var level = new LevelReactionEvent(100m, 99m, now);
+Check(LevelReactionEvent.TryCreate(100m, 98m, 99m, 100.5m, now) is null, "model level movement cannot manufacture a touch");
+Check(LevelReactionEvent.TryCreate(100m, 100m, 99m, 100.5m, now) is not null, "price crossing stable level creates event");
+Check(LevelReactionEvent.TryCreate(100m, 100m, 100m, 100m, now) is null, "stationary price at newly moved model level cannot manufacture touch next tick");
+level.Observe(100.5m, now);
+Check(level.Response(true, 100.5m, .25m) is null, "single ES observation cannot confirm level response");
+level.Observe(100.5m, now.AddSeconds(1)); level.Observe(100.5m, now.AddSeconds(2));
+Check(level.Response(true, 100.5m, .25m) == "CrossHold", "cross hold requires observed persistence");
+level.Observe(99.5m, now.AddSeconds(3)); level.Observe(99.5m, now.AddSeconds(4)); level.Observe(99.5m, now.AddSeconds(5));
+Check(level.Response(false, 99.5m, .25m) == "Reject", "frozen approach distinguishes rejection from crossing");
+Check(level.Response(true, 100.25m, .25m) is null && !level.Active(now.AddMinutes(6)), "level response boundary and expiry");
+var shadow = new PathOpportunity("s", "OC", true, now, 1, 100m, 90m, 10m, 1.5m, .75m);
+Check(!shadow.Observe(now, 1, 111m), "policy observation cannot retrospectively stop on activation tick");
+shadow.Observe(now.AddSeconds(1), 1, 100m);
+Check(shadow.ProtectedPoints == 0m && shadow.FixedPoints is null, "fixed target continues after protected policy stops");
+Check(shadow.Observe(now.AddSeconds(2), 1, 115m) && shadow.FixedPoints == 15m, "shadow follows prices beyond alternative exit");
+var peer = new PathOpportunity("p", "ES", true, now.AddSeconds(10), 1, 100.25m, 90m, 10.25m, 1.5m, .75m);
+Check(shadow.Overlaps(peer, .25m) && !shadow.Overlaps(new PathOpportunity("x", "ES", false, now, 1, 100m, 110m, 10m, 1.5m, .75m), .25m), "overlap requires direction, event time and structure");
+Check(!ExecutionClock.TimeStopDue(1, 0) && !ExecutionClock.TimeStopDue(100, 0), "zero time stop is disabled even after bars elapsed");
+Check(!ExecutionClock.TimeStopDue(5, 6) && ExecutionClock.TimeStopDue(6, 6), "positive time stop fires at its existing boundary");
+Check(ExecutionClock.ExitTimestamp(now, now.AddSeconds(20), now.Date, now.AddSeconds(21), false) == now.AddSeconds(20), "live archive uses actual fill timestamp instead of bar opening");
+Check(ExecutionClock.ExitTimestamp(now, now.AddMinutes(-3), now.Date, now.AddSeconds(21), false) == now.AddSeconds(21), "invalid stale live fill uses callback reception");
+Check(ExecutionClock.ExitTimestamp(now, now.AddDays(1), now.AddSeconds(30), now.AddDays(1), true) == now.AddSeconds(30), "Replay never imports wall clock fill timestamp");
+Check(ExecutionClock.ExitTimestamp(now, null, now.AddSeconds(30), now.AddDays(1), true) == now.AddSeconds(30), "Replay reconciliation uses replay market clock");
+var bars = Enumerable.Range(0, 121).Select(i => new OpfCandle(i, now.Date.AddDays(i - 121), 100, 110, 90, i + 100, 1000, 100)).ToArray();
+var complete = IntradayEntryPolicy.ClosedAsOf(bars.Select(c => (c, c.Time.AddDays(1))), now.Date.AddDays(-1));
+Check(complete.Length == 120, "daily as-of excludes future/incomplete session");
+Check(IntradayEntryPolicy.Sma(complete, 120) == 159.5m, "120 complete daily sessions SMA");
+Check(IntradayEntryPolicy.Sma(complete.Take(119).ToArray(), 120) is null, "119 sessions cannot pretend SMA120 exists");
+Check(IntradayEntryPolicy.Sma(complete, 10) == 214.5m, "SMA10 uses trailing completed sessions");
+string? React(bool isLong, decimal price, decimal stop, DateTime time, DateTime? held, decimal delta = 30) =>
+    IntradayEntryPolicy.Reaction(isLong, price, 100, stop, .25m, time, now.AddSeconds(30), held, delta, 100, 2m);
+Check(React(true, 100.5m, 98, now, now.AddSeconds(-3)) is null, "long real-time break hold and tape confirmation");
+Check(React(false, 99.5m, 102, now, now.AddSeconds(-3), -30) is null, "short symmetric confirmation");
+Check(React(true, 100.5m, 98, now, now.AddSeconds(-1)) == "WaitingHold", "single tick is not sustained reaction");
+Check(React(true, 103, 98, now, now.AddSeconds(-3)) == "ChaseTooFar", "late chase rejected");
+Check(React(true, 97.5m, 98, now, now.AddSeconds(-3)) == "Invalidated", "stop invalidation takes precedence");
+Check(React(true, 100.5m, 98, now.AddSeconds(31), now) == "Expired", "expiry invalidates candidate");
+Check(React(true, 100.5m, 98, now, now.AddSeconds(-3), -20) == "WaitingFlow", "opposite tape cannot confirm long");
+Check(IntradayEntryPolicy.IcebergArbitration(0, false, true, true, true, true, 30) == "Enter", "iceberg flat clean admission");
+Check(IntradayEntryPolicy.IcebergArbitration(1, false, true, true, false, true, 300) == "Enter", "independent same-side slot at risk boundary");
+Check(IntradayEntryPolicy.IcebergArbitration(1, false, true, true, false, true, 301) == "RiskCap", "combined risk above cap blocked");
+Check(IntradayEntryPolicy.IcebergArbitration(1, false, false, true, false, true, 30) == "FlattenThenWait", "opposite iceberg waits for confirmed flatten");
+Check(IntradayEntryPolicy.IcebergArbitration(0, false, true, true, true, false, 30) == "WaitCleanup", "flat with old protection cannot re-enter");
+Check(IntradayEntryPolicy.IcebergArbitration(1, false, true, false, false, true, 30) == "WaitProtection", "naked primary cannot add slot");
+Check(IntradayEntryPolicy.IcebergArbitration(1, true, true, true, false, true, 30) == "Occupied", "only one iceberg slot");
+Check(IntradayEntryPolicy.IcebergArbitration(2, true, true, true, false, true, 30) == "Occupied", "two-contract maximum");
+var item = new NativeIcebergEvent("NQZ6", 12, now, 100, true, 40, 60, false, now.AddSeconds(1));
+var early = new DynamicExitComparison();
+early.Observe(true, 108m, 100m, 10m, 90m, 115m, 100.75m, true);
+Check(early.ExitPoints is null, "shadow stop cannot fill retroactively");
+early.Observe(true, 100.5m, 100m, 10m, 90m, 115m, 100.75m, true);
+Check(early.ExitPoints == .5m, "shadow stop uses next observed price including gaps");
+var locked = new DynamicExitComparison();
+locked.Observe(false, 87m, 100m, 10m, 110m, 85m, 99.25m, false);
+locked.Observe(false, 96m, 100m, 10m, 110m, 85m, 99.25m, false);
+Check(locked.ExitPoints == 4m, "short shadow profit lock follows observation order");
+Check(ExecutionIdentity.Oco("instance", "NQZ6", "same") != ExecutionIdentity.Oco("instance", "MNQZ6", "same"), "cross-product OCO isolation");
+Check(ExecutionIdentity.Oco("one", "NQZ6", "same") != ExecutionIdentity.Oco("two", "NQZ6", "same"), "cross-instance OCO isolation");
+var breakoutEvent = new EsBreakoutEvent(now, false, 90m, 120m, 100m);
+Check(breakoutEvent.Active(now.AddMinutes(6), 95m), "event persists across five minute boundary");
+Check(!breakoutEvent.Active(now.AddMinutes(16), 95m) && !breakoutEvent.Active(now, 121m), "event expires or invalidates");
+Check(breakoutEvent.NeedsRetest(90m) && !breakoutEvent.RetestReady(90m, .25m), "wide stop must wait for retest");
+Check(breakoutEvent.RetestReady(99m, .25m), "short retest reduces structural risk without tightening stop");
+var longEvent = new EsBreakoutEvent(now, true, 110m, 80m, 100m);
+Check(longEvent.RetestReady(101m, .25m) && !longEvent.RetestReady(110m, .25m), "long retest symmetric");
+Check(IntradayEntryPolicy.BreakoutChase(false, 29880.5m, 29908m, 29891m, 17.25m) == "CrossMarketChaseTooFar", "paired NQ late short rejected");
+Check(IntradayEntryPolicy.BreakoutChase(true, 110.5m, 83m, 100m, 17.25m) == "CrossMarketChaseTooFar", "long late chase symmetric");
+Check(IntradayEntryPolicy.BreakoutChase(false, 100m, 125m, 100m, 17.25m) == "CrossMarketRiskExpanded", "risk expansion without price chase rejected");
+Check(IntradayEntryPolicy.BreakoutChase(false, 99m, 117m, 100m, 17.25m) is null, "near-anchor entry remains eligible");
+Check(IntradayEntryPolicy.BreakoutChase(false, 100m, 117m, 100m, 17.25m) is null, "retest near original anchor remains eligible");
+Check(!NativeIcebergArchive.AvailableAsOf(item, now), "replay excludes event not captured yet");
+Check(NativeIcebergArchive.AvailableAsOf(item, now.AddSeconds(1)), "replay exposes native event as of capture");
+Check(!NativeIcebergArchive.AvailableAsOf(item, now.AddSeconds(31)), "old native event cannot trigger stale entry");
+var directory = Path.Combine(Path.GetTempPath(), "opf-iceberg-test-" + Guid.NewGuid().ToString("N"));
+try
+{
+    NativeIcebergArchive.Append(directory, item);
+    NativeIcebergArchive.Append(directory, item with { Deleted = true, CapturedAtUtc = now.AddSeconds(3) });
+    var restored = NativeIcebergArchive.Read(directory, now);
+    Check(restored.Length == 2 && restored[1].Deleted, "native event update and exhaustion preserved on round trip");
+}
+finally { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+var row = Enumerable.Repeat("", 23).ToArray();
+row[20] = "account_A"; row[21] = "MNQZ6"; row[22] = "False";
+Check(AccountPnlScope.Matches(row, "account_A", "MNQZ6", false), "same account contract and mode restores PnL");
+Check(!AccountPnlScope.Matches(row, "account_B", "MNQZ6", false), "other account PnL excluded");
+Check(!AccountPnlScope.Matches(row, "account_A", "NQZ6", false), "NQ cannot import MNQ PnL");
+Check(!AccountPnlScope.Matches(row, "account_A", "MNQZ6", true), "Replay cannot import live PnL");
+Check(!AccountPnlScope.Matches(row.Take(20).ToArray(), "account_A", "MNQZ6", false), "legacy unscoped rows not silently summed");
+Check(!AccountPnlScope.Matches(row, "unresolved", "MNQZ6", false), "unknown account not treated as shared scope");

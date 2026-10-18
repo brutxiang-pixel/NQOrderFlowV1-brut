@@ -29,6 +29,8 @@
 		<Compile Remove="OPFStrategyV1\obj\**\*.cs" />
 		<Compile Remove="OPFStrategyV1\Scripts\tests\**\*.cs" />
 		<Compile Remove="OPFStrategyV1\Evidence\**\*.cs" />
+		<Compile Remove="_decomp\**\*.cs" />
+		<Compile Remove="OPFIndicatorX\**\*.cs" />
 	</ItemGroup>
 	<ItemGroup>
 		<Reference Include="ATAS.DataFeedsCore">

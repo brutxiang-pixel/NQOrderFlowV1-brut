@@ -40,6 +40,11 @@ public sealed record ActualExecutionSettings(
     string RunProfileId,
     string RunMode)
 {
+    public bool FeishuNotificationEnabled { get; init; }
+    public string FeishuWebhookUrl { get; init; } = string.Empty;
+    public decimal NqDailyLossLimitDollars { get; init; } = 600m;
+    public decimal NqWeeklyLongLossLimitDollars { get; init; } = 2000m;
+
     public static ActualExecutionSettings Default()
     {
         return new ActualExecutionSettings(
@@ -47,7 +52,7 @@ public sealed record ActualExecutionSettings(
             EnableActualOrders: false,
             ManualAlertEnabled: true,
             ExecutionMode: "ManualAlert",
-            ActualExecutionPaths: "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated_WideStop1_5R|FailureReverse_RetestFailed|SignificantZonePassiveLimitLong|SignificantZonePassiveLimitShort",
+            ActualExecutionPaths: "ObservationConfirm|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated_WideStop1_5R|FailureReverse_RetestFailed|ESResponseAlignedBreakout|ESWallRejectionReversal|ESExpectedMoveExpansion|ESGammaConcentrationResponse|NativeIcebergReaction",
             ActualAllowResearchPaths: false,
             ActualOrderQuantity: 1m,
             ActualTargetR: 1.5m,
@@ -133,7 +138,7 @@ public sealed record ActualExecutionSettings(
         var fallback = Default();
         return settings with
         {
-            ActualExecutionPaths = string.IsNullOrWhiteSpace(settings.ActualExecutionPaths) ? fallback.ActualExecutionPaths : settings.ActualExecutionPaths,
+            ActualExecutionPaths = MergeExecutionPaths(settings.ActualExecutionPaths, fallback.ActualExecutionPaths),
             ActualOrderQuantity = settings.ActualOrderQuantity <= 0m ? fallback.ActualOrderQuantity : settings.ActualOrderQuantity,
             ActualTargetR = settings.ActualTargetR <= 0m ? fallback.ActualTargetR : settings.ActualTargetR,
             ActualMaxTradesPerDay = settings.ActualMaxTradesPerDay <= 0 ? fallback.ActualMaxTradesPerDay : settings.ActualMaxTradesPerDay,
@@ -172,5 +177,16 @@ public sealed record ActualExecutionSettings(
         if (string.Equals(executionMode, "ManualAlert", StringComparison.OrdinalIgnoreCase))
             return "ManualAlert";
         return enableActualOrders && !manualAlertEnabled ? "Auto" : "ManualAlert";
+    }
+
+    private static string MergeExecutionPaths(string configured, string fallback)
+    {
+        var allowed = fallback.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var paths = (string.IsNullOrWhiteSpace(configured) ? fallback : configured).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(allowed.Contains)
+            .Concat(allowed)
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+        return string.Join('|', paths);
     }
 }

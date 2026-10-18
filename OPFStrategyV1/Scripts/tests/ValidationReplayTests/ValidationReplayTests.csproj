@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../Strategy/OptionsProxyExpiry.cs" Link="OptionsProxyExpiry.cs" />
+    <Compile Include="../../../Strategy/ValidationPacket.cs" Link="ValidationPacket.cs" />
+    <Compile Include="../../../Strategy/OptionsProxyEntryGate.cs" Link="OptionsProxyEntryGate.cs" />
+    <Compile Include="../../../Strategy/OptionsProxySnapshotStore.cs" Link="OptionsProxySnapshotStore.cs" />
+    <Compile Include="../../../Strategy/IntradayEntryPolicy.cs" Link="IntradayEntryPolicy.cs" />
+    <Compile Include="../../../Strategy/LiveAccountScope.cs" Link="LiveAccountScope.cs" />
+    <Compile Include="../../../Strategy/LegacyPnlIdentity.cs" Link="LegacyPnlIdentity.cs" />
+    <Compile Include="../../../Core/MarketData/OpfCandle.cs" Link="OpfCandle.cs" />
+  </ItemGroup>
+</Project>

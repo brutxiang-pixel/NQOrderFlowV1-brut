@@ -95,6 +95,7 @@ Console.WriteLine($"PASS LiveBracketConfirmationGate cases={bracketCases.Length}
 
 var feishuMessage = FeishuTradeNotification.FormatConfirmedEntry(
     "20260817-0250-Long-886",
+    "NQ",
     "Long",
     30224.75m,
     30218.50m,
@@ -110,6 +111,7 @@ Console.WriteLine("PASS FeishuTradeNotification formatting");
 
 var feishuExitMessage = FeishuTradeNotification.FormatCompletedExit(
     "20260817-0650-Long-934",
+    "NQ",
     "Long",
     30316.50m,
     30326.50m,
@@ -254,8 +256,8 @@ Console.WriteLine("PASS LiveAccountScope normalization");
 var scopedSnapshotA = ConfigSnapshot.Create(ProfileCatalog.Select("MNQ_0.1", "MNQ_1Contract_Target150_200"), "config", "loaded", ActualExecutionSettings.Default(), "account_A");
 var scopedSnapshotB = ConfigSnapshot.Create(ProfileCatalog.Select("MNQ_0.1", "MNQ_1Contract_Target150_200"), "config", "loaded", ActualExecutionSettings.Default(), "account_B");
 if (scopedSnapshotA.SnapshotId == scopedSnapshotB.SnapshotId ||
-    !scopedSnapshotA.SnapshotId.EndsWith("-account_A", StringComparison.Ordinal) ||
-    !scopedSnapshotB.SnapshotId.EndsWith("-account_B", StringComparison.Ordinal))
+    scopedSnapshotA.AccountScope != "account_A" ||
+    scopedSnapshotB.AccountScope != "account_B")
 {
     throw new InvalidOperationException($"Assertion failed [account-scoped-snapshots]: first={scopedSnapshotA.SnapshotId} second={scopedSnapshotB.SnapshotId}");
 }

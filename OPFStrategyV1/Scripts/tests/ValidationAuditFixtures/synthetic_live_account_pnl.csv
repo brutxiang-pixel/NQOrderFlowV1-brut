@@ -1,0 +1,5 @@
+SnapshotID,TradeID,Classification,Quantity,NetPnLDollars,GrossPnLDollars,CommissionDollars,AccountScope,IsReplay
+synthetic,t1,Normal,1,9,10,1,SYNTHETIC,true
+synthetic,t2,Normal,1,1000,1001,1,SYNTHETIC,true
+synthetic,t3,Normal,1,1000,1001,1,SYNTHETIC,true
+synthetic,t4,Normal,2,20,21,1,SYNTHETIC,true

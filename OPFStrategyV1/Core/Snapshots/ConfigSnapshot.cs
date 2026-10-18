@@ -23,15 +23,17 @@ public sealed record ConfigSnapshot(
     string ActualExecutionConfigStatus,
     ActualExecutionSettings ActualExecutionSettings)
 {
+    public string AccountScope { get; init; } = "unresolved";
     public static ConfigSnapshot Create(
         ProfileSelection profileSelection,
         string actualExecutionConfigPath,
         string actualExecutionConfigStatus,
-        ActualExecutionSettings actualExecutionSettings)
+        ActualExecutionSettings actualExecutionSettings,
+        string accountScope = "unresolved")
     {
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss");
         return new ConfigSnapshot(
-            SnapshotId: $"OPF-{timestamp}",
+            SnapshotId: $"OPF-{timestamp}-{Guid.NewGuid():N}",
             CreatedAt: DateTime.UtcNow,
             StrategyVersion: StrategyVersions.StrategyVersion,
             ResearchSchemaVersion: StrategyVersions.ResearchSchemaVersion,
@@ -47,6 +49,7 @@ public sealed record ConfigSnapshot(
             ExecutionProfile: profileSelection.ExecutionProfile,
             ActualExecutionConfigPath: actualExecutionConfigPath,
             ActualExecutionConfigStatus: actualExecutionConfigStatus,
-            ActualExecutionSettings: actualExecutionSettings);
+            ActualExecutionSettings: actualExecutionSettings with { FeishuWebhookUrl = string.IsNullOrEmpty(actualExecutionSettings.FeishuWebhookUrl) ? string.Empty : "REDACTED" })
+        { AccountScope = accountScope };
     }
 }

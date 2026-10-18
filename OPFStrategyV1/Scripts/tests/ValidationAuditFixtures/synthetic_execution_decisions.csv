@@ -1,0 +1,6 @@
+SnapshotID,StrategyVersion,InstrumentProfileName,SignalID,Time,Decision,Reason,Side,ResearchPath
+synthetic,test,MNQ_0.1,s1,2026-10-14T01:00:00Z,Skip,Waiting,Long,ObservationConfirm
+synthetic,test,MNQ_0.1,s1,2026-10-14T01:00:00Z,Skip,Waiting,Long,ObservationConfirm
+synthetic,test,MNQ_0.1,s1,2026-10-14T01:00:01Z,Execute,Allow,Long,ObservationConfirm
+synthetic,test,MNQ_0.1,s2,2026-10-14T01:00:02Z,Execute,Allow,Long,StartupTestOrder
+synthetic,test,MNQ_0.1,s3,2026-10-14T01:00:03Z,Execute,Allow,Long,NativeIcebergReaction

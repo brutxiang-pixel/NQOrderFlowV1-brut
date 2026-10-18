@@ -15,9 +15,14 @@
 
   <ItemGroup>
     <Compile Remove="Scripts\tests\**\*.cs" />
+    <None Remove="Scripts\tests\**\bin\**;Scripts\tests\**\obj\**" />
   </ItemGroup>
 
   <ItemGroup>
+    <Reference Include="OFT.Platform.Core">
+      <HintPath>$(ATASPlatformDir)\OFT.Platform.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="ATAS.DataFeedsCore">
       <HintPath>$(ATASPlatformDir)\ATAS.DataFeedsCore.dll</HintPath>
       <Private>false</Private>
@@ -40,10 +45,10 @@
     </Reference>
   </ItemGroup>
 
-  <Target Name="CopyToATAS" AfterTargets="Build">
+
+  <Target Name="CopyToATAS" AfterTargets="Build" Condition="'$(DeployToATAS)' == 'true'">
     <Copy SourceFiles="$(TargetPath)"
           DestinationFolder="$(APPDATA)\ATAS\Strategies"
           OverwriteReadOnlyFiles="true" />
   </Target>
-
 </Project>

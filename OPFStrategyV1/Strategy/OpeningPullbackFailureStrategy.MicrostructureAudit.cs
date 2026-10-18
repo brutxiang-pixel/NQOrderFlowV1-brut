@@ -33,6 +33,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         RecordFootprintTrade(trade);
         RecordZoneBehaviorTrade(trade);
         RecordMarketExecutionTapeTrade(trade);
+        RecordEntryTrade(trade);
     }
 
     protected override void OnNewTrades(IEnumerable<MarketDataArg> trades)

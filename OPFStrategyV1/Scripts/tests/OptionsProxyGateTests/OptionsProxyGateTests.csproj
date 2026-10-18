@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup><Compile Include="../../../Strategy/OptionsProxyEntryGate.cs" Link="OptionsProxyEntryGate.cs" /><Compile Include="../../../Strategy/OptionsProxyExpiry.cs" Link="OptionsProxyExpiry.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../Strategy/OptionsProxySnapshotStore.cs" Link="OptionsProxySnapshotStore.cs" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../../Core/MarketData/OpfCandle.cs" Link="OpfCandle.cs" />
+    <Compile Include="../../../Core/Scoring/*.cs" Link="Scoring/%(Filename).cs" />
+    <Compile Include="../../../Regime/*.cs" Link="Regime/%(Filename).cs" />
+    <Compile Include="../../../Strategy/ExecutionClock.cs" Link="ExecutionClock.cs" />
+    <Compile Include="../../../Strategy/StructureRiskPolicy.cs" Link="StructureRiskPolicy.cs" />
+    <Compile Include="../../../Core/Profiles/*.cs" Link="Profiles/%(Filename).cs" />
+    <Compile Include="../../../Core/Versions/*.cs" Link="Versions/%(Filename).cs" />
+    <Compile Include="../../../Core/Configuration/ActualExecutionSettings.cs" Link="ActualExecutionSettings.cs" />
+    <Compile Include="../../../Core/Snapshots/ConfigSnapshot.cs" Link="ConfigSnapshot.cs" />
+  </ItemGroup>
+</Project>

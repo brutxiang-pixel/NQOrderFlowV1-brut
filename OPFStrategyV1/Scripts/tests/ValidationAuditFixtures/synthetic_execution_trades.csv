@@ -1,0 +1,7 @@
+SnapshotID,StrategyVersion,InstrumentProfileName,TradeID,EntryTime,ResearchPath,Side,Quantity,ActualMFE_R,PointsR,IsAbnormalExecution
+synthetic,test,MNQ_0.1,t1,2026-10-14T01:00:00Z,ObservationConfirm,Long,1,1.5,1,False
+synthetic,test,MNQ_0.1,t1,2026-10-14T01:00:00Z,ObservationConfirm,Long,1,1.5,1,False
+synthetic,test,MNQ_0.1,t2,2026-10-14T01:00:00Z,StartupTestOrder,Long,1,1,1,False
+synthetic,test,MNQ_0.1,t3,2026-10-14T01:00:00Z,NativeIcebergReaction,Long,1,1,1,False
+synthetic,test,MNQ_0.1,t4,2026-10-14T01:00:00Z,ObservationConfirm,Long,1,1,1,False
+synthetic,test,MNQ_0.1,t5,2026-10-14T01:00:00Z,ObservationConfirm,Long,1,1,1,False

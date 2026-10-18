@@ -138,7 +138,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             bigTrades.Sum(x => x.Volume),
             HasAbsorptionAtLevel(TradeSide.Long, candle),
             HasAbsorptionAtLevel(TradeSide.Short, candle),
-            "Unavailable:TradeTapeOnly",
+            _nativeMboProvider is null ? "Unavailable:TradeTapeOnly" : $"NativeMBO:{FormatMboStatus(_nativeMboProvider)}",
             zone,
             shadow,
             expectation);
@@ -180,9 +180,10 @@ public sealed partial class OpeningPullbackFailureStrategy
     {
         try
         {
-            using var content = new StringContent(FeishuTradeNotification.CreatePayload(text), Encoding.UTF8, "application/json");
-            using var response = await FeishuHttpClient.PostAsync(webhook, content).ConfigureAwait(false);
-            _researchLogger?.AppendInfo(_snapshot?.SnapshotId ?? "-", candle.Bar, candle.Time, $"FEISHU_LIQUIDITY_SPIKE_RESULT status={(int)response.StatusCode}");
+            var result = await FeishuNotificationSender.SendAsync(FeishuHttpClient, webhook, text,
+                (attempt, observed) => _researchLogger?.AppendInfo(_snapshot?.SnapshotId ?? "-", candle.Bar, candle.Time,
+                    $"FEISHU_LIQUIDITY_SPIKE_RESULT attempt={attempt} status={observed.HttpStatus} businessCode={observed.BusinessCode} success={observed.Success}")).ConfigureAwait(false);
+            if (!result.Success) _researchLogger?.AppendInfo(_snapshot?.SnapshotId ?? "-", candle.Bar, candle.Time, "FEISHU_LIQUIDITY_SPIKE_DELIVERY_FAILED");
         }
         catch (Exception ex)
         {
