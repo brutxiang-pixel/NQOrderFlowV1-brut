@@ -2,6 +2,10 @@ namespace OPFStrategyV1.Strategy;
 
 public static class OptionsProxyEntryGate
 {
+    // Reserve five seconds for publication and consumer polling; entry freshness remains 90s.
+    internal static bool CanPublishQuote(DateTime received, DateTime now) =>
+        received <= now && now - received <= TimeSpan.FromSeconds(85);
+
     internal static string? Evaluate(EsOptionsProxySnapshot context, DateTime decision,
         string path, bool isLong, decimal open, decimal high, decimal low, decimal close, decimal risk)
     {
@@ -51,7 +55,8 @@ public static class OptionsProxyEntryGate
                 return "OptionsGate:ESResponseReferenceInvalid";
             if (isLong ? fastMove <= -responseThreshold : fastMove >= responseThreshold)
                 return "OptionsGate:ESFastResponseOpposesEntry";
-            if (alignedBody <= 0m || closeFraction < 0.65m)
+            var minCloseFraction = path == "ESResponseAlignedBreakout" && isLong ? 0.75m : 0.65m;
+            if (alignedBody <= 0m || closeFraction < minCloseFraction)
                 return "OptionsGate:NqConfirmationWeak";
         }
         if (path == "ESResponseAlignedBreakout")

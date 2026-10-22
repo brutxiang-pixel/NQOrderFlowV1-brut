@@ -256,7 +256,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         var rejectedIv = 0;
         foreach (var option in options)
         {
-            if (!_esQuoteReceived.TryGetValue(ProxyOptionKey(option), out var quoteReceived) || DateTime.UtcNow - quoteReceived > TimeSpan.FromSeconds(90))
+            if (!_esQuoteReceived.TryGetValue(ProxyOptionKey(option), out var quoteReceived) || !OptionsProxyEntryGate.CanPublishQuote(quoteReceived, DateTime.UtcNow))
             { rejectedQuote++; continue; }
             var quote = _esOptionsProxySubscriptions.GetValueOrDefault(ProxyOptionKey(option))?.Summary;
             var bid = quote?.BestBidPrice ?? option.BestBidPrice;

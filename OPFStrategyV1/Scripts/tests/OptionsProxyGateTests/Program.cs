@@ -1,5 +1,10 @@
 using OPFStrategyV1.Strategy;
 var now = new DateTime(2026, 10, 12, 14, 0, 0, DateTimeKind.Utc);
+if (!OptionsProxyEntryGate.CanPublishQuote(now.AddSeconds(-85), now) ||
+    OptionsProxyEntryGate.CanPublishQuote(now.AddSeconds(-85).AddTicks(-1), now) ||
+    OptionsProxyEntryGate.CanPublishQuote(now.AddTicks(1), now))
+    throw new Exception("Quote publication reserve boundary failed.");
+Console.WriteLine("PASS quote publication reserve boundary and future timestamp");
 foreach (var stop in new[] { 14m, 15.75m, 24.25m, 24.75m, 50m })
     if (StructureRiskPolicy.Reject(stop, 20m, 1m) is not null || StructureRiskPolicy.Reject(stop, 2m, 1m) is not null)
         throw new Exception("Approved structural risk must pass for NQ and MNQ.");
@@ -47,6 +52,8 @@ Check(Gate(Context() with { CallQuoteCoverage = .49m }, path: "ESWallRejectionRe
 Check(Gate(Context() with { CallQuoteCoverage = .13m }, path: "ObservationConfirm") is null, "OC uses local quality without global wall coverage");
 Check(Gate(Context(), path: "ObservationConfirm") is null, "observation confirmation preserved");
 Check(Gate(Context(), path: "ESResponseAlignedBreakout") is null, "ES response path allowed");
+Check(OptionsProxyEntryGate.Evaluate(Context(), now, "ESResponseAlignedBreakout", true, 100m, 110m, 99m, 106.5m, 10m) == "OptionsGate:NqConfirmationWeak", "breakout long requires a 0.75 directional close");
+Check(OptionsProxyEntryGate.Evaluate(Context(es: 4998m, prior: 5000m), now, "ESResponseAlignedBreakout", false, 110m, 110m, 99m, 102.5m, 10m) is null, "breakout short retains the existing 0.65 directional close threshold");
 Check(Gate(Context(es: 4998m, prior: 5000m) with { UnderlyingPrice60sAgo = 4998m }, path: "ESWallRejectionReversal", isLong: true) == "OptionsGate:ESWallNotReached", "wall rejection requires wall proximity");
 Check(Gate(Context(es: 5020m, prior: 5018m), path: "ESExpectedMoveExpansion") is null, "expected move expansion allowed");
 Check(Gate(Context(es: 5070m, prior: 5068m), path: "ESExpectedMoveExpansion") == "OptionsGate:ExpectedMoveOverextended", "final gate agrees with generator 125 percent upper bound");

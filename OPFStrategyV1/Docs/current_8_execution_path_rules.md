@@ -1,6 +1,30 @@
 # 当前 8 条实际下单路径规则
 
-更新时间：2026-10-19（北京时间），OPF_INTRADAY_2.0
+更新时间：2026-10-22（北京时间），OPF_INTRADAY_2.8
+
+## 2.8 自动止盈与锁盈保护
+
+本版本保留每笔订单原生 SL/TP 和 OCO 结构，不做分批平仓；在 1 手配置下，自动止盈仍由原生 TP 完成，新增阶段二只移动 SL 锁定部分浮盈。阶段二必须先收到阶段一 `PROTECT_*_APPLIED` 确认，且只允许朝降低风险方向改单；改单失败记录 `PROFIT_LOCK_MODIFY_FAILED_V210`，不把订单标记为已锁盈。
+
+| 路径 | 阶段一保护 | 原生 TP | 阶段二锁盈触发 | 锁定位置 |
+|---|---:|---:|---:|---:|
+| ObservationConfirm | 0.75R | 1.5R | 1.25R | +0.25R |
+| BreakawayFvg_Qualified | 0.75R | 1.5R | 1.25R | +0.5R |
+| FailureReverse_ObservationInvalidated_WideStop1_5R | 1R | 4R | 2R | +0.5R |
+| FailureReverse_RetestFailed | 1R | 1.5R | 1.25R | +0.5R |
+| ESResponseAlignedBreakout | 0.75R | 1.5R | 1.25R | +0.5R |
+| ESWallRejectionReversal | 1R | 1.5R | 1.25R | +0.5R |
+| ESExpectedMoveExpansion | 1R | 1.5R | 1.25R | +0.5R |
+| ESGammaConcentrationResponse | 1R | 1.5R | 1.25R | +0.5R |
+
+保护事件按 `TRIGGERED → MODIFY_SEND → APPLIED` 记录；市场已经穿过目标保护价时记录 `PROFIT_LOCK_SKIPPED_MARKET_CROSSED_V210` 并等待后续行情，原 SL 仍权威。TP、SL、时间退出或人工平仓后仍走原有保护单清理；ES 数据失效不改变已成交订单的保护链。
+
+## 2.7 实际执行行为更新
+
+- `ESResponseAlignedBreakout` Long 的本地收盘位置确认要求为K线区间方向端至少0.75；Short仍为0.65。
+- 正常 Breakout 止损后，同账户 NQ/MNQ 同方向候选共享事件冷却，必须等止损时间之后的新ES五分钟参考，并继续通过现有ES响应与本地确认门禁。异常隔离、异常强平不启动冷却。
+- Breakout 达到0.75R后将保护止损移动到覆盖配置往返手续费并多锁一个最小跳动的位置；原1.5R目标不变。该保护价不保证覆盖成交滑点。
+- 其他路径、Breakout Short确认阈值、FR Short目标及全局风险配置均不变。
 
 本文以当前实际配置和策略代码为准，记录当前自动下单的 8 条路径。研究路径、历史路径和仅记录不下单的路径不包含在内。
 
@@ -35,19 +59,19 @@ ESGammaConcentrationResponse
 
 当前配置文件中的主要全局值：
 
-| 项目 | 当前值 |
-|---|---:|
-| 自动模式 | 开启 |
-| 单次下单数量 | 1 手 |
-| 每日最大交易数 | 20 笔 |
-| MNQ 日损限制 | 200 美元 |
-| NQ 日损限制 | 测试阶段关闭，配置为 0 |
-| 周损限制 | 当前配置关闭 |
-| 最低预期 RR | 1.0 |
-| 趋势状态要求 | 开启 |
-| 宽止损 | 开启，倍率 1.5R |
-| 往返手续费模型 | 每手 1.20 美元 |
-| ES 期权代理门禁 | 开启 |
+| 项目        |          当前值 |
+| --------- | -----------: |
+| 自动模式      |           开启 |
+| 单次下单数量    |          1 手 |
+| 每日最大交易数   |         20 笔 |
+| MNQ 日损限制  |       200 美元 |
+| NQ 日损限制   | 测试阶段关闭，配置为 0 |
+| 周损限制      |       当前配置关闭 |
+| 最低预期 RR   |          1.0 |
+| 趋势状态要求    |           开启 |
+| 宽止损       |   开启，倍率 1.5R |
+| 往返手续费模型   |   每手 1.20 美元 |
+| ES 期权代理门禁 |           开启 |
 
 ## 二、ObservationConfirm
 
@@ -365,16 +389,16 @@ DealerGammaUnknown
 
 ## 十一、方向与历史路径说明
 
-| 路径 | 当前实际主要方向 | 核心触发 |
-|---|---|---|
-| ObservationConfirm | Long / Short | 显著区触达后确认 |
-| BreakawayFvg_Qualified | 主要 Long | 新 Bull FVG 突破质量确认 |
-| FailureReverse_ObservationInvalidated_WideStop1_5R | Short | Bull 区失效后的反转 |
-| FailureReverse_RetestFailed | Short | 反转后的回测失败 |
-| ESResponseAlignedBreakout | Long / Short | ES 与 NQ/MNQ 突破方向一致 |
-| ESWallRejectionReversal | Long / Short | Put/Call Wall 触达后拒绝 |
-| ESExpectedMoveExpansion | Long / Short | ES 相对锚点扩张 |
-| ESGammaConcentrationResponse | Long / Short | Gamma 集中位附近响应 |
+| 路径                                                 | 当前实际主要方向     | 核心触发                |
+| -------------------------------------------------- | ------------ | ------------------- |
+| ObservationConfirm                                 | Long / Short | 显著区触达后确认            |
+| BreakawayFvg_Qualified                             | 主要 Long      | 新 Bull FVG 突破质量确认   |
+| FailureReverse_ObservationInvalidated_WideStop1_5R | Short        | Bull 区失效后的反转        |
+| FailureReverse_RetestFailed                        | Short        | 反转后的回测失败            |
+| ESResponseAlignedBreakout                          | Long / Short | ES 与 NQ/MNQ 突破方向一致  |
+| ESWallRejectionReversal                            | Long / Short | Put/Call Wall 触达后拒绝 |
+| ESExpectedMoveExpansion                            | Long / Short | ES 相对锚点扩张           |
+| ESGammaConcentrationResponse                       | Long / Short | Gamma 集中位附近响应       |
 
 以下路径不在当前8条自动下单配置中：
 

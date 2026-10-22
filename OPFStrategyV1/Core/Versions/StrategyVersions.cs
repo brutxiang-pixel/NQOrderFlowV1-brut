@@ -2,7 +2,7 @@ namespace OPFStrategyV1.Core.Versions;
 
 public static class StrategyVersions
 {
-    public const string StrategyVersion = "OPF_INTRADAY_2.0";
+    public const string StrategyVersion = "OPF_INTRADAY_2.8";
     public const string ResearchSchemaVersion = "OPF_RESEARCH_2.33";
     public const string ScoringConfigVersion = "OPF_SCORING_0.1";
     public const string ZoneDetectorVersion = "OPF_ZONE_0.1";

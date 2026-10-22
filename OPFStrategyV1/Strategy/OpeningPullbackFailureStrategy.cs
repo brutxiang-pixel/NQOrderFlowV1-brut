@@ -306,6 +306,20 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     public bool ShowResearchHud { get; set; } = true;
 
     [Category("OPF HUD")]
+    [DisplayName("Show Detailed Diagnostics")]
+    public bool ShowDetailedDiagnostics { get; set; }
+
+    [Category("OPF HUD")]
+    [DisplayName("Show Historical Order Details")]
+    public bool ShowHistoricalOrderDetails { get; set; }
+
+    private string _compactHudText = string.Empty;
+    private RegimeResult? _hudRegime;
+    private DateTime _nextHudRefreshUtc;
+    private int _renderedHudBottom;
+    private readonly List<Rectangle> _orderLabelBounds = new();
+
+    [Category("OPF HUD")]
     [DisplayName("Show Actual Order Lines")]
     public bool ShowActualOrderLines { get; set; } = true;
 
@@ -960,6 +974,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         UpdateActiveProtectionObservation(value);
         ObservePathOpportunities(value);
         ScheduleProtectBreakEvenV186(value);
+        ScheduleProfitLockV210(value);
         ScheduleHistoricalVirtualTargetsV220();
         ProcessClosedBar(bar - 1);
         if (bar == CurrentBar - 1)
@@ -968,6 +983,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             TryActivateSignificantZoneFirstTouches(bar);
         if (bar == CurrentBar - 1)
             EvaluateIntradayEntries(bar, value);
+        if (bar == CurrentBar - 1 && _lastResearchCandle is { } hudCandle &&
+            _hudRegime is { } hudRegime && DateTime.UtcNow >= _nextHudRefreshUtc)
+        {
+            _nextHudRefreshUtc = DateTime.UtcNow.AddSeconds(1);
+            UpdateHud(hudCandle, hudRegime);
+        }
     }
 
     private void EnsureConnectorReadyForExecution()
@@ -1071,6 +1092,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         AllowHistoricalReplayConnectorBypass(current);
         UpdateActualExecutionExcursion(current);
         ScheduleProtectBreakEvenV186(current.Close);
+        ScheduleProfitLockV210(current.Close);
         ScheduleHistoricalVirtualTargetsV220();
         ScheduleHistoricalReplayAccountFlatReconciliationIfNeeded(current);
         ScheduleStaleUnfilledEntryAbortIfNeeded(current);
@@ -1164,7 +1186,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             ManualAlertCard[] cards;
             lock (_renderLock)
             {
-                hud = _hudText;
+                hud = ShowDetailedDiagnostics ? _hudText : _compactHudText;
                 cards = _manualAlertCards.ToArray();
             }
 
@@ -1254,6 +1276,14 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             AppendExecutionEvent(execution, eventName, "SL", execution.ProtectPendingStopV186, execution.BracketQty, message);
             return;
         }
+        if (execution.ProfitLockPendingV210 && string.Equals(failedRole, "SL", StringComparison.OrdinalIgnoreCase))
+        {
+            execution.ProfitLockPendingV210 = false;
+            var pendingStop = execution.ProfitLockPendingStopV210;
+            execution.ProfitLockPendingStopV210 = 0m;
+            AppendExecutionEvent(execution, "PROFIT_LOCK_MODIFY_FAILED_V210", "SL", pendingStop, execution.BracketQty, message);
+            return;
+        }
         if (!execution.RunnerBreakEvenPending)
             return;
         if (!IsActiveExecutionOrder(failedOrder) ||
@@ -1297,6 +1327,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         {
             execution.StopOrder = order;
             TryMarkProtectBreakEvenV186Applied(execution, order, source);
+            TryMarkProfitLockV210Applied(execution, order, source);
         }
         else if (role == "TP")
             execution.TargetOrder = order;
@@ -5360,10 +5391,17 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             (targetR, breakEvenTriggerR, timeStopBars) = (.75m, .5m, 1);
         else if (researchPath == "ObservationConfirm")
             (targetR, breakEvenTriggerR, timeStopBars) = (1.5m, .75m, 6);
+        else if (researchPath == "BreakawayFvg_Qualified")
+            (targetR, breakEvenTriggerR, timeStopBars) = (1.5m, .75m, FastPolicyTimeStopBarsV209);
+        else if (researchPath == "FailureReverse_RetestFailed")
+            (targetR, breakEvenTriggerR, timeStopBars) = (1.5m, 1m, ShortPolicyTimeStopBarsV209);
+        else if (researchPath == "FailureReverse_ObservationInvalidated_WideStop1_5R")
+            (targetR, breakEvenTriggerR, timeStopBars) = (4m, 1m, ShortPolicyTimeStopBarsV209);
         else if (IsStaticDynamicExitV215(side, researchPath, risk))
             (targetR, timeStopBars) = (1.5m, 12);
-        else if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or
-                 "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse")
+        else if (researchPath == "ESResponseAlignedBreakout")
+            (targetR, breakEvenTriggerR) = (1.5m, 0.75m);
+        else if (researchPath is "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse")
             (targetR, breakEvenTriggerR) = (1.5m, 1m);
         else if (side == TradeSide.Short && string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase))
             (targetR, breakEvenTriggerR, timeStopBars) = (BreakawayShortTargetRV209, BreakawayShortBreakEvenTriggerRV209, ShortPolicyTimeStopBarsV209);
@@ -5964,6 +6002,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         execution.ExitPrice = loggedExitPrice;
         execution.ExitRole = finalRole;
         NotifyFeishuCompletedExit(execution, finalExitPrice, finalRole);
+        if (!isQuarantined && !isAbnormalSafetyFlatten && !validation.IsAbnormal &&
+            execution.ResearchPath == "ESResponseAlignedBreakout" && IsStopExitRole(finalRole))
+            MarkEsBreakoutStopped(execution);
 
         if (isQuarantined)
         {
@@ -7382,8 +7423,11 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return;
 
         execution.ProtectBreakEvenTriggerBarV186 ??= currentBar;
-        var breakEvenStop = BreakEvenPolicy.Stop(entry, execution.Side == TradeSide.Long,
-            _actualCommissionPerContractRoundTrip, _snapshot.InstrumentProfile.PointValue, _snapshot.InstrumentProfile.TickSize);
+        var breakEvenStop = execution.ResearchPath == "ESResponseAlignedBreakout"
+            ? BreakEvenPolicy.ProfitLockStop(entry, execution.Side == TradeSide.Long,
+                _actualCommissionPerContractRoundTrip, _snapshot.InstrumentProfile.PointValue, _snapshot.InstrumentProfile.TickSize)
+            : BreakEvenPolicy.Stop(entry, execution.Side == TradeSide.Long,
+                _actualCommissionPerContractRoundTrip, _snapshot.InstrumentProfile.PointValue, _snapshot.InstrumentProfile.TickSize);
         var reference = CurrentExecutionMarketReference(marketPrice);
         AppendExecutionEvent(execution, ProtectBreakEvenEventName(execution, "TRIGGERED"), "SL", breakEvenStop, execution.BracketQty, $"triggerR={triggerR:0.##}|trigger={triggerPrice:0.########}|reference={reference:0.########}|bar={execution.ProtectBreakEvenTriggerBarV186}");
 
@@ -7438,8 +7482,102 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         });
     }
 
+    private void ScheduleProfitLockV210(decimal marketPrice)
+    {
+        foreach (var execution in ActiveReplayExecutions())
+            ScheduleProfitLockV210(execution, marketPrice);
+    }
+
+    private void ScheduleProfitLockV210(ReplayExecutionState execution, decimal marketPrice)
+    {
+        var currentBar = Math.Max(_lastSeenBar, _lastResearchCandle?.Bar ?? -1);
+        if (_snapshot is null || execution.ExitCompleted || !execution.BracketSubmitted ||
+            !execution.ProtectBreakEvenAppliedV186 || execution.ProfitLockEvaluatedV210 ||
+            execution.ProfitLockPendingV210 || execution.ProfitLockLastMarketCrossedBarV210 == currentBar ||
+            !IsWorkingExecutionOrder(execution.StopOrder) ||
+            !ProfitLockPolicy.TryGet(execution.ResearchPath, out var lockPlan))
+            return;
+
+        var entry = execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice;
+        var triggerPrice = execution.Side == TradeSide.Long
+            ? entry + execution.InitialRiskPoints * lockPlan.TriggerR
+            : entry - execution.InitialRiskPoints * lockPlan.TriggerR;
+        var triggerObserved = execution.ProtectionObservationStarted &&
+            (execution.Side == TradeSide.Long
+                ? execution.ProtectiveObservedHigh >= triggerPrice
+                : execution.ProtectiveObservedLow <= triggerPrice);
+        if (!triggerObserved)
+            return;
+
+        var reference = CurrentExecutionMarketReference(marketPrice);
+        var targetLockStop = execution.Side == TradeSide.Long
+            ? AlignToTick(entry + execution.InitialRiskPoints * lockPlan.LockR, _snapshot.InstrumentProfile.TickSize)
+            : AlignToTick(entry - execution.InitialRiskPoints * lockPlan.LockR, _snapshot.InstrumentProfile.TickSize);
+        var feeStop = BreakEvenPolicy.Stop(entry, execution.Side == TradeSide.Long, _actualCommissionPerContractRoundTrip,
+            _snapshot.InstrumentProfile.PointValue, _snapshot.InstrumentProfile.TickSize);
+        var lockStop = execution.Side == TradeSide.Long ? Math.Max(targetLockStop, feeStop) : Math.Min(targetLockStop, feeStop);
+        var tick = _snapshot.InstrumentProfile.TickSize;
+        var marketValid = execution.Side == TradeSide.Long ? reference - lockStop >= tick : lockStop - reference >= tick;
+        var improvesStop = execution.Side == TradeSide.Long ? lockStop > execution.Stop : lockStop < execution.Stop;
+        if (!marketValid || !improvesStop)
+        {
+            if (!marketValid)
+            {
+                execution.ProfitLockLastMarketCrossedBarV210 = currentBar;
+                AppendExecutionEvent(execution, "PROFIT_LOCK_SKIPPED_MARKET_CROSSED_V210", "SL", lockStop, execution.BracketQty, $"reference={reference:0.########}|current={execution.Stop:0.########}|triggerR={lockPlan.TriggerR:0.##}|lockR={lockPlan.LockR:0.##}");
+            }
+            else
+            {
+                execution.ProfitLockEvaluatedV210 = true;
+                AppendExecutionEvent(execution, "PROFIT_LOCK_NOOP_V210", "SL", lockStop, execution.BracketQty, $"reference={reference:0.########}|current={execution.Stop:0.########}|triggerR={lockPlan.TriggerR:0.##}|lockR={lockPlan.LockR:0.##}");
+            }
+            return;
+        }
+
+        execution.ProfitLockPendingV210 = true;
+        execution.ProfitLockPendingStopV210 = lockStop;
+        AppendExecutionEvent(execution, "PROFIT_LOCK_TRIGGERED_V210", "SL", lockStop, execution.BracketQty, $"triggerR={lockPlan.TriggerR:0.##}|lockR={lockPlan.LockR:0.##}|reference={reference:0.########}");
+        EnqueueExecutionAction("ProfitLockV210", async () =>
+        {
+            if (execution.ExitCompleted || !execution.ProfitLockPendingV210 || !IsWorkingExecutionOrder(execution.StopOrder))
+            {
+                execution.ProfitLockPendingV210 = false;
+                return;
+            }
+
+            var oldStop = execution.StopOrder!;
+            var newStop = oldStop.Clone();
+            newStop.TriggerPrice = lockStop;
+            newStop.TriggerPriceType = ReplayStopTriggerPriceType;
+            AppendExecutionEvent(execution, "PROFIT_LOCK_MODIFY_SEND_V210", "SL", lockStop, execution.BracketQty, $"old={oldStop.TriggerPrice:0.########}|triggerR={lockPlan.TriggerR:0.##}|lockR={lockPlan.LockR:0.##}");
+            try
+            {
+                await ModifyOrderAsync(oldStop, newStop);
+                if (execution.ProfitLockPendingV210 && !execution.ExitCompleted &&
+                    Math.Abs(newStop.TriggerPrice - lockStop) <= tick / 2m)
+                {
+                    execution.Stop = lockStop;
+                    execution.StopOrder = newStop;
+                    execution.ProfitLockPendingV210 = false;
+                    execution.ProfitLockPendingStopV210 = 0m;
+                    execution.ProfitLockEvaluatedV210 = true;
+                    AppendExecutionEvent(execution, "PROFIT_LOCK_APPLIED_V210", "SL", lockStop, execution.BracketQty, "confirmed=ModifyOrderAsync");
+                }
+            }
+            catch (Exception ex)
+            {
+                execution.ProfitLockPendingV210 = false;
+                execution.ProfitLockPendingStopV210 = 0m;
+                AppendExecutionEvent(execution, "PROFIT_LOCK_MODIFY_FAILED_V210", "SL", lockStop, execution.BracketQty, $"{ex.GetType().Name}:{ex.Message}");
+                throw;
+            }
+        });
+    }
+
     private static decimal ProtectBreakEvenTriggerRFor(ReplayExecutionState execution)
     {
+        if (execution.ResearchPath == "ESResponseAlignedBreakout")
+            return .75m;
         if (TryGetActualExitPolicyV209(execution.Side, execution.ResearchPath, out _, out var triggerR, out _) && triggerR > 0m)
             return triggerR;
         return ProtectBreakEvenTriggerRV186;
@@ -7474,6 +7612,21 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         var appliedEvent = ProtectBreakEvenEventName(execution, "APPLIED");
         LogExecutionInfo($"EXEC_{appliedEvent} trade={execution.TradeId} stop={execution.Stop:0.########} src={source}");
         AppendExecutionEvent(execution, appliedEvent, "SL", execution.Stop, execution.BracketQty, $"src={source}|triggerBar={execution.ProtectBreakEvenTriggerBarV186}");
+    }
+
+    private void TryMarkProfitLockV210Applied(ReplayExecutionState execution, Order order, string source)
+    {
+        if (_snapshot is null || !execution.ProfitLockPendingV210 || execution.ProfitLockEvaluatedV210)
+            return;
+        if (Math.Abs(order.TriggerPrice - execution.ProfitLockPendingStopV210) > _snapshot.InstrumentProfile.TickSize / 2m)
+            return;
+
+        execution.Stop = execution.ProfitLockPendingStopV210;
+        execution.StopOrder = order;
+        execution.ProfitLockPendingV210 = false;
+        execution.ProfitLockPendingStopV210 = 0m;
+        execution.ProfitLockEvaluatedV210 = true;
+        AppendExecutionEvent(execution, "PROFIT_LOCK_APPLIED_V210", "SL", execution.Stop, execution.BracketQty, $"src={source}");
     }
 
     private void TryMarkZoneBirthRunnerBreakEvenV173Applied(ReplayExecutionState execution, Order order, string source)
@@ -10364,6 +10517,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void UpdateHud(OpfCandle candle, RegimeResult regime)
     {
+        _hudRegime = regime;
         var snapshotId = _snapshot?.SnapshotId ?? "-";
         var shortSnapshot = snapshotId.Length <= 18 ? snapshotId : snapshotId[^18..];
         var noTrade = regime.Regime == MarketRegime.Unknown ? "RegimeUnknown" : "-";
@@ -10418,9 +10572,33 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         }
         hud.AppendLine($"NoTrade: {noTrade}");
         AppendEsOptionsProxyHud(hud);
+        var compact = new StringBuilder();
+        compact.AppendLine($"{StrategyVersions.StrategyVersion} | {Security?.Code} | {(_manualAlertEnabled ? "ASSIST" : ActualOrdersEnabled ? "AUTO" : "OBSERVE")}");
+        compact.AppendLine($"Exec: {(IsEsOptionsSource ? "SOURCE ONLY (no orders)" : _manualInterventionLatch ? "BLOCKED: MANUAL LOCK" : _liveReadinessBlocked ? "BLOCKED: " + _liveReadinessBlockReason : _latencyGateActive ? "BLOCKED: LATENCY" : globexLocked ? "BLOCKED: SESSION" : !ActualOrdersEnabled ? "ORDERS OFF" : "ARMED (signal gates still apply)")}");
+        compact.AppendLine($"Today {_replayTradesToday}/{ReplayMaxTradesPerDay} | Net ${_liveAccountDailyNetPnlDollars:0.##} | pos {GetCurrentAccountPosition():0.##}");
+        compact.AppendLine($"Regime {regime.Regime} | zones {_activeZoneCount} | slots {activeExecutions.Count}/2");
+        EsOptionsProxySnapshot esHud;
+        lock (_esOptionsProxySync) esHud = _esOptionsProxy;
+        var esClock = IsHistoricalReplayTime(candle.Time) ? DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc) : DateTime.UtcNow;
+        var esAge = Math.Max(0, (esClock - esHud.CapturedAtUtc).TotalSeconds);
+        var esFresh = esHud.CapturedAtUtc <= esClock && esAge <= 90;
+        var quotesFresh = esHud.EvidenceSchema < 2 || esHud.OptionQuotesObservedAtUtc is { } quoteAt && quoteAt <= esClock && esClock - quoteAt <= TimeSpan.FromSeconds(90);
+        var optionsReady = esHud.Status == "ModelReady" && esFresh && quotesFresh && esHud.AtmQuotesReady == true && esHud.LocalQuoteCoverage >= .5m;
+        compact.AppendLine($"Options: {(optionsReady ? "DATA OK" : "BLOCKED / WAIT")} | {esHud.Status}");
+        compact.AppendLine($"ES age {(esHud.Status is "ModelReady" or "PriceReady" ? esAge.ToString("0") + "s" : "--")} | ATM {(esHud.AtmQuotesReady == true ? "YES" : "NO")} | local {esHud.LocalQuoteCoverage:P0}");
+        if (!optionsReady) compact.AppendLine($"ES reason: {(!esFresh ? "stale snapshot" : !quotesFresh ? "stale option quotes" : esHud.Detail)}");
+        compact.AppendLine($"CW {esHud.CallWallProxy:0.##} | PW {esHud.PutWallProxy:0.##} | EM {esHud.ExpectedMoveProxy:0.##}");
+        foreach (var execution in activeExecutions.Take(2))
+            compact.AppendLine($"{(execution.Side == TradeSide.Long ? "LONG" : "SHORT")} E {execution.EntryAvgPrice:0.##} SL {execution.Stop:0.##} TP {execution.Target:0.##}");
+        if (activeExecutions.Count == 0) compact.AppendLine("Position flat | history: markers only");
+        if (_replayAbnormalEntryToday > 0 || _replayAbnormalProtectiveFillToday > 0 || _manualInterventionLatch)
+            compact.AppendLine("ATTENTION: inspect detailed diagnostics / logs");
 
         lock (_renderLock)
+        {
             _hudText = hud.ToString();
+            _compactHudText = compact.ToString();
+        }
     }
 
     private static string BuildActiveExecutionHudLine(ReplayExecutionState? execution)
@@ -10471,19 +10649,39 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         var font = new RenderFont("Consolas", 11);
         const int padX = 10;
         const int padY = 8;
-        const int minBoxW = 560;
-        var maxBoxW = Math.Max(1, ChartArea.Width - padX * 2);
-        var boundedHud = WrapHudText(context, font, hud, maxBoxW - padX * 2);
+        var maxBoxW = Math.Max(1, Math.Min(ShowDetailedDiagnostics ? 520 : 390, ChartArea.Width - padX * 2));
+        var maxHeight = Math.Max(1, (int)(ChartArea.Height * (ShowDetailedDiagnostics ? .45 : .28)));
+        var rowHeight = Math.Max(1, (int)Math.Ceiling((double)context.MeasureString("Ag", font).Height));
+        var lines = hud.Replace("\r", string.Empty).TrimEnd().Split('\n');
+        var maxRows = Math.Max(1, (maxHeight - padY * 2) / rowHeight);
+        var shown = lines.Take(maxRows).Select(line => FitHudLine(context, font, line, maxBoxW - padX * 2)).ToArray();
+        if (lines.Length > maxRows) shown[^1] = "... details in diagnostics / logs";
+        var boundedHud = string.Join(Environment.NewLine, shown);
         var size = context.MeasureString(boundedHud, font);
-        var boxW = Math.Min(maxBoxW, Math.Max(Math.Min(minBoxW, maxBoxW), (int)Math.Ceiling((double)size.Width) + padX * 2));
+        var boxW = maxBoxW;
         var boxH = (int)Math.Ceiling((double)size.Height) + padY * 2;
-        var x = ChartArea.X + (ChartArea.Width - boxW) / 2;
-        var y = ChartArea.Y + 8;
+        var x = ChartArea.X + padX;
+        var y = ChartArea.Y + 76;
+        _renderedHudBottom = y + boxH;
         var rect = new Rectangle(x, y, boxW, boxH);
 
         context.FillRectangle(Color.FromArgb(125, 0, 0, 0), rect);
         context.DrawRectangle(new RenderPen(Color.FromArgb(170, 70, 70, 70), 1), rect);
-        context.DrawString(boundedHud, font, Color.DeepSkyBlue, x + padX, y + padY);
+        var rowY = y + padY;
+        foreach (var line in shown)
+        {
+            var color = line.StartsWith("Exec:") || line.StartsWith("Options:") ? line.Contains("ARMED") || line.Contains("DATA OK") ? Color.MediumSeaGreen : Color.Orange :
+                line.StartsWith("ATTENTION") ? Color.OrangeRed : Color.DeepSkyBlue;
+            context.DrawString(line, font, color, x + padX, rowY);
+            rowY += rowHeight;
+        }
+    }
+
+    private static string FitHudLine(RenderContext context, RenderFont font, string line, int width)
+    {
+        if (context.MeasureString(line, font).Width <= width) return line;
+        while (line.Length > 0 && context.MeasureString(line + "...", font).Width > width) line = line[..^1];
+        return line + "...";
     }
 
     private static string WrapHudText(RenderContext context, RenderFont font, string value, int maxLineWidth)
@@ -10536,7 +10734,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         for (var index = 0; index < cards.Count; index++)
         {
             var card = cards[index];
-            var y = ChartArea.Y + topOffset + index * (cardHeight + cardGap);
+            var y = Math.Max(ChartArea.Y + topOffset, _renderedHudBottom + cardGap) + index * (cardHeight + cardGap);
+            if (y + cardHeight > ChartArea.Bottom - margin) break;
             var rect = new Rectangle(x, y, width, cardHeight);
             var sideColor = card.Side == TradeSide.Long ? Color.FromArgb(31, 208, 164) : Color.FromArgb(245, 80, 110);
             var sideText = card.Side == TradeSide.Long ? "LONG" : "SHORT";
@@ -10577,12 +10776,13 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private void DrawActualExecutionLines(RenderContext context)
     {
+        _orderLabelBounds.Clear();
         if (ChartInfo is null || _recentReplayExecutions.Count == 0)
             return;
 
         var maxVisible = ActualMaxVisibleOrders <= 0 ? 1 : ActualMaxVisibleOrders;
         var drawn = 0;
-        foreach (var execution in _recentReplayExecutions.AsEnumerable().Reverse())
+        foreach (var execution in _recentReplayExecutions.OrderByDescending(IsReplayExecutionActive).ThenByDescending(x => x.CreatedTime))
         {
             if (drawn >= maxVisible)
                 break;
@@ -10613,6 +10813,25 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             entry = execution.CreatedPrice;
 
         var isActive = IsReplayExecutionActive(execution);
+        if (!isActive && !ShowHistoricalOrderDetails)
+        {
+            if (execution.ExitPrice is not { } exitPrice || execution.ExitBar is not { } exitBar || ChartInfo is null) return;
+            var startX = ChartInfo.GetXByBar(execution.CreatedBar, true);
+            var endX = ChartInfo.GetXByBar(exitBar, true);
+            var startY = (int)ChartInfo.GetYByPrice(entry, false);
+            var endY = (int)ChartInfo.GetYByPrice(exitPrice, false);
+            if (startX < ChartArea.Left || startX > ChartArea.Right || endX < ChartArea.Left || endX > ChartArea.Right ||
+                startY < ChartArea.Top || startY > ChartArea.Bottom || endY < ChartArea.Top || endY > ChartArea.Bottom) return;
+            var pen = new RenderPen(Color.FromArgb(100, Color.SlateGray), 1);
+            context.DrawLine(pen, startX, startY, endX, endY);
+            context.DrawLine(new RenderPen(Color.DeepSkyBlue, 2), startX - 3, startY, startX + 3, startY);
+            var points = (exitPrice - entry) * (execution.Side == TradeSide.Long ? 1m : -1m);
+            var resultColor = points > 0m ? Color.MediumSeaGreen : points < 0m ? Color.IndianRed : Color.SlateGray;
+            var dollars = Math.Round(points * (_snapshot?.InstrumentProfile.PointValue ?? 0m) * ActualPnlQuantity(execution), 2);
+            context.DrawLine(new RenderPen(resultColor, 2), endX - 3, endY, endX + 3, endY);
+            DrawActualOrderLabel(context, $"{execution.Side.ToString().ToUpperInvariant()} {(points > 0m ? "WIN" : points < 0m ? "LOSS" : "FLAT")} {points:+0.##;-0.##;0}pt ${dollars:+0.00;-0.00;0.00} gross", resultColor, endX + 8, endY);
+            return;
+        }
         var alpha = isActive ? 230 : 90;
         var isPendingEntry = execution.EntryFilledQty <= 0m && !execution.ExitCompleted;
         var suffix = isPendingEntry ? "PENDING_ENTRY" : execution.ProtectionCleanupPending ? "CLEANUP" : isActive ? "ACTIVE" : $"EXIT {execution.ExitRole ?? "-"}";
@@ -10627,7 +10846,16 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         DrawActualHLine(context, execution.Target, Color.FromArgb(alpha, Color.LimeGreen), 2, $"TP {execution.Target:0.00} ({execution.TargetR:0.0}R)", x1, x2, labelSlot: labelSlotOffset + 2);
 
         if (execution.ExitCompleted && execution.ExitPrice.HasValue)
-            DrawActualHLine(context, execution.ExitPrice.Value, Color.FromArgb(190, Color.Gold), 1, $"EXIT {execution.ExitRole} {execution.ExitPrice.Value:0.00}", x1, x2, labelSlot: labelSlotOffset + 3);
+        {
+            var points = (execution.ExitPrice.Value - entry) * (execution.Side == TradeSide.Long ? 1m : -1m);
+            var dollars = Math.Round(points * (_snapshot?.InstrumentProfile.PointValue ?? 0m) * ActualPnlQuantity(execution), 2);
+            DrawActualHLine(context, execution.ExitPrice.Value, points > 0m ? Color.MediumSeaGreen : points < 0m ? Color.IndianRed : Color.SlateGray, 1, $"{execution.Side} EXIT {execution.ExitRole} {points:+0.##;-0.##;0}pt ${dollars:+0.00;-0.00;0.00} gross", x1, x2, labelSlot: labelSlotOffset + 3);
+        }
+    }
+
+    private static decimal ActualPnlQuantity(ReplayExecutionState execution)
+    {
+        return execution.ExitFilledQty > 0m ? execution.ExitFilledQty : execution.EntryFilledQty;
     }
 
     private int GetActualExecutionStartX(ReplayExecutionState execution)
@@ -10656,16 +10884,33 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return;
 
         var y = (int)ChartInfo.GetYByPrice(price, false);
+        if (y < ChartArea.Top || y > ChartArea.Bottom || x2 <= x1) return;
         context.DrawLine(new RenderPen(color, width), x1, y, x2, y);
+        DrawActualOrderLabel(context, label, color, x2 - 8, y);
+    }
 
-        var font = new RenderFont("Consolas", 11);
+    private void DrawActualOrderLabel(RenderContext context, string label, Color color, int rightX, int y)
+    {
+        var font = new RenderFont("Consolas", 10);
+        label = FitHudLine(context, font, label, Math.Min(300, ChartArea.Width - 24));
         var size = context.MeasureString(label, font);
-        var labelX = x1 + 8;
-        var labelY = y - (int)size.Height - 4 + labelSlot * 2;
-        var rect = new Rectangle(labelX - 4, labelY - 2, (int)Math.Ceiling((double)size.Width) + 8, (int)Math.Ceiling((double)size.Height) + 4);
+        var labelW = (int)Math.Ceiling((double)size.Width) + 8;
+        var labelH = (int)Math.Ceiling((double)size.Height) + 4;
+        var labelX = Math.Clamp(rightX - labelW, ChartArea.Left + 4, Math.Max(ChartArea.Left + 4, ChartArea.Right - labelW - 4));
+        Rectangle rect = default;
+        var placed = false;
+        for (var slot = 0; slot < 12; slot++)
+        {
+            var offset = slot == 0 ? -labelH - 3 : (slot % 2 == 1 ? 1 : -1) * ((slot + 1) / 2) * (labelH + 3);
+            rect = new Rectangle(labelX, y + offset, labelW, labelH);
+            if (rect.Top < ChartArea.Top || rect.Bottom > ChartArea.Bottom || _orderLabelBounds.Any(r => r.IntersectsWith(rect))) continue;
+            placed = true; break;
+        }
+        if (!placed) return;
+        _orderLabelBounds.Add(rect);
 
         context.FillRectangle(Color.FromArgb(135, 0, 0, 0), rect);
-        context.DrawString(label, font, color, labelX, labelY);
+        context.DrawString(label, font, color, rect.X + 4, rect.Y + 2);
     }
 
     private static OpfCandle ToOpfCandle(int bar, IndicatorCandle candle)
@@ -10953,6 +11198,10 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         public bool ProtectBreakEvenEvaluatedV186 { get; set; }
         public bool ProtectBreakEvenPendingV186 { get; set; }
         public bool ProtectBreakEvenAppliedV186 { get; set; }
+        public bool ProfitLockEvaluatedV210 { get; set; }
+        public bool ProfitLockPendingV210 { get; set; }
+        public decimal ProfitLockPendingStopV210 { get; set; }
+        public int ProfitLockLastMarketCrossedBarV210 { get; set; } = -1;
         public bool DeferredBreakEvenArmedV208 { get; set; }
         public int? ProtectBreakEvenTriggerBarV186 { get; set; }
         public decimal ProtectPendingStopV186 { get; set; }

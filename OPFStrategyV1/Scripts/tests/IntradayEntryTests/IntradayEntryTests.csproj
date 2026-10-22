@@ -7,6 +7,8 @@
     <Compile Include="../../../Strategy/CrossMarketAlignment.cs" Link="CrossMarketAlignment.cs" />
     <Compile Include="../../../Strategy/IntradayEntryPolicy.cs" Link="IntradayEntryPolicy.cs" />
     <Compile Include="../../../Strategy/EsBreakoutEvent.cs" Link="EsBreakoutEvent.cs" />
+    <Compile Include="../../../Strategy/BreakEvenPolicy.cs" Link="BreakEvenPolicy.cs" />
+    <Compile Include="../../../Strategy/ProfitLockPolicy.cs" Link="ProfitLockPolicy.cs" />
     <Compile Include="../../../Strategy/ExecutionIdentity.cs" Link="ExecutionIdentity.cs" />
     <Compile Include="../../../Strategy/DynamicExitComparison.cs" Link="DynamicExitComparison.cs" />
     <Compile Include="../../../Strategy/ExecutionClock.cs" Link="ExecutionClock.cs" />

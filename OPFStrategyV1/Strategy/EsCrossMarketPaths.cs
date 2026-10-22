@@ -187,10 +187,23 @@ public sealed partial class OpeningPullbackFailureStrategy
         {
             var replay = IsHistoricalReplayTime(candle.Time);
             // NQ and MNQ share index prices; isolate accounts and live/Replay streams.
-            var contract = (Security?.Code ?? "").Replace("MNQ", "NQ", StringComparison.OrdinalIgnoreCase);
-            var anchorKey = $"{LiveAccountScope.FromPortfolio(Portfolio)}|{contract}|{side}|{replay}";
+            var anchorKey = BreakoutAnchorKey(side, replay);
             var proposed = new EsBreakoutEvent(candle.Time, side == TradeSide.Long, candle.Close, stop, trigger);
-            var anchor = BreakoutAnchors.AddOrUpdate(anchorKey, proposed, (_, old) => old.Active(candle.Time, candle.Close) ? old : proposed);
+            var anchor = BreakoutAnchors.AddOrUpdate(anchorKey, proposed, (_, old) =>
+                old.StoppedAt.HasValue || old.Active(candle.Time, candle.Close) ? old : proposed);
+            if (anchor.StoppedAt is { } stoppedAt)
+            {
+                var referenceAt = context.Price5mReferenceAtUtc ?? DateTime.MinValue;
+                if (anchor.NeedsFreshReference(referenceAt))
+                {
+                    if (_reactionAuditKeys.Add($"ES_BREAKOUT_COOLDOWN|{anchor.Started:O}|{side}|{referenceAt:O}"))
+                        LogLiveReadinessInfo($"ES_BREAKOUT_COOLDOWN_WAIT side={side} stoppedAt={stoppedAt:O} newReference={referenceAt:O}");
+                    return;
+                }
+                anchor = proposed;
+                BreakoutAnchors[anchorKey] = anchor;
+                LogLiveReadinessInfo($"ES_BREAKOUT_COOLDOWN_RELEASE side={side} stoppedAt={stoppedAt:O} newReference={referenceAt:O}");
+            }
             trigger = anchor.Trigger;
             stop = anchor.Stop;
             risk = Math.Abs(candle.Close - stop);
@@ -248,4 +261,18 @@ public sealed partial class OpeningPullbackFailureStrategy
             $"ES_CROSS_MARKET_CLOSED_BASELINE path={path} side={side} reason={reason}");
     }
 
+    private void MarkEsBreakoutStopped(ReplayExecutionState execution)
+    {
+        var anchorKey = BreakoutAnchorKey(execution.Side, execution.HistoricalReplayAtCreation);
+        if (!BreakoutAnchors.TryGetValue(anchorKey, out var anchor)) return;
+        var stoppedAt = execution.ExitTime ?? DateTime.UtcNow;
+        BreakoutAnchors[anchorKey] = anchor with { StoppedAt = stoppedAt };
+        LogLiveReadinessInfo($"ES_BREAKOUT_STOP_COOLDOWN_ARMED trade={execution.TradeId} side={execution.Side} event={anchor.Started:O} stoppedAt={stoppedAt:O}");
+    }
+
+    private string BreakoutAnchorKey(TradeSide side, bool replay)
+    {
+        var contract = (Security?.Code ?? string.Empty).Replace("MNQ", "NQ", StringComparison.OrdinalIgnoreCase);
+        return $"{LiveAccountScope.FromPortfolio(Portfolio)}|{contract}|{side}|{replay}";
+    }
 }

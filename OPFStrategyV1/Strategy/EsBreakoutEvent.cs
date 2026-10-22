@@ -2,6 +2,7 @@ namespace OPFStrategyV1.Strategy;
 
 internal sealed record EsBreakoutEvent(DateTime Started, bool IsLong, decimal Price, decimal Stop, decimal Trigger)
 {
+    public DateTime? StoppedAt { get; init; }
     public decimal Risk => Math.Abs(Price - Stop);
     public bool Active(DateTime now, decimal price) => now >= Started && now <= Started.AddMinutes(15) &&
         (IsLong ? price > Stop : price < Stop);
@@ -11,4 +12,5 @@ internal sealed record EsBreakoutEvent(DateTime Started, bool IsLong, decimal Pr
         Math.Abs(price - Stop) <= 25m &&
         (IsLong ? price >= Trigger + tick : price <= Trigger - tick) &&
         Math.Abs(price - Trigger) <= Math.Max(tick * 4m, Risk * .25m);
+    public bool NeedsFreshReference(DateTime referenceAtUtc) => StoppedAt is { } stoppedAt && referenceAtUtc <= stoppedAt;
 }

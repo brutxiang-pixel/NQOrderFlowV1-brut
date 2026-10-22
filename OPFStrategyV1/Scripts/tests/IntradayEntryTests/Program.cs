@@ -32,6 +32,11 @@ var peer = new PathOpportunity("p", "ES", true, now.AddSeconds(10), 1, 100.25m, 
 Check(shadow.Overlaps(peer, .25m) && !shadow.Overlaps(new PathOpportunity("x", "ES", false, now, 1, 100m, 110m, 10m, 1.5m, .75m), .25m), "overlap requires direction, event time and structure");
 Check(!ExecutionClock.TimeStopDue(1, 0) && !ExecutionClock.TimeStopDue(100, 0), "zero time stop is disabled even after bars elapsed");
 Check(!ExecutionClock.TimeStopDue(5, 6) && ExecutionClock.TimeStopDue(6, 6), "positive time stop fires at its existing boundary");
+Check(ProfitLockPolicy.TryGet("ObservationConfirm", out var oc) && oc.TriggerR == .75m && oc.LockR == .25m, "observation confirm profit lock policy");
+Check(ProfitLockPolicy.TryGet("FailureReverse_RetestFailed", out var fr) && fr.TriggerR == 1.25m && fr.LockR == .5m, "failure reverse profit lock policy");
+Check(!ProfitLockPolicy.TryGet("Unknown", out _), "unknown path has no profit lock policy");
+foreach (var path in new[] { "ObservationConfirm", "BreakawayFvg_Qualified", "FailureReverse_ObservationInvalidated_WideStop1_5R", "FailureReverse_RetestFailed", "ESResponseAlignedBreakout", "ESWallRejectionReversal", "ESExpectedMoveExpansion", "ESGammaConcentrationResponse" })
+    Check(ProfitLockPolicy.TryGet(path, out var plan) && plan.TriggerR > 0m && plan.LockR > 0m && plan.TriggerR > plan.LockR, $"all eight paths have monotonic profit lock policy: {path}");
 Check(ExecutionClock.ExitTimestamp(now, now.AddSeconds(20), now.Date, now.AddSeconds(21), false) == now.AddSeconds(20), "live archive uses actual fill timestamp instead of bar opening");
 Check(ExecutionClock.ExitTimestamp(now, now.AddMinutes(-3), now.Date, now.AddSeconds(21), false) == now.AddSeconds(21), "invalid stale live fill uses callback reception");
 Check(ExecutionClock.ExitTimestamp(now, now.AddDays(1), now.AddSeconds(30), now.AddDays(1), true) == now.AddSeconds(30), "Replay never imports wall clock fill timestamp");
@@ -76,6 +81,10 @@ Check(breakoutEvent.Active(now.AddMinutes(6), 95m), "event persists across five 
 Check(!breakoutEvent.Active(now.AddMinutes(16), 95m) && !breakoutEvent.Active(now, 121m), "event expires or invalidates");
 Check(breakoutEvent.NeedsRetest(90m) && !breakoutEvent.RetestReady(90m, .25m), "wide stop must wait for retest");
 Check(breakoutEvent.RetestReady(99m, .25m), "short retest reduces structural risk without tightening stop");
+var stoppedBreakout = breakoutEvent with { StoppedAt = now.AddMinutes(2) };
+Check(stoppedBreakout.NeedsFreshReference(now.AddMinutes(2)) && !stoppedBreakout.NeedsFreshReference(now.AddMinutes(7)), "stopped breakout waits for a strictly newer ES five-minute reference");
+Check(BreakEvenPolicy.ProfitLockStop(100m, true, 1.2m, 2m, .25m) == 101m, "long profit lock covers fees plus one tick");
+Check(BreakEvenPolicy.ProfitLockStop(100m, false, 1.2m, 2m, .25m) == 99m, "short profit lock covers fees plus one tick");
 var longEvent = new EsBreakoutEvent(now, true, 110m, 80m, 100m);
 Check(longEvent.RetestReady(101m, .25m) && !longEvent.RetestReady(110m, .25m), "long retest symmetric");
 Check(IntradayEntryPolicy.BreakoutChase(false, 29880.5m, 29908m, 29891m, 17.25m) == "CrossMarketChaseTooFar", "paired NQ late short rejected");

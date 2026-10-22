@@ -9,4 +9,10 @@ internal static class BreakEvenPolicy
             ? Math.Ceiling((entry + offset) / tick) * tick
             : Math.Floor((entry - offset) / tick) * tick;
     }
+
+    public static decimal ProfitLockStop(decimal entry, bool isLong, decimal commissionPerContract, decimal pointValue, decimal tick)
+    {
+        var breakEven = Stop(entry, isLong, commissionPerContract, pointValue, tick);
+        return breakEven + (isLong ? tick : -tick);
+    }
 }
