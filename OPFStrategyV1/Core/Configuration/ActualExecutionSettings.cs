@@ -48,11 +48,11 @@ public sealed record ActualExecutionSettings(
     public static ActualExecutionSettings Default()
     {
         return new ActualExecutionSettings(
-            Version: "ACTUAL_EXEC_2.52",
+            Version: "ACTUAL_EXEC_2.53",
             EnableActualOrders: false,
             ManualAlertEnabled: true,
             ExecutionMode: "ManualAlert",
-            ActualExecutionPaths: "ObservationConfirm|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated_WideStop1_5R|FailureReverse_RetestFailed|ESResponseAlignedBreakout|ESWallRejectionReversal|ESExpectedMoveExpansion|ESGammaConcentrationResponse|NativeIcebergReaction",
+            ActualExecutionPaths: "BreakawayFvg_Qualified|FailureReverse_RetestFailed|ESResponseAlignedBreakout|ESWallRejectionReversal|ESExpectedMoveExpansion|ESGammaConcentrationResponse",
             ActualAllowResearchPaths: false,
             ActualOrderQuantity: 1m,
             ActualTargetR: 1.5m,
@@ -181,10 +181,16 @@ public sealed record ActualExecutionSettings(
 
     private static string MergeExecutionPaths(string configured, string fallback)
     {
+        var retired = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "ObservationConfirm",
+            "FailureReverse_ObservationInvalidated_WideStop1_5R"
+        };
         var allowed = fallback.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(path => !retired.Contains(path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var paths = (string.IsNullOrWhiteSpace(configured) ? fallback : configured).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(allowed.Contains)
+            .Where(path => allowed.Contains(path) && !retired.Contains(path))
             .Concat(allowed)
             .Distinct(StringComparer.OrdinalIgnoreCase);
         return string.Join('|', paths);

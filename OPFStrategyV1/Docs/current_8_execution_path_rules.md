@@ -1,6 +1,16 @@
-# 当前 8 条实际下单路径规则
+# 当前 6 条实际下单路径规则与 2 条研究路径
 
-更新时间：2026-10-22（北京时间），OPF_INTRADAY_2.8
+更新时间：2026-10-26（北京时间），OPF_INTRADAY_2.9
+
+## 2.9 两条路径转研究、NQ 入场质量与扩张阶段
+
+`FailureReverse_ObservationInvalidated_WideStop1_5R` 与 `ObservationConfirm` 本版本停止实际下单，但不删除候选、漏斗、MFE/MAE 和研究退出记录。旧的实际执行配置在升级到 `ACTUAL_EXEC_2.53` 时会过滤这两条路径，避免旧配置自动合并回来。
+
+`ESResponseAlignedBreakout` 和 `ESExpectedMoveExpansion` 在 NQ 上增加独立的自身 K 线确认：突破路径要求实体占本 K 线区间至少 50%、方向性收盘至少 80%；预期波动扩张路径要求实体至少 40%、方向性收盘至少 65%。MNQ 不套用这组 NQ 专属门禁。
+
+预期波动扩张由原来的 `0.75-1.25` 倍锚定预期波动收敛为 `0.75-1.10` 倍；超过 1.10 倍记录 `OptionsGate:ExpectedMoveExpansionLate`，仍保留候选审计。
+
+每条执行决策的 Reason 追加 `EntryQualityV29`，记录品种、路径、风险点数、K 线区间、实体比例、方向性收盘和 bar，供订单库按入场质量复盘。锁盈状态机本轮不改。
 
 ## 2.8 自动止盈与锁盈保护
 
@@ -26,7 +36,7 @@
 - Breakout 达到0.75R后将保护止损移动到覆盖配置往返手续费并多锁一个最小跳动的位置；原1.5R目标不变。该保护价不保证覆盖成交滑点。
 - 其他路径、Breakout Short确认阈值、FR Short目标及全局风险配置均不变。
 
-本文以当前实际配置和策略代码为准，记录当前自动下单的 8 条路径。研究路径、历史路径和仅记录不下单的路径不包含在内。
+本文以当前实际配置和策略代码为准，记录当前自动下单的 6 条路径。`ObservationConfirm`、`FailureReverse_ObservationInvalidated_WideStop1_5R` 和 `NativeIcebergReaction` 仅记录研究，不实际下单。
 
 当前实际配置：
 
@@ -404,7 +414,7 @@ DealerGammaUnknown
 
 - `SignificantZoneFirstTouchLong`
 - `SignificantZoneFirstTouchShort`
-- `NativeIcebergReaction`
+- `NativeIcebergReaction`（研究记录，不实际下单）
 - 普通 `BreakawayFvg`
 - 其他历史研究、Shadow、ZoneBirth、UnknownRegime 和 HTF 路径。
 

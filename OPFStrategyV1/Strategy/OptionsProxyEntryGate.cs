@@ -88,7 +88,7 @@ public static class OptionsProxyEntryGate
                 return "OptionsGate:ExpectedMoveAnchorInvalid";
             var displacement = current.Value - anchor.Value;
             if (Math.Abs(displacement) < expected.Value * 0.75m) return "OptionsGate:ExpectedMoveNotExpanded";
-            if (Math.Abs(displacement) > expected.Value * 1.25m) return "OptionsGate:ExpectedMoveOverextended";
+            if (Math.Abs(displacement) > expected.Value * 1.10m) return "OptionsGate:ExpectedMoveExpansionLate";
             if ((isLong && displacement <= 0m) || (!isLong && displacement >= 0m)) return "OptionsGate:ExpectedMoveDirectionDisagrees";
             if (Math.Abs(esMove) < responseThreshold || (isLong ? esMove <= 0m : esMove >= 0m)) return "OptionsGate:ExpectedMoveNoFollowThrough";
         }

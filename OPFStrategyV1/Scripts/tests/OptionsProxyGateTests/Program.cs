@@ -56,7 +56,7 @@ Check(OptionsProxyEntryGate.Evaluate(Context(), now, "ESResponseAlignedBreakout"
 Check(OptionsProxyEntryGate.Evaluate(Context(es: 4998m, prior: 5000m), now, "ESResponseAlignedBreakout", false, 110m, 110m, 99m, 102.5m, 10m) is null, "breakout short retains the existing 0.65 directional close threshold");
 Check(Gate(Context(es: 4998m, prior: 5000m) with { UnderlyingPrice60sAgo = 4998m }, path: "ESWallRejectionReversal", isLong: true) == "OptionsGate:ESWallNotReached", "wall rejection requires wall proximity");
 Check(Gate(Context(es: 5020m, prior: 5018m), path: "ESExpectedMoveExpansion") is null, "expected move expansion allowed");
-Check(Gate(Context(es: 5070m, prior: 5068m), path: "ESExpectedMoveExpansion") == "OptionsGate:ExpectedMoveOverextended", "final gate agrees with generator 125 percent upper bound");
+Check(Gate(Context(es: 5070m, prior: 5068m), path: "ESExpectedMoveExpansion") == "OptionsGate:ExpectedMoveExpansionLate", "expected move expansion rejects late extension beyond 110 percent");
 var currentEvidence = Context() with { EvidenceSchema = 2, UnderlyingObservedAtUtc = now, OptionQuotesObservedAtUtc = now, AnchorEstablishedAtUtc = now.AddHours(-1), AnchorSource = "FirstValidSessionObservation", AnchorSeries = "test", AnchorTradingDay = OptionsProxyExpiry.ExchangeDate(now) };
 Check(Gate(currentEvidence with { Status = "PriceReady", AtmQuotesReady = false, LocalQuoteCoverage = 0m }, path: "ObservationConfirm") is null, "structural path uses live ES response without unrelated option quote requirement");
 Check(Gate(currentEvidence with { Status = "PriceReady" }, path: "ESResponseAlignedBreakout") == "OptionsGate:DataUnavailable", "ES family retains option model requirement");

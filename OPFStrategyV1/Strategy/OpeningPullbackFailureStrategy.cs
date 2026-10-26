@@ -3273,6 +3273,13 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             ResolveMarketExecutionScenario(marketExecutionScenarioId, "Skip", optionsGateReason);
             return;
         }
+        var nqQualityReason = NqCrossMarketQualityReason(signal, entryCandle, researchPath);
+        if (nqQualityReason is not null)
+        {
+            AppendExecutionDecision(signal, entryCandle, "Skip", nqQualityReason, researchPath, stop, risk);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_NQ_ENTRY_QUALITY_V29", "-", researchPath, entryCandle.Close, 0m, nqQualityReason);
+            return;
+        }
         if (TryEmitManualAlert(signal, entryCandle, researchPath, stop, risk))
         {
             ResolveMarketExecutionScenario(marketExecutionScenarioId, "ManualAlert", "NoOrderSubmission");
@@ -4004,6 +4011,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         var entry = entryCandle.Close;
+        var entryQualityTag = BuildEntryQualityTag(signal, entryCandle, researchPath, risk);
+        var loggedReason = string.IsNullOrEmpty(entryQualityTag) ? reason : reason + "|" + entryQualityTag;
         var targetR = ActualTargetRFor(signal, researchPath, risk);
         var target = TargetFromRisk(signal.Side, entry, risk, targetR);
         var reward = EstimateActualExecutionReward(signal, researchPath, entry, risk);
@@ -4018,7 +4027,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             entryCandle.Time,
             entryCandle.Bar,
             decision,
-            reason,
+            loggedReason,
             signal.Side.ToString(),
             signal.SetupType.ToString(),
             researchPath,
@@ -4035,6 +4044,18 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             _replayDailyPnlDollars,
             _replayTradesToday,
             tradeId);
+    }
+
+    private string BuildEntryQualityTag(CandidateSignal signal, OpfCandle candle, string researchPath, decimal risk)
+    {
+        var range = candle.High - candle.Low;
+        if (range <= 0m) return $"EntryQualityV29:path={researchPath}|risk={risk:0.##}|range=0";
+        var body = Math.Abs(candle.Close - candle.Open) / range;
+        var close = signal.Side == TradeSide.Long
+            ? (candle.Close - candle.Low) / range
+            : (candle.High - candle.Close) / range;
+        var instrument = ResolveFeishuProductCode();
+        return $"EntryQualityV29:instrument={instrument}|path={researchPath}|risk={risk:0.##}|range={range:0.##}|body={body:0.000}|directionalClose={close:0.000}|bar={candle.Bar}";
     }
 
     private void BufferKnnShadowInput(
@@ -4531,6 +4552,26 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             reasons.Add($"SetupQualityTooLow:score={signal.SetupQualityScore.TotalScore:0.##},min={minSetupQuality:0.##}");
         }
         return reasons.ToArray();
+    }
+
+    private string? NqCrossMarketQualityReason(CandidateSignal signal, OpfCandle entryCandle, string researchPath)
+    {
+        var code = (Security?.Code ?? string.Empty).ToUpperInvariant();
+        if (!code.StartsWith("NQ", StringComparison.Ordinal) || code.StartsWith("MNQ", StringComparison.Ordinal) ||
+            researchPath is not ("ESResponseAlignedBreakout" or "ESExpectedMoveExpansion"))
+            return null;
+
+        var range = entryCandle.High - entryCandle.Low;
+        if (range <= 0m) return "NQOwnConfirmationUnavailableV29";
+        var bodyFraction = Math.Abs(entryCandle.Close - entryCandle.Open) / range;
+        var directionalClose = signal.Side == TradeSide.Long
+            ? (entryCandle.Close - entryCandle.Low) / range
+            : (entryCandle.High - entryCandle.Close) / range;
+        var minBody = researchPath == "ESResponseAlignedBreakout" ? .50m : .40m;
+        var minClose = researchPath == "ESResponseAlignedBreakout" ? .80m : .65m;
+        if (bodyFraction < minBody || directionalClose < minClose)
+            return $"NQOwnConfirmationWeakV29:path={researchPath}|body={bodyFraction:0.000}|minBody={minBody:0.00}|close={directionalClose:0.000}|minClose={minClose:0.00}";
+        return null;
     }
 
     private bool IsObservationConfirmFillerAllowed(CandidateSignal signal, string researchPath)
