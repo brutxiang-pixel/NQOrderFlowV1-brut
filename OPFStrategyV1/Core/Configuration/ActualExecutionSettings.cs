@@ -53,7 +53,7 @@ public sealed record ActualExecutionSettings(
             EnableActualOrders: false,
             ManualAlertEnabled: true,
             ExecutionMode: "ManualAlert",
-            ActualExecutionPaths: "BreakawayFvg_Qualified|FailureReverse_RetestFailed|ESResponseAlignedBreakout|ESWallRejectionReversal|ESExpectedMoveExpansion|ESGammaConcentrationResponse",
+            ActualExecutionPaths: "BreakawayFvg_Qualified|FailureReverse_RetestFailed|ESResponseAlignedBreakout|ESWallRejectionReversal|ESExpectedMoveExpansion|ESGammaConcentrationResponse|CrossMarketIcebergOrderFlowReaction",
             ActualAllowResearchPaths: false,
             ActualOrderQuantity: 1m,
             ActualTargetR: 1.5m,

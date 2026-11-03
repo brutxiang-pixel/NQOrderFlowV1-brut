@@ -92,6 +92,17 @@ Check(IntradayEntryPolicy.BreakoutChase(true, 110.5m, 83m, 100m, 17.25m) == "Cro
 Check(IntradayEntryPolicy.BreakoutChase(false, 100m, 125m, 100m, 17.25m) == "CrossMarketRiskExpanded", "risk expansion without price chase rejected");
 Check(IntradayEntryPolicy.BreakoutChase(false, 99m, 117m, 100m, 17.25m) is null, "near-anchor entry remains eligible");
 Check(IntradayEntryPolicy.BreakoutChase(false, 100m, 117m, 100m, 17.25m) is null, "retest near original anchor remains eligible");
+Check(IntradayEntryPolicy.EvidenceSize(false, false, true, 3m) == (1, 1m), "one independent evidence axis uses base size");
+Check(IntradayEntryPolicy.EvidenceSize(true, true, false, 3m) == (2, 2m), "two orthogonal evidence axes increase size");
+Check(IntradayEntryPolicy.EvidenceSize(true, true, true, 3m) == (3, 3m), "three orthogonal evidence axes reach three-contract tier");
+Check(IntradayEntryPolicy.EvidenceSize(true, true, true, 1m) == (3, 1m), "configured per-product cap bounds evidence tier");
+var eventKey = "acct|NQZ6|False|ES_EVENT_KEY:Long|touch|Put";
+Check(PhysicalEventExecutionDedup.TryClaim(eventKey, now), "first strategy claims physical event");
+Check(!PhysicalEventExecutionDedup.TryClaim(eventKey, now.AddSeconds(1)), "same account and event cannot submit twice");
+PhysicalEventExecutionDedup.Release(eventKey);
+Check(PhysicalEventExecutionDedup.TryClaim(eventKey, now.AddSeconds(2)), "aborted preflight releases event claim for later attempt");
+Check(PhysicalEventExecutionDedup.TryClaim("acct|NQZ6|True|ES_EVENT_KEY:Long|touch|Put", now), "Replay and live events are isolated");
+Check(PhysicalEventExecutionDedup.TryClaim("other|NQZ6|False|ES_EVENT_KEY:Long|touch|Put", now), "other accounts are isolated");
 Check(!NativeIcebergArchive.AvailableAsOf(item, now), "replay excludes event not captured yet");
 Check(NativeIcebergArchive.AvailableAsOf(item, now.AddSeconds(1)), "replay exposes native event as of capture");
 Check(!NativeIcebergArchive.AvailableAsOf(item, now.AddSeconds(31)), "old native event cannot trigger stale entry");

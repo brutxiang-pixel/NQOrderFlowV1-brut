@@ -11,6 +11,7 @@
     <Compile Include="../../../Core/Profiles/*.cs" Link="Profiles/%(Filename).cs" />
     <Compile Include="../../../Core/Versions/*.cs" Link="Versions/%(Filename).cs" />
     <Compile Include="../../../Core/Configuration/ActualExecutionSettings.cs" Link="ActualExecutionSettings.cs" />
+    <Compile Include="../../../Core/Configuration/CommissionSchedule.cs" Link="CommissionSchedule.cs" />
     <Compile Include="../../../Core/Snapshots/ConfigSnapshot.cs" Link="ConfigSnapshot.cs" />
   </ItemGroup>
 </Project>

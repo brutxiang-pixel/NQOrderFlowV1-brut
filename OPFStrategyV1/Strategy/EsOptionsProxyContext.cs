@@ -524,7 +524,7 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private string? OptionsEntryGateReason(CandidateSignal signal, OpfCandle candle, string path, decimal risk)
     {
-        if (path == "NativeIcebergReaction") return null;
+        if (path is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction") return null;
         if (IsEsOptionsSource) return "OptionsGate:EsSourceOnly";
         if (!EnableEsOptionsEntryGate) return null;
         if (!IsEsOptionsConsumer) return "OptionsGate:UnsupportedPhaseOneInstrument";

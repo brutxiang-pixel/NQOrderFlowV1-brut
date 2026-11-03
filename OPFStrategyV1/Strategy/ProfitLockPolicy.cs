@@ -16,6 +16,7 @@ internal static class ProfitLockPolicy
             "ESWallRejectionReversal" => new(1.25m, .5m),
             "ESExpectedMoveExpansion" => new(1.25m, .5m),
             "ESGammaConcentrationResponse" => new(1.25m, .5m),
+            "CrossMarketIcebergOrderFlowReaction" => new(.5m, .25m),
             _ => default
         };
         return plan.TriggerR > 0m;

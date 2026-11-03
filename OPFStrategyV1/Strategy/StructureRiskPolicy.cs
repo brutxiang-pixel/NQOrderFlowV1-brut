@@ -5,6 +5,7 @@ public static class StructureRiskPolicy
     public const decimal MaxPoints = 50m;
     public static bool Applies(string path) => path is
         "NativeIcebergReaction" or
+        "CrossMarketIcebergOrderFlowReaction" or
         "ObservationConfirm" or "BreakawayFvg_Qualified" or
         "FailureReverse_ObservationInvalidated_WideStop1_5R" or "FailureReverse_RetestFailed" or
         "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or

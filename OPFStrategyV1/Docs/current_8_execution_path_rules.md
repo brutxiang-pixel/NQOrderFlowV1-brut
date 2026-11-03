@@ -1,12 +1,26 @@
-# 当前 6 条实际下单路径规则与研究路径
+# 当前 7 条实际下单路径规则与研究路径
 
-更新时间：2026-11-03（北京时间），OPF_INTRADAY_2.10
+更新时间：2026-11-03（北京时间），OPF_INTRADAY_2.12
+
+## 2.12 冰山事件、Gamma有符号墙位与证据计分手数
+
+实际下单集合为原六条路径加 `CrossMarketIcebergOrderFlowReaction`。`NativeIcebergReaction` 是旧兼容名，不放入默认执行集合，不会与新路径重复下单。
+
+冰山执行只使用NQ/MNQ本地图表的原生MBO记录。要求真实 `NativeRefreshConfirmed`、Hidden>0，且事件在本次策略运行后产生；触发需离冰山价至少2 tick、价格保持2秒、10秒本地逐笔同向主动成交占比至少15%。Bid侧支持Long，Ask侧支持Short；ES价格与期权背景只影响手数评分，不要求ES同时出现冰山。初始SL位于冰山价外4 tick，TP为0.75R，达到0.5R启动保本保护；45秒内未取得0.25R有利进展时走紧急平仓，仍使用真实SL/TP/OCO与既有订单清理链。
+
+`ESGammaConcentrationResponse` 不再把无符号Gamma/OI集中度直接对称映射多空：Long必须是集中strike贴近Put Wall且出现Put Wall拒绝；Short必须贴近Call Wall且出现Call Wall拒绝。价格需触达后收复，ES五分钟响应同向。不能映射到对应有符号墙位时记录Gamma方向拒绝，不用Gamma集中度猜方向。Gamma与Wall Rejection相同物理墙位触达共用一次执行权。
+
+ES事件族新增账户内去重，NQ/MNQ折叠为同一NQ合约根，避免两图对同一ES事件重复入场；Replay和Live事件空间独立。物理事件在门禁、风险、仓位及手数检查完成后、创建订单前认领。
+
+ES事件与冰山候选记录三轴证据：有效期权模型/报价背景、ES方向响应、本地逐笔及本地K线质量。1、2、3个维度分别使用1、2、3手；NQ/MNQ最高均为3手。高风险突破尚未回踩时仍允许执行，但仓位回落至1手。报价覆盖/新鲜度、NQ实体/收盘比例不再作为独立一票否决，写入评分与门禁日志；严重陈旧/未来时间、缺少ES underlying历史、墙位事件无拒绝、ExpectedMove无有效锚点、结构止损方向或最大风险等仍为硬条件。结构止损最多50点，冰山路径按实际数量计算600美元路径预算，二级组合风险仍遵循300美元上限。执行记录包含 `EvidenceSizedQty`，日志包含三轴分数与输入状态。
+
+本轮分数只影响实际提交手数，不作为新的影子门禁；订单走现有真实OCO保护、Feishu成交通知、退出清理和人工平仓锁定重入流程。模拟账户应重点观察 `EVIDENCE_SIZE`、`EvidenceSizedQty`、`SKIP_PHYSICAL_EVENT_DUPLICATE_V212`、`NATIVE_ICEBERG_REACTION` 和Gamma墙拒绝日志。
 
 ## 2.9 两条路径转研究、NQ 入场质量与扩张阶段
 
 `FailureReverse_ObservationInvalidated_WideStop1_5R` 与 `ObservationConfirm` 本版本停止实际下单，但不删除候选、漏斗、MFE/MAE 和研究退出记录。旧的实际执行配置在升级到 `ACTUAL_EXEC_2.53` 时会过滤这两条路径，避免旧配置自动合并回来。
 
-`ESResponseAlignedBreakout` 和 `ESExpectedMoveExpansion` 在 NQ 上增加独立的自身 K 线确认：突破路径要求实体占本 K 线区间至少 50%、方向性收盘至少 80%；预期波动扩张路径要求实体至少 40%、方向性收盘至少 65%。MNQ 不套用这组 NQ 专属门禁。
+`ESResponseAlignedBreakout` 和 `ESExpectedMoveExpansion` 在 NQ 上记录自身K线实体/收盘质量，2.12中作为证据计分，不再一票否决；缺少真实OHLC数据仍阻止下单。突破参考50%实体/80%收盘，扩张参考40%实体/65%收盘。MNQ按本地逐笔证据计分，不套用NQ偏好阈值。
 
 预期波动扩张由原来的 `0.75-1.25` 倍锚定预期波动收敛为 `0.75-1.10` 倍；超过 1.10 倍记录 `OptionsGate:ExpectedMoveExpansionLate`，仍保留候选审计。
 
@@ -36,9 +50,9 @@
 - Breakout 达到0.75R后将保护止损移动到覆盖配置往返手续费并多锁一个最小跳动的位置；原1.5R目标不变。该保护价不保证覆盖成交滑点。
 - 其他路径、Breakout Short确认阈值、FR Short目标及全局风险配置均不变。
 
-本文以当前实际配置和策略代码为准，记录当前自动下单的 6 条路径。`ObservationConfirm`、`FailureReverse_ObservationInvalidated_WideStop1_5R` 和 `NativeIcebergReaction` 仅记录研究，不实际下单。
+本文以当前实际配置和策略代码为准。2.12版本实际自动下单集合共7条：原6条加 `CrossMarketIcebergOrderFlowReaction`；`ObservationConfirm`、`FailureReverse_ObservationInvalidated_WideStop1_5R` 和兼容名 `NativeIcebergReaction` 仅记录研究，不实际下单。
 
-当前实际配置（6条）：
+当前实际配置（7条）：
 
 ```text
 BreakawayFvg_Qualified
@@ -47,6 +61,7 @@ ESResponseAlignedBreakout
 ESWallRejectionReversal
 ESExpectedMoveExpansion
 ESGammaConcentrationResponse
+CrossMarketIcebergOrderFlowReaction
 ```
 
 ## 一、全局实际下单条件
@@ -70,7 +85,8 @@ ESGammaConcentrationResponse
 | 项目        |          当前值 |
 | --------- | -----------: |
 | 自动模式      |           开启 |
-| 单次下单数量    |          1 手 |
+| 普通路径单次下单 |          1 手 |
+| ES/冰山动态手数 |       证据计分1–3手 |
 | 每日最大交易数   |         20 笔 |
 | MNQ 日损限制  |       200 美元 |
 | NQ 日损限制   | 测试阶段关闭，配置为 0 |
@@ -221,21 +237,20 @@ Long FailureReverse 主要保留为研究或特殊扩量，不是当前常规对
 
 以下四条路径使用 ES 实时行情和 ES 期权链代理模型指导 NQ/MNQ：
 
-当前公共 ES 代理门禁仍检查前述四条旧路径。新版证据（EvidenceSchema=2）下，旧四条依赖有效的 ES 价格与五分钟参考，不再依赖 ATM/本地期权报价覆盖；Breakaway 仍拒绝显著反向的 ES 响应。新增 ES 四条仍要求 ModelReady 及相应期权报价。旧归档缺少独立证据时间时保留旧数据质量检查，不能当作新版证据验收。
+ES四条路径均要求有效ES价格、近5分钟参考及方向响应。报价覆盖率和90秒期权报价新鲜度参与手数评分；ES底层价格严重陈旧、未来时间或结构事件不成立仍硬拒绝。`CrossMarketIcebergOrderFlowReaction` 以本地NQ/MNQ原生MBO及逐笔确认为入场主因，ES期权和ES响应只参与仓位计分。
 
 - `ESResponseAlignedBreakout`
 - `ESWallRejectionReversal`
 - `ESExpectedMoveExpansion`
 - `ESGammaConcentrationResponse`
+- `CrossMarketIcebergOrderFlowReaction`
 
 ES 图表是 `SourceOnly`，不在 ES 图表上实际下单；NQ/MNQ 图表作为 Consumer 读取 ES 源发布的共享快照。
 
-四条路径共同要求：
+四条ES路径共同要求：
 
-- ES 代理状态为 `ModelReady`。
-- 快照年龄不超过 90 秒。
-- 有有效 ATM 报价。
-- 本地有效期权报价覆盖率至少 50%。
+- ES 代理为 `ModelReady` 或具备有效价格数据的 `PriceReady`。
+- 代理快照不超过5分钟；较新的期权报价、ATM及至少50%本地/Call/Put覆盖只增加仓位分数。
 - 有 ES 当前价格。
 - 有约 60 秒和 5 分钟价格参考。
 - 60 秒参考年龄约 55 至 70 秒。
@@ -395,7 +410,7 @@ DealerGammaUnknown
 - 目标通常 1.5R。
 - 达到约 1R 后进入保本保护。
 
-## 十一、方向与历史路径说明（6条执行 + 研究候选）
+## 十一、方向与历史路径说明（7条执行 + 研究候选）
 
 | 路径                                                 | 当前实际主要方向     | 核心触发                |
 | -------------------------------------------------- | ------------ | ------------------- |
@@ -407,12 +422,13 @@ DealerGammaUnknown
 | ESWallRejectionReversal                            | Long / Short | Put/Call Wall 触达后拒绝 |
 | ESExpectedMoveExpansion                            | Long / Short | ES 相对锚点扩张           |
 | ESGammaConcentrationResponse                       | Long / Short | Gamma 集中位附近响应       |
+| CrossMarketIcebergOrderFlowReaction               | Long / Short | NQ/MNQ原生冰山与本地成交确认 |
 
-以下路径不在当前6条自动下单配置中：
+以下路径不在当前7条自动下单配置中：
 
 - `SignificantZoneFirstTouchLong`
 - `SignificantZoneFirstTouchShort`
-- `NativeIcebergReaction`（研究记录，不实际下单）
+- `NativeIcebergReaction`（旧兼容标签，不单独下单）
 - 普通 `BreakawayFvg`
 - 其他历史研究、Shadow、ZoneBirth、UnknownRegime 和 HTF 路径。
 

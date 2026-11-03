@@ -30,7 +30,7 @@ public sealed partial class OpeningPullbackFailureStrategy
                 ActiveTrades = ActiveReplayExecutions().Select(x => x.TradeId).ToArray(),
                 Frames = _completedFrames.Values.ToArray(), DailyAverages = _dailyAverages.ToArray(),
                 MicroContext = micro, Tape = tape,
-                IsTest = path == "StartupTestOrder", IsIndependentIceberg = path == "NativeIcebergReaction"
+                IsTest = path == "StartupTestOrder", IsIndependentIceberg = path is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction"
             });
         }
         catch (Exception ex)

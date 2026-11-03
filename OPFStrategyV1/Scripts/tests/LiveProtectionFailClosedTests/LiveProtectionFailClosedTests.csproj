@@ -8,7 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\OPFStrategyV1.csproj" />
     <Reference Include="ATAS.DataFeedsCore">
-      <HintPath>C:\Program Files (x86)\ATAS Platform\ATAS.DataFeedsCore.dll</HintPath>
+      <HintPath>$(ATASPlatformDir)\ATAS.DataFeedsCore.dll</HintPath>
       <Private>true</Private>
     </Reference>
   </ItemGroup>

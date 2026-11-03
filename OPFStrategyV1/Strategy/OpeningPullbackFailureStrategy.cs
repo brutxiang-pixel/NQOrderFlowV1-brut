@@ -295,7 +295,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     [Category("OPF Profile")]
     [DisplayName("Execution Profile")]
-    public string ExecutionProfileName { get; set; } = "MNQ_2Contract_Evidence";
+    public string ExecutionProfileName { get; set; } = "MNQ_1Contract_Target150_200";
 
     [Category("OPF Research")]
     [DisplayName("Enable Research Logging")]
@@ -633,15 +633,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private string ResolveExecutionProfileName(ActualExecutionSettings settings)
     {
-        if (settings.ActualOrderQuantity == 2m &&
-            string.Equals(settings.ResearchLogMode, "Compact", StringComparison.OrdinalIgnoreCase) &&
-            settings.ActualTargetR == 1.5m &&
-            !settings.ActualUseFullLossGuard &&
-            !settings.ActualUseConsecutiveLossGuard)
-        {
-            return "MNQ_2Contract_Evidence";
-        }
-
         return ExecutionProfileName;
     }
 
@@ -2306,7 +2297,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (activeExecutions.Count == 1)
         {
             var primary = activeExecutions[0];
-            var quantity = Math.Max(0m, ReplayOrderQuantity);
+            var quantity = EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time);
             var combinedRisk = primary.InitialRiskPoints * _snapshot.InstrumentProfile.PointValue * RemainingExecutionQuantity(primary) +
                 risk * _snapshot.InstrumentProfile.PointValue * quantity;
             if (primary.Side != signal.Side)
@@ -3386,6 +3377,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         }
         if (!isDeferredContinuation)
             StartShadowTradeTracking(signal, entryCandle, researchPath, stop, risk);
+        var requestedQty = EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time);
         if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
         {
             var reason = $"LiveDailyLoss:net={_liveAccountDailyNetPnlDollars:0.##},limit={_actualDailyLossLimitDollars:0.##}";
@@ -3475,7 +3467,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (isSecondaryExecution)
         {
             var primary = activeExecutions[0];
-            var secondaryQty = Math.Max(0m, ReplayOrderQuantity);
+            var secondaryQty = EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time);
             var pointValue = _snapshot.InstrumentProfile.PointValue;
             var combinedRisk = primary.InitialRiskPoints * pointValue * RemainingExecutionQuantity(primary) +
                 risk * pointValue * secondaryQty;
@@ -3484,11 +3476,11 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
                 secondaryReason = "DeferredSecondaryDisabled";
             else if (primary.Side != signal.Side)
                 secondaryReason = $"SecondaryDirectionMismatch:primary={primary.Side}|candidate={signal.Side}";
-            else if (researchPath != "NativeIcebergReaction" && !primary.ProtectBreakEvenAppliedV186 && !primary.RunnerBreakEvenApplied)
+            else if (!IsIcebergExecutionPath(researchPath) && !primary.ProtectBreakEvenAppliedV186 && !primary.RunnerBreakEvenApplied)
                 secondaryReason = "SecondaryPrimaryNotActuallyProtectedAtBE";
-            else if (researchPath != "NativeIcebergReaction" && (signal.Zone?.ZoneId ?? $"{researchPath}|{signal.Bar}") == primary.EntryStructureKey)
+            else if (!IsIcebergExecutionPath(researchPath) && (signal.Zone?.ZoneId ?? $"{researchPath}|{signal.Bar}") == primary.EntryStructureKey)
                 secondaryReason = "SecondaryRequiresIndependentStructure";
-            else if (researchPath != "NativeIcebergReaction" && !StructureRiskPolicy.Applies(researchPath) && !IsStaticSecondaryEligibleV215(signal.Side, researchPath, risk))
+            else if (!IsIcebergExecutionPath(researchPath) && !StructureRiskPolicy.Applies(researchPath) && !IsStaticSecondaryEligibleV215(signal.Side, researchPath, risk))
                 secondaryReason = $"SecondaryStaticG2Blocked:path={researchPath}|side={signal.Side}|band={StaticRiskBandV215(risk)}";
             else if (combinedRisk > 300m)
                 secondaryReason = $"SecondaryRiskCap:combined={combinedRisk:0.##}|max=300";
@@ -3539,7 +3531,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return;
         }
 
-        var qty = 1m;
+        var qty = requestedQty;
         if (qty <= 0m)
         {
             _researchLogger?.AppendInfo(_snapshot.SnapshotId, entryCandle.Bar, entryCandle.Time, "EXEC_SKIP_QTY quantity<=0");
@@ -3548,15 +3540,29 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return;
         }
 
+        string? physicalEventClaim = null;
+        if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse" or "CrossMarketIcebergOrderFlowReaction")
+        {
+            var eventPart = signal.SkipReasons.FirstOrDefault(x => x.StartsWith("ES_EVENT_KEY:", StringComparison.Ordinal) || x.StartsWith("ICE_EVENT_KEY:", StringComparison.Ordinal));
+            var scope = $"{LiveAccountScope.FromPortfolio(Portfolio)}|{Security?.Code?.Replace("MNQ", "NQ", StringComparison.OrdinalIgnoreCase)}|{IsHistoricalReplayTime(entryCandle.Time)}|{eventPart ?? signal.SignalId}";
+            if (!PhysicalEventExecutionDedup.TryClaim(scope, entryCandle.Time))
+            {
+                AppendExecutionDecision(signal, entryCandle, "Skip", $"PhysicalEventAlreadyClaimed:{eventPart}", researchPath, stop, risk);
+                AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_PHYSICAL_EVENT_DUPLICATE_V212", "-", researchPath, entryCandle.Close, 0m, eventPart ?? signal.SignalId);
+                return;
+            }
+            physicalEventClaim = scope;
+        }
+
         var entry = entryCandle.Close;
         var targetR = isDeferredContinuation ? DeferredContinuationTargetRV208 : ActualTargetRFor(signal, researchPath, risk);
         var targetDistance = risk * targetR;
         var target = signal.Side == TradeSide.Long ? entry + targetDistance : entry - targetDistance;
         var lane = isSecondaryExecution ? "Secondary" : "Primary";
         var tradeId = $"{entryCandle.Time:yyyyMMdd-HHmm}-{signal.Side}-{entryCandle.Bar}{(isSecondaryExecution ? "-S2" : string.Empty)}{(isDeferredContinuation ? "-DEF" : string.Empty)}";
-        if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse")
+        if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse" or "CrossMarketIcebergOrderFlowReaction")
             tradeId += "-" + researchPath;
-        if (researchPath == "NativeIcebergReaction") tradeId += "-ICE-" + signal.SignalId;
+        if (researchPath is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction") tradeId += "-ICE-" + signal.SignalId;
         tradeId += "-" + (Security?.Code ?? ResolveFeishuProductCode()) + "-" + _snapshot.SnapshotId[^8..];
         var maxAllowedRiskPoints = MaxAllowedActualRiskPoints(signal, researchPath, risk);
         var entryOrder = new Order
@@ -3588,6 +3594,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             targetR,
             entryOrder);
         execution.Lane = lane;
+        execution.PhysicalEventClaimKey = physicalEventClaim;
         execution.EntryZoneId = signal.Zone?.ZoneId;
         execution.EntryStructureKey = signal.Zone?.ZoneId ?? $"{researchPath}|{signal.Bar}";
         execution.IsDeferredContinuation = isDeferredContinuation;
@@ -3701,6 +3708,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             executeReasons.Add($"{observationLongTargetTag}:targetR={targetR:0.##},plannedRisk={risk:0.##}");
         if (targetR != ReplayTargetR)
             executeReasons.Add($"ActualTargetOverride:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
+        if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse" or "CrossMarketIcebergOrderFlowReaction")
+            executeReasons.Add($"EvidenceSizedQty:{qty:0.##}");
         var executeReason = string.Join("|", executeReasons);
         execution.CountedAsObservationFiller = isObservationFiller;
         execution.CountedAsQualityRescue = IsDailyVolumeQualityRescue(signal, researchPath, risk);
@@ -3980,6 +3989,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         execution.ExitBar = _lastResearchCandle?.Bar;
         execution.ExitPrice = reference;
         execution.ExitRole = "ENTRY_SUBMISSION_ABORTED";
+        PhysicalEventExecutionDedup.Release(execution.PhysicalEventClaimKey);
         RollBackNormalTradeCounters(execution);
         LogExecutionInfo($"EXEC_ENTRY_SUBMISSION_ABORTED_V178 trade={execution.TradeId} reason={reason}");
         AppendExecutionEvent(execution, "ENTRY_SUBMISSION_ABORTED_V178", "ENTRY", reference, execution.Quantity, reason);
@@ -4016,6 +4026,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         var entry = entryCandle.Close;
         var entryQualityTag = BuildEntryQualityTag(signal, entryCandle, researchPath, risk);
         var loggedReason = string.IsNullOrEmpty(entryQualityTag) ? reason : reason + "|" + entryQualityTag;
+        if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse" or "CrossMarketIcebergOrderFlowReaction")
+            loggedReason += $"|EvidenceSizedQty:{EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time):0.##}";
         var targetR = ActualTargetRFor(signal, researchPath, risk);
         var target = TargetFromRisk(signal.Side, entry, risk, targetR);
         var reward = EstimateActualExecutionReward(signal, researchPath, entry, risk);
@@ -4465,6 +4477,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             "SignificantZoneFirstTouchLong" or
             "SignificantZoneFirstTouchShort" or
             "NativeIcebergReaction" or
+            "CrossMarketIcebergOrderFlowReaction" or
             "ESResponseAlignedBreakout" or
             "ESWallRejectionReversal" or
             "ESExpectedMoveExpansion" or
@@ -4475,7 +4488,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     {
         return researchPath switch
         {
-            "NativeIcebergReaction" => true,
+            "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction" => true,
             "ObservationConfirm" or "ObservationConfirm_WideStop1_5R" or "BreakawayFvg_Qualified" => true,
             "BreakawayFvg" => side == TradeSide.Short,
             "FailureReverse_ObservationInvalidated_WideStop1_5R" or "FailureReverse_RetestFailed" => side == TradeSide.Short,
@@ -4493,7 +4506,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private string[] ActualExecutionStrategySkipReasons(CandidateSignal signal, string researchPath)
     {
-        if (researchPath == "NativeIcebergReaction") return Array.Empty<string>();
+        if (researchPath is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction") return Array.Empty<string>();
         if (researchPath == "ObservationConfirm")
             return signal.SetupQualityScore.TotalScore < _actualObservationConfirmMinSetupQualityScore
                 ? new[] { $"OCBaseQuality:score={signal.SetupQualityScore.TotalScore:0.##}|min={_actualObservationConfirmMinSetupQualityScore:0.##}" }
@@ -4564,16 +4577,17 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             researchPath is not ("ESResponseAlignedBreakout" or "ESExpectedMoveExpansion"))
             return null;
 
-        var range = entryCandle.High - entryCandle.Low;
+        if (!_intradayEvidence.TryGetValue(signal.SignalId, out var evidence)) return "NQOwnConfirmationUnavailableV29";
+        var range = evidence.High - evidence.Low;
         if (range <= 0m) return "NQOwnConfirmationUnavailableV29";
-        var bodyFraction = Math.Abs(entryCandle.Close - entryCandle.Open) / range;
+        var bodyFraction = Math.Abs(evidence.Close - evidence.Open) / range;
         var directionalClose = signal.Side == TradeSide.Long
-            ? (entryCandle.Close - entryCandle.Low) / range
-            : (entryCandle.High - entryCandle.Close) / range;
+            ? (evidence.Close - evidence.Low) / range
+            : (evidence.High - evidence.Close) / range;
         var minBody = researchPath == "ESResponseAlignedBreakout" ? .50m : .40m;
         var minClose = researchPath == "ESResponseAlignedBreakout" ? .80m : .65m;
         if (bodyFraction < minBody || directionalClose < minClose)
-            return $"NQOwnConfirmationWeakV29:path={researchPath}|body={bodyFraction:0.000}|minBody={minBody:0.00}|close={directionalClose:0.000}|minClose={minClose:0.00}";
+            LogLiveReadinessInfo($"NQ_OWN_CANDLE_EVIDENCE path={researchPath} body={bodyFraction:0.000} preferredBody={minBody:0.00} close={directionalClose:0.000} preferredClose={minClose:0.00} impact=scoreOnly");
         return null;
     }
 
@@ -4636,6 +4650,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (StructureRiskPolicy.Applies(researchPath)) return StructureRiskPolicy.MaxPoints;
         if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse")
             return _snapshot?.InstrumentProfile.MaxRiskPointsHard ?? 25m;
+        if (researchPath == "CrossMarketIcebergOrderFlowReaction") return StructureRiskPolicy.MaxPoints;
         if (IsZoneBirthShortExpansionV168(signal, researchPath))
             return risk <= ZoneBirthShortV170LowRiskMaxPoints
                 ? ZoneBirthShortV170LowRiskMaxPoints
@@ -5192,9 +5207,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (_snapshot is null)
             return Array.Empty<string>();
-        if (researchPath == "NativeIcebergReaction")
+        if (researchPath is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction")
         {
-            var reject = StructureRiskPolicy.Reject(risk, _snapshot.InstrumentProfile.PointValue, 1m);
+            var quantity = EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time);
+            var reject = StructureRiskPolicy.Reject(risk, _snapshot.InstrumentProfile.PointValue, quantity);
+            var dollars = risk * _snapshot.InstrumentProfile.PointValue * quantity;
+            if (reject is null && dollars > 600m) reject = $"IcebergDollarRiskExceeded:risk={dollars:0.##}|max=600";
             return reject is null ? Array.Empty<string>() : new[] { reject };
         }
 
@@ -5287,7 +5305,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             // Replace legacy stop-width cuts, retaining quality and daily-cap rules.
             reasons.RemoveAll(reason => !reason.StartsWith("OCWideStopLongExpansionV163DailyCap:", StringComparison.Ordinal) &&
                 !reason.StartsWith("ShortObservationMidRiskQualityCutV112:", StringComparison.Ordinal));
-            var reject = StructureRiskPolicy.Reject(risk, instrument.PointValue, ReplayOrderQuantity);
+            var quantity = EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time);
+            var reject = StructureRiskPolicy.Reject(risk, instrument.PointValue, quantity);
             if (reject is not null) reasons.Add(reject);
         }
 
@@ -5431,7 +5450,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         breakEvenTriggerR = 0m;
         timeStopBars = 0;
 
-        if (researchPath == "NativeIcebergReaction")
+        if (researchPath is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction")
             (targetR, breakEvenTriggerR, timeStopBars) = (.75m, .5m, 1);
         else if (researchPath == "ObservationConfirm")
             (targetR, breakEvenTriggerR, timeStopBars) = (1.5m, .75m, 6);
@@ -7272,7 +7291,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (_snapshot is null || entry <= 0m)
             return execution.PlannedRiskPoints;
 
-        var minRisk = execution.ResearchPath == "NativeIcebergReaction" ? _snapshot.InstrumentProfile.TickSize :
+        var minRisk = execution.ResearchPath is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction" ? _snapshot.InstrumentProfile.TickSize :
             Math.Max(_snapshot.InstrumentProfile.MinStopPoints, _snapshot.InstrumentProfile.TickSize);
         var stop = execution.Stop;
         if (execution.Side == TradeSide.Long)
@@ -7295,7 +7314,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return;
 
         var entry = execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice;
-        var minRisk = execution.ResearchPath == "NativeIcebergReaction" ? _snapshot.InstrumentProfile.TickSize :
+        var minRisk = execution.ResearchPath is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction" ? _snapshot.InstrumentProfile.TickSize :
             Math.Max(_snapshot.InstrumentProfile.MinStopPoints, _snapshot.InstrumentProfile.TickSize);
         var stop = execution.Stop;
         if (execution.Side == TradeSide.Long)
@@ -11156,6 +11175,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         public DynamicExitComparison EarlyExitComparison { get; } = new();
         public DynamicExitComparison LockExitComparison { get; } = new();
         public string Lane { get; set; } = "Primary";
+        public string? PhysicalEventClaimKey { get; set; }
         public decimal IcebergMaxFavorable { get; set; }
         public string? EntryZoneId { get; set; }
         public string? EntryStructureKey { get; set; }

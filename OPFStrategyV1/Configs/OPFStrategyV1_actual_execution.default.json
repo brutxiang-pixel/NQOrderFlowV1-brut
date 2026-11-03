@@ -3,7 +3,7 @@
   "EnableActualOrders": false,
   "ManualAlertEnabled": true,
   "ExecutionMode": "ManualAlert",
-  "ActualExecutionPaths": "BreakawayFvg_Qualified|FailureReverse_RetestFailed|ESResponseAlignedBreakout|ESWallRejectionReversal|ESExpectedMoveExpansion|ESGammaConcentrationResponse",
+  "ActualExecutionPaths": "BreakawayFvg_Qualified|FailureReverse_RetestFailed|ESResponseAlignedBreakout|ESWallRejectionReversal|ESExpectedMoveExpansion|ESGammaConcentrationResponse|CrossMarketIcebergOrderFlowReaction",
   "ActualAllowResearchPaths": false,
   "ActualOrderQuantity": 1,
   "ActualTargetR": 1.5,

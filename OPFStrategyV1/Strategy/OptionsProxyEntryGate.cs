@@ -2,7 +2,7 @@ namespace OPFStrategyV1.Strategy;
 
 public static class OptionsProxyEntryGate
 {
-    // Reserve five seconds for publication and consumer polling; entry freshness remains 90s.
+    // Reserve five seconds for publication and polling. Option freshness affects sizing; ES price age remains an entry gate.
     internal static bool CanPublishQuote(DateTime received, DateTime now) =>
         received <= now && now - received <= TimeSpan.FromSeconds(85);
 
@@ -13,24 +13,17 @@ public static class OptionsProxyEntryGate
         var captured = context.CapturedAtUtc;
         var crossMarket = path is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse";
         var structureOnly = !crossMarket;
-        if (status != "ModelReady" && !(structureOnly && context.EvidenceSchema >= 2 && status == "PriceReady")) return "OptionsGate:DataUnavailable";
+        if (status != "ModelReady" && !(context.EvidenceSchema >= 2 && status == "PriceReady")) return "OptionsGate:DataUnavailable";
         if (captured > decision) return "OptionsGate:FutureData";
-        if (decision - captured > TimeSpan.FromSeconds(90)) return "OptionsGate:Stale";
+        if (decision - captured > TimeSpan.FromMinutes(5)) return "OptionsGate:Stale";
         if (context.EvidenceSchema >= 2 && (context.UnderlyingObservedAtUtc is not { } observed || observed > decision || decision - observed > TimeSpan.FromSeconds(90)))
             return "OptionsGate:UnderlyingStale";
-        if (!structureOnly || context.EvidenceSchema < 2)
+        if (status == "ModelReady" && (!structureOnly || context.EvidenceSchema < 2))
         {
-            if (context.EvidenceSchema >= 2 && (context.OptionQuotesObservedAtUtc is not { } quotes || quotes > decision || decision - quotes > TimeSpan.FromSeconds(90)))
-                return "OptionsGate:OptionQuotesStale";
-            if (context.AtmQuotesReady != true || context.LocalQuoteCoverage is null) return "OptionsGate:QuoteQualityUnavailable";
-            if (context.LocalQuoteCoverage < 0.5m) return "OptionsGate:LocalQuotesIncomplete";
+            if (context.OptionQuotesObservedAtUtc is { } quotes && quotes > decision) return "OptionsGate:FutureOptionData";
         }
-        var concentrationPath = path is "ESWallRejectionReversal" or "ESGammaConcentrationResponse";
-        if (concentrationPath && (context.CallQuoteCoverage is null || context.PutQuoteCoverage is null ||
-            context.CallQuoteCoverage < 0.5m || context.PutQuoteCoverage < 0.5m)) return "OptionsGate:WallQuotesIncomplete";
         if (risk <= 0m || high <= low) return "OptionsGate:InvalidCandidate";
         var alignedBody = isLong ? close - open : open - close;
-        var closeFraction = isLong ? (close - low) / (high - low) : (high - close) / (high - low);
         var breakout = path.StartsWith("Breakaway", StringComparison.Ordinal);
         var current = context.UnderlyingPrice;
         var esMove = current.HasValue && context.UnderlyingPrice5mAgo.HasValue
@@ -55,8 +48,7 @@ public static class OptionsProxyEntryGate
                 return "OptionsGate:ESResponseReferenceInvalid";
             if (isLong ? fastMove <= -responseThreshold : fastMove >= responseThreshold)
                 return "OptionsGate:ESFastResponseOpposesEntry";
-            var minCloseFraction = path == "ESResponseAlignedBreakout" && isLong ? 0.75m : 0.65m;
-            if (alignedBody <= 0m || closeFraction < minCloseFraction)
+            if (alignedBody <= 0m)
                 return "OptionsGate:NqConfirmationWeak";
         }
         if (path == "ESResponseAlignedBreakout")
@@ -94,13 +86,19 @@ public static class OptionsProxyEntryGate
         }
         if (path == "ESGammaConcentrationResponse")
         {
-            if (context.EvidenceSchema >= 2 && !ValidLevelEvent(context, decision, null)) return "OptionsGate:GammaEventUnavailable";
-            if (context.EvidenceSchema >= 2 && (isLong ? current <= context.EventLevel + .25m : current >= context.EventLevel - .25m))
-                return "OptionsGate:GammaResponseLost";
             if (context.GammaConcentrationStrike is null || !current.HasValue || context.GammaConcentrationShare < 0.18m) return "OptionsGate:GammaConcentrationInsufficient";
-            var distance = Math.Abs(current.Value - (context.EventLevel ?? context.GammaConcentrationStrike.Value));
+            var isPutWall = context.PutWallProxy is { } put && Math.Abs(context.GammaConcentrationStrike.Value - put) <= Math.Max(.25m, (context.ExpectedMoveProxy ?? 0m) * .1m);
+            var isCallWall = context.CallWallProxy is { } call && Math.Abs(context.GammaConcentrationStrike.Value - call) <= Math.Max(.25m, (context.ExpectedMoveProxy ?? 0m) * .1m);
+            if (isLong && !isPutWall) return "OptionsGate:GammaUnsignedLongRequiresPutWall";
+            if (!isLong && !isCallWall) return "OptionsGate:GammaUnsignedShortRequiresCallWall";
+            var wall = isLong ? context.PutWallProxy : context.CallWallProxy;
+            if (wall is null || !current.HasValue) return "OptionsGate:GammaWallUnavailable";
+            if (context.EvidenceSchema >= 2 && (!ValidLevelEvent(context, decision, "Reject") || context.EventLevel != wall)) return "OptionsGate:GammaWallRejectUnavailable";
+            if (context.EvidenceSchema >= 2 && (isLong ? current <= wall + .25m : current >= wall - .25m))
+                return "OptionsGate:GammaWallResponseLost";
+            var distance = Math.Abs(current.Value - wall.Value);
             if (distance > Math.Max(1m, (context.ExpectedMoveProxy ?? 0m) * 0.2m)) return "OptionsGate:GammaConcentrationNotNear";
-            if (Math.Abs(esMove) < responseThreshold || (isLong && esMove <= 0m) || (!isLong && esMove >= 0m)) return "OptionsGate:GammaConcentrationNoResponse";
+            if (Math.Abs(esMove) < responseThreshold || (isLong && esMove <= 0m) || (!isLong && esMove >= 0m)) return "OptionsGate:GammaWallNoResponse";
         }
         if (breakout && Math.Abs(esMove) >= responseThreshold)
         {

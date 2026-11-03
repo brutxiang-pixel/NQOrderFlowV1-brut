@@ -14,6 +14,7 @@
     <Compile Include="../../../Strategy/ExecutionClock.cs" Link="ExecutionClock.cs" />
     <Compile Include="../../../Strategy/NativeIcebergArchive.cs" Link="NativeIcebergArchive.cs" />
     <Compile Include="../../../Strategy/AccountPnlScope.cs" Link="AccountPnlScope.cs" />
+    <Compile Include="../../../Strategy/PhysicalEventExecutionDedup.cs" Link="PhysicalEventExecutionDedup.cs" />
     <Compile Include="../../../Core/MarketData/OpfCandle.cs" Link="OpfCandle.cs" />
   </ItemGroup>
 </Project>

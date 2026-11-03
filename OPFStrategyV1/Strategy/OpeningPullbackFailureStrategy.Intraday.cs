@@ -172,7 +172,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             return "MTF:ContinuationAgainstTwoFastFrames";
         var spike = BuildLiquiditySpikeObservation(candle, signal.Side);
         if (continuation && spike.EventType == "Exhaustion" && spike.Side == signal.Side) return "Micro:ContinuationExhaustion";
-        if (!continuation && path != "NativeIcebergReaction" && spike.EventType == "Initiative" && spike.Side != signal.Side)
+        if (!continuation && path is not ("NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction") && spike.EventType == "Initiative" && spike.Side != signal.Side)
             return "Micro:ReversalAgainstInitiative";
         var obstacles = _completedFrames.Values.Where(x => x.Name is "4H" or "6H" or "D")
             .Select(x => isLong ? x.High : x.Low).Concat(_dailyAverages.Values.Where(x => x.HasValue).Select(x => x!.Value));

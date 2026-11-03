@@ -20,7 +20,7 @@ public sealed partial class OpeningPullbackFailureStrategy
     private void ObserveEsLevelEvents(EsOptionsProxySnapshot context)
     {
         if (context.UnderlyingPrice is not { } price || context.CapturedAtUtc <= _previousEsEventTime) return;
-        foreach (var (key, level) in new[] { ("Put", context.PutWallProxy), ("Call", context.CallWallProxy), ("Gamma", context.GammaConcentrationStrike) })
+        foreach (var (key, level) in new[] { ("Put", context.PutWallProxy), ("Call", context.CallWallProxy) })
         {
             if (_levelEvents.TryGetValue(key, out var existing) && existing.Active(context.CapturedAtUtc))
             { existing.Observe(price, context.CapturedAtUtc); continue; }
@@ -36,7 +36,6 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
         _previousEsLevels["Put"] = context.PutWallProxy;
         _previousEsLevels["Call"] = context.CallWallProxy;
-        _previousEsLevels["Gamma"] = context.GammaConcentrationStrike;
         _previousEsEventPrice = price;
         _previousEsEventTime = context.CapturedAtUtc;
     }
@@ -44,7 +43,7 @@ public sealed partial class OpeningPullbackFailureStrategy
     private EsOptionsProxySnapshot WithLevelEvent(EsOptionsProxySnapshot context, string path, TradeSide side, DateTime decision)
     {
         if (context.EvidenceSchema < 2 || path is not ("ESWallRejectionReversal" or "ESGammaConcentrationResponse")) return context;
-        var key = path == "ESGammaConcentrationResponse" ? "Gamma" : side == TradeSide.Long ? "Put" : "Call";
+        var key = side == TradeSide.Long ? "Put" : "Call";
         if (!_levelEvents.TryGetValue(key, out var item) || !item.Active(decision) || context.UnderlyingPrice is not { } price)
             return context with { EventLevel = null, EventTouchedAtUtc = null, EventKind = null };
         return context with { EventLevel = item.Level, EventTouchedAtUtc = item.Touched,
@@ -68,12 +67,12 @@ public sealed partial class OpeningPullbackFailureStrategy
             RefreshEsOptionsSharedContext();
             lock (_esOptionsProxySync) context = _esOptionsProxy;
         }
-        if (context.Status != "ModelReady" || context.UnderlyingPrice is null)
+        if (context.Status is not ("ModelReady" or "PriceReady") || context.UnderlyingPrice is null)
         {
             if (intraday && candle.Time < _nextEsIntradayAudit) return;
             _nextEsIntradayAudit = candle.Time.AddSeconds(5);
             _researchLogger?.AppendInfo(_snapshot.SnapshotId, candle.Bar, candle.Time,
-                $"ES_CROSS_MARKET_FUNNEL stage=DataBlocked status={context.Status} reason={context.Detail}");
+                $"ES_CROSS_MARKET_FUNNEL stage=DataBlocked product={Security?.Code ?? "-"} status={context.Status} reason={context.Detail} captured={context.CapturedAtUtc:O} optionQuotes={context.OptionQuotesObservedAtUtc:O} underlying={context.UnderlyingObservedAtUtc:O} coverage={context.Coverage:0.000}");
             return;
         }
 
@@ -137,41 +136,60 @@ public sealed partial class OpeningPullbackFailureStrategy
             var wallReach = Math.Max(1m, context.ExpectedMoveProxy.Value * 0.15m);
             var putLevel = _levelEvents.TryGetValue("Put", out var putEvent) && putEvent.Active(candle.Time) ? putEvent.Level : context.PutWallProxy;
             var callLevel = _levelEvents.TryGetValue("Call", out var callEvent) && callEvent.Active(candle.Time) ? callEvent.Level : context.CallWallProxy;
-            if (putLevel is { } putWall && Math.Abs(context.UnderlyingPrice.Value - putWall) <= wallReach && esMove >= responseThreshold && longBody >= range * 0.25m)
+            var concentration = context.GammaConcentrationStrike;
+            var gammaEligible = context.GammaConcentrationShare >= .18m && concentration.HasValue &&
+                Math.Abs(context.UnderlyingPrice.Value - concentration.Value) <= Math.Max(1m, context.ExpectedMoveProxy.Value * .2m);
+            var putGamma = gammaEligible && putLevel.HasValue && Math.Abs(concentration!.Value - putLevel.Value) <= Math.Max(.25m, context.ExpectedMoveProxy.Value * .1m);
+            var callGamma = gammaEligible && callLevel.HasValue && Math.Abs(concentration!.Value - callLevel.Value) <= Math.Max(.25m, context.ExpectedMoveProxy.Value * .1m);
+            if (!putGamma && putLevel is { } putWall && Math.Abs(context.UnderlyingPrice.Value - putWall) <= wallReach && esMove >= responseThreshold && longBody >= range * 0.25m && WallEventAllowed(context, "Put", putWall, TradeSide.Long, candle.Time))
                 SubmitEsCrossMarketCandidate(candle, "ESWallRejectionReversal", TradeSide.Long, "ESPutWallReject", intraday, _previousCandle?.High ?? candle.Open);
-            if (callLevel is { } callWall && Math.Abs(context.UnderlyingPrice.Value - callWall) <= wallReach && esMove <= -responseThreshold && shortBody >= range * 0.25m)
+            if (!callGamma && callLevel is { } callWall && Math.Abs(context.UnderlyingPrice.Value - callWall) <= wallReach && esMove <= -responseThreshold && shortBody >= range * 0.25m && WallEventAllowed(context, "Call", callWall, TradeSide.Short, candle.Time))
                 SubmitEsCrossMarketCandidate(candle, "ESWallRejectionReversal", TradeSide.Short, "ESCallWallReject", intraday, _previousCandle?.Low ?? candle.Open);
+            if (concentration is { } gamma && context.GammaConcentrationShare >= 0.18m &&
+                Math.Abs(context.UnderlyingPrice.Value - gamma) <= Math.Max(1m, context.ExpectedMoveProxy.Value * 0.2m) && range > 0m)
+            {
+            if (putGamma && esMove >= responseThreshold && longBody >= range * 0.25m && putLevel is { } gammaPut && WallEventAllowed(context, "Put", gammaPut, TradeSide.Long, candle.Time))
+                SubmitEsCrossMarketCandidate(candle, "ESGammaConcentrationResponse", TradeSide.Long, "ESPutGammaWallReject", intraday, _previousCandle?.High ?? candle.Open);
+            if (callGamma && esMove <= -responseThreshold && shortBody >= range * 0.25m && callLevel is { } gammaCall && WallEventAllowed(context, "Call", gammaCall, TradeSide.Short, candle.Time))
+                SubmitEsCrossMarketCandidate(candle, "ESGammaConcentrationResponse", TradeSide.Short, "ESCallGammaWallReject", intraday, _previousCandle?.Low ?? candle.Open);
+            }
         }
+    }
 
-        var gammaLevel = _levelEvents.TryGetValue("Gamma", out var gammaEvent) && gammaEvent.Active(candle.Time) ? gammaEvent.Level : context.GammaConcentrationStrike;
-        if (gammaLevel is { } concentration && context.GammaConcentrationShare >= 0.18m && context.ExpectedMoveProxy is > 0m &&
-            Math.Abs(context.UnderlyingPrice.Value - concentration) <= Math.Max(1m, context.ExpectedMoveProxy.Value * 0.2m) && range > 0m)
-        {
-            if (esMove >= responseThreshold && longBody >= range * 0.25m)
-                SubmitEsCrossMarketCandidate(candle, "ESGammaConcentrationResponse", TradeSide.Long, "ESGammaClusterUp", intraday, _previousCandle?.High ?? candle.Open);
-            if (esMove <= -responseThreshold && shortBody >= range * 0.25m)
-                SubmitEsCrossMarketCandidate(candle, "ESGammaConcentrationResponse", TradeSide.Short, "ESGammaClusterDown", intraday, _previousCandle?.Low ?? candle.Open);
-        }
+    private bool WallEventAllowed(EsOptionsProxySnapshot context, string wallType, decimal wall, TradeSide side, DateTime now)
+    {
+        return _levelEvents.TryGetValue(wallType, out var reaction) && reaction.Active(now) &&
+            Math.Abs(reaction.Level - wall) <= .25m && reaction.Response(side == TradeSide.Long, context.UnderlyingPrice ?? wall, .25m) == "Reject";
     }
 
     private void SubmitEsCrossMarketCandidate(OpfCandle candle, string path, TradeSide side, string reason, bool intraday, decimal trigger)
     {
         if (!IsReplayExecutionPathEnabled(path)) return;
+        if (Security?.Code?.StartsWith("ES", StringComparison.OrdinalIgnoreCase) == true) return;
         var decisionUtc = IsHistoricalReplayTime(candle.Time) ? DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc) : DateTime.UtcNow;
         EsOptionsProxySnapshot context;
         if (IsHistoricalReplayTime(candle.Time))
             context = OptionsProxySnapshotStore.ReadAsOf(OptionsProxyArchivePath, decisionUtc);
         else lock (_esOptionsProxySync) context = _esOptionsProxy;
         context = WithLevelEvent(context, path, side, decisionUtc);
+        var gateRisk = Math.Abs(candle.Close - (side == TradeSide.Long ? candle.Low - .5m : candle.High + .5m));
         var gate = OptionsProxyEntryGate.Evaluate(context, decisionUtc, path, side == TradeSide.Long,
-            candle.Open, candle.High, candle.Low, candle.Close, Math.Abs(candle.Close - (side == TradeSide.Long ? candle.Low - .5m : candle.High + .5m)));
+            candle.Open, candle.High, candle.Low, candle.Close, gateRisk);
         if (gate is not null)
         {
             if (_reactionAuditKeys.Add($"ES_GATE|{path}|{side}|{candle.Bar}|{gate}"))
-                _researchLogger?.AppendInfo(_snapshot!.SnapshotId, candle.Bar, candle.Time, $"ES_CROSS_MARKET_REJECT path={path} side={side} reason={gate}");
+            {
+                _researchLogger?.AppendInfo(_snapshot!.SnapshotId, candle.Bar, candle.Time,
+                    $"ES_CROSS_MARKET_REJECT product={Security?.Code ?? "-"} path={path} side={side} reason={gate} captured={context.CapturedAtUtc:O} optionQuotes={context.OptionQuotesObservedAtUtc:O} underlying={context.UnderlyingObservedAtUtc:O} coverage={context.Coverage:0.000} local={context.LocalQuoteCoverage:0.000} call={context.CallQuoteCoverage:0.000} put={context.PutQuoteCoverage:0.000}");
+                _researchLogger?.AppendValidationPacket(_snapshot!.SnapshotId, "options",
+                    new OptionsGatePacket(_snapshot.SnapshotId, $"{path}-{side}-{candle.Bar:000000}-{reason}", Security?.Code ?? "-",
+                        path, decisionUtc, side == TradeSide.Long, candle, gateRisk, context, gate));
+            }
             return;
         }
         var eventId = context.EventTouchedAtUtc is { } touch ? $"{path}-{side}-{touch:yyyyMMddHHmmssfffffff}" : $"{path}-{candle.Bar:000000}-{side}";
+        var eventPath = path is "ESWallRejectionReversal" or "ESGammaConcentrationResponse" ? "ES_WALL_GAMMA" : path;
+        var physical = string.Empty;
         var key = $"{path}|{side}|{candle.Bar}";
         if (intraday && _intradayAttempts.Contains(path + "|" + eventId)) return;
         if (intraday && _intradayAttempts.Contains(path + "|" + $"{path}-{candle.Bar:000000}-{side}")) return;
@@ -213,13 +231,17 @@ public sealed partial class OpeningPullbackFailureStrategy
                 if (!anchor.RetestReady(candle.Close, _snapshot!.InstrumentProfile.TickSize))
                 {
                     if (_reactionAuditKeys.Add($"ES_RETEST|{anchor.Started:O}|{side}"))
-                        LogLiveReadinessInfo($"ES_BREAKOUT_RETEST_WAIT event={anchor.Started:O} side={side} anchorPrice={anchor.Price} anchorRisk={anchor.Risk} trigger={trigger} stop={stop} price={candle.Close}");
-                    return;
+                        LogLiveReadinessInfo($"ES_BREAKOUT_RETEST_BYPASS event={anchor.Started:O} side={side} anchorPrice={anchor.Price} anchorRisk={anchor.Risk} trigger={trigger} stop={stop} price={candle.Close} sizePenalty=base");
                 }
             }
             key = $"{path}-{side}-{anchor.Started:yyyyMMddHHmmssfffffff}";
             if (_intradayAttempts.Contains(path + "|" + key)) return;
         }
+
+        physical = path is "ESWallRejectionReversal" or "ESGammaConcentrationResponse"
+            ? $"{side}|{context.EventTouchedAtUtc:O}|{context.EventLevel:0.00}|{(side == TradeSide.Long ? "Put" : "Call")}"
+            : path == "ESExpectedMoveExpansion" ? $"{side}|EM|{context.AnchorTradingDay:yyyyMMdd}|{context.ExpectedMoveAnchor:0.00}"
+            : $"{side}|BO|{(intraday && BreakoutAnchors.TryGetValue(BreakoutAnchorKey(side, IsHistoricalReplayTime(candle.Time)), out var activeBreakout) ? activeBreakout.Started : context.Price5mReferenceAtUtc):O}";
 
         var range = candle.High - candle.Low;
         if (range <= 0m) return;
@@ -232,6 +254,9 @@ public sealed partial class OpeningPullbackFailureStrategy
             45m,
             quality >= 45m,
             new[] { new ScoreComponent("CandleResponse", $"body={bodyFraction:0.000}|close={directionalClose:0.000}", quality >= 45m, 100m, quality, reason) });
+        var eventEvidence = new List<string> { "IndependentESContext", reason, $"ES_EVENT_KEY:{eventPath}|{physical}" };
+        if (intraday && path == "ESResponseAlignedBreakout" && _pendingEsRetest is { } activeAnchor && !activeAnchor.RetestReady(candle.Close, _snapshot!.InstrumentProfile.TickSize))
+            eventEvidence.Add("LargeRiskBreakoutNoRetest");
         var signal = new CandidateSignal(
             intraday && path == "ESResponseAlignedBreakout" ? key : eventId,
             _snapshot!.SnapshotId,
@@ -243,7 +268,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             null,
             score,
             score,
-            new[] { "IndependentESContext", reason });
+            eventEvidence.ToArray());
         if (intraday)
         {
             if (!_esReactionPlans.TryGetValue(signal.SignalId, out var plan))

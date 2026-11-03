@@ -6,6 +6,14 @@ public sealed record CompletedFrame(string Name, DateTime Time, decimal High, de
 
 public static class IntradayEntryPolicy
 {
+    public static (int Score, decimal Quantity) EvidenceSize(bool optionContext, bool esPriceReaction, bool localFlow,
+        decimal configuredMaximum)
+    {
+        var score = (optionContext ? 1 : 0) + (esPriceReaction ? 1 : 0) + (localFlow ? 1 : 0);
+        var quantity = score >= 3 ? 3m : score >= 2 ? 2m : 1m;
+        return (score, Math.Min(quantity, Math.Max(1m, configuredMaximum)));
+    }
+
     public static string? BreakoutChase(bool isLong, decimal price, decimal stop, decimal anchorPrice, decimal anchorRisk)
     {
         var advance = isLong ? price - anchorPrice : anchorPrice - price;

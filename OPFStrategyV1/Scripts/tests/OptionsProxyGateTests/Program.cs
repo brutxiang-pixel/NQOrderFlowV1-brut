@@ -41,36 +41,49 @@ void Check(bool condition, string name) { if (!condition) throw new Exception(na
 Check(Gate(Context()) is null, "ES response aligned breakout allowed");
 Check(Gate(Context(es: 4998m, prior: 5000m)) == "OptionsGate:ESResponseDisagreesWithBreakout", "ES response disagrees with long breakout");
 Check(Gate(Context(), isLong: false) == "OptionsGate:ESResponseDisagreesWithBreakout", "ES response disagrees with short breakout");
+var gammaContext = Context(es: 4991m, prior: 4988m) with { EvidenceSchema = 2, GammaConcentrationStrike = 4990m, PutWallProxy = 4990m,
+    CapturedAtUtc = now.AddSeconds(-1), UnderlyingObservedAtUtc = now.AddSeconds(-1), OptionQuotesObservedAtUtc = now.AddSeconds(-1),
+    Price5mReferenceAtUtc = now.AddSeconds(-300), PriceReferenceAtUtc = now.AddSeconds(-60),
+    EventLevel = 4990m, EventTouchedAtUtc = now.AddSeconds(-10), EventKind = "Reject", GammaConcentrationShare = .25m };
+var gammaLongReason = OptionsProxyEntryGate.Evaluate(gammaContext, now, "ESGammaConcentrationResponse", true, 100m, 110m, 99m, 109m, 10m);
+Check(gammaLongReason is null,
+    "unsigned gamma concentration maps to put wall for long rejection");
+Check(OptionsProxyEntryGate.Evaluate(gammaContext with { PutWallProxy = 4980m }, now, "ESGammaConcentrationResponse", true, 100m, 110m, 99m, 109m, 10m) == "OptionsGate:GammaUnsignedLongRequiresPutWall",
+    "unsigned gamma cannot open long without put-wall mapping");
+Check(OptionsProxyEntryGate.Evaluate(gammaContext with { GammaConcentrationStrike = 5010m, CallWallProxy = 5010m, EventLevel = 5010m,
+    EventKind = "Reject", UnderlyingPrice = 5009m, UnderlyingPrice60sAgo = 5012m, UnderlyingPrice5mAgo = 5012m }, now,
+    "ESGammaConcentrationResponse", false, 110m, 111m, 99m, 100m, 10m) is null,
+    "unsigned gamma concentration maps to call wall for short rejection");
 Check(Gate(Context(es: 5000m, prior: 5000m), path: "SignificantZoneFirstTouchLong", close: 100.5m) is null, "non-breakout path uses ES response as context only");
 Check(Gate(Context(status: "Unavailable")) == "OptionsGate:DataUnavailable", "missing data blocked");
 Check(Gate(Context(age: -1)) == "OptionsGate:FutureData", "future data blocked");
 Check(Gate(Context(age: 301)) == "OptionsGate:Stale", "stale data blocked");
-Check(Gate(Context() with { LocalQuoteCoverage = .49m }) == "OptionsGate:LocalQuotesIncomplete", "incomplete local data blocked");
+Check(Gate(Context() with { LocalQuoteCoverage = .49m }) is null, "incomplete quote coverage remains evidence, not a hard block");
 Check(Gate(Context(coverage: .13m)) is null, "far strikes no longer block complete ATM and local quotes");
-Check(Gate(Context() with { AtmQuotesReady = false }) == "OptionsGate:QuoteQualityUnavailable", "missing ATM pair remains blocked");
-Check(Gate(Context() with { CallQuoteCoverage = .49m }, path: "ESWallRejectionReversal") == "OptionsGate:WallQuotesIncomplete", "wall path needs call and put coverage");
+Check(Gate(Context() with { AtmQuotesReady = false }) is null, "missing ATM pair remains evidence, not a hard block");
+Check(Gate(Context() with { CallQuoteCoverage = .49m }, path: "ESWallRejectionReversal") == "OptionsGate:ESWallNotReached", "wall quote coverage is not the reason a distant wall is blocked");
 Check(Gate(Context() with { CallQuoteCoverage = .13m }, path: "ObservationConfirm") is null, "OC uses local quality without global wall coverage");
 Check(Gate(Context(), path: "ObservationConfirm") is null, "observation confirmation preserved");
 Check(Gate(Context(), path: "ESResponseAlignedBreakout") is null, "ES response path allowed");
-Check(OptionsProxyEntryGate.Evaluate(Context(), now, "ESResponseAlignedBreakout", true, 100m, 110m, 99m, 106.5m, 10m) == "OptionsGate:NqConfirmationWeak", "breakout long requires a 0.75 directional close");
+Check(OptionsProxyEntryGate.Evaluate(Context(), now, "ESResponseAlignedBreakout", true, 100m, 110m, 99m, 106.5m, 10m) is null, "breakout long close quality is score-only");
 Check(OptionsProxyEntryGate.Evaluate(Context(es: 4998m, prior: 5000m), now, "ESResponseAlignedBreakout", false, 110m, 110m, 99m, 102.5m, 10m) is null, "breakout short retains the existing 0.65 directional close threshold");
 Check(Gate(Context(es: 4998m, prior: 5000m) with { UnderlyingPrice60sAgo = 4998m }, path: "ESWallRejectionReversal", isLong: true) == "OptionsGate:ESWallNotReached", "wall rejection requires wall proximity");
 Check(Gate(Context(es: 5020m, prior: 5018m), path: "ESExpectedMoveExpansion") is null, "expected move expansion allowed");
 Check(Gate(Context(es: 5070m, prior: 5068m), path: "ESExpectedMoveExpansion") == "OptionsGate:ExpectedMoveExpansionLate", "expected move expansion rejects late extension beyond 110 percent");
 var currentEvidence = Context() with { EvidenceSchema = 2, UnderlyingObservedAtUtc = now, OptionQuotesObservedAtUtc = now, AnchorEstablishedAtUtc = now.AddHours(-1), AnchorSource = "FirstValidSessionObservation", AnchorSeries = "test", AnchorTradingDay = OptionsProxyExpiry.ExchangeDate(now) };
 Check(Gate(currentEvidence with { Status = "PriceReady", AtmQuotesReady = false, LocalQuoteCoverage = 0m }, path: "ObservationConfirm") is null, "structural path uses live ES response without unrelated option quote requirement");
-Check(Gate(currentEvidence with { Status = "PriceReady" }, path: "ESResponseAlignedBreakout") == "OptionsGate:DataUnavailable", "ES family retains option model requirement");
+Check(Gate(currentEvidence with { Status = "PriceReady" }, path: "ESResponseAlignedBreakout") is null, "ES price event remains executable without an option model");
 Check(Gate(currentEvidence with { UnderlyingObservedAtUtc = now.AddSeconds(-91) }) == "OptionsGate:UnderlyingStale", "new snapshot cannot mask stale underlying observation");
-Check(Gate(currentEvidence with { OptionQuotesObservedAtUtc = now.AddSeconds(-91) }, path: "ESResponseAlignedBreakout") == "OptionsGate:OptionQuotesStale", "new snapshot cannot mask stale option evidence");
+Check(Gate(currentEvidence with { OptionQuotesObservedAtUtc = now.AddSeconds(-91) }, path: "ESResponseAlignedBreakout") is null, "stale option evidence is score-only while ES price event is fresh");
 Check(Gate(currentEvidence with { UnderlyingPrice = 4992m, UnderlyingPrice5mAgo = 4989m, UnderlyingPrice60sAgo = 4991m }, path: "ESWallRejectionReversal") == "OptionsGate:WallEventUnavailable", "wall proximity does not manufacture touch event");
 Check(Gate(currentEvidence with { UnderlyingPrice = 4992m, UnderlyingPrice5mAgo = 4989m, UnderlyingPrice60sAgo = 4991m, EventLevel = 4990m, EventTouchedAtUtc = now.AddSeconds(-3), EventKind = "Reject" }, path: "ESWallRejectionReversal") is null, "frozen wall rejection admitted");
-Check(Gate(currentEvidence with { UnderlyingPrice = 5002m, UnderlyingPrice5mAgo = 5000m }, path: "ESGammaConcentrationResponse") == "OptionsGate:GammaEventUnavailable", "gamma concentration alone cannot choose direction");
-Check(Gate(currentEvidence with { UnderlyingPrice = 5002m, UnderlyingPrice5mAgo = 5000m, EventLevel = 5000m, EventTouchedAtUtc = now.AddSeconds(-3), EventKind = "CrossHold" }, path: "ESGammaConcentrationResponse") is null, "gamma crossing response admitted without dealer sign assumption");
-Check(Gate(currentEvidence with { UnderlyingPrice = 4998m, UnderlyingPrice5mAgo = 5000m, UnderlyingPrice60sAgo = 4999m, EventLevel = 5000m, EventTouchedAtUtc = now.AddSeconds(-3), EventKind = "Reject" }, path: "ESGammaConcentrationResponse", isLong: false, close: 99.5m) is null, "short gamma rejection uses observed response symmetrically");
-Check(Gate(currentEvidence with { UnderlyingPrice = 5002m, UnderlyingPrice5mAgo = 5000m, EventLevel = 5000m, EventTouchedAtUtc = now.AddMinutes(-6), EventKind = "CrossHold" }, path: "ESGammaConcentrationResponse") == "OptionsGate:GammaEventUnavailable", "expired level event cannot re-enter");
+Check(Gate(currentEvidence with { UnderlyingPrice = 5002m, UnderlyingPrice5mAgo = 5000m }, path: "ESGammaConcentrationResponse") == "OptionsGate:GammaUnsignedLongRequiresPutWall", "gamma concentration alone cannot choose direction");
+Check(Gate(currentEvidence with { UnderlyingPrice = 5002m, UnderlyingPrice5mAgo = 5000m, EventLevel = 5000m, EventTouchedAtUtc = now.AddSeconds(-3), EventKind = "CrossHold" }, path: "ESGammaConcentrationResponse") == "OptionsGate:GammaUnsignedLongRequiresPutWall", "unmapped gamma crosshold cannot choose direction");
+Check(Gate(currentEvidence with { UnderlyingPrice = 4998m, UnderlyingPrice5mAgo = 5000m, UnderlyingPrice60sAgo = 4999m, EventLevel = 5000m, EventTouchedAtUtc = now.AddSeconds(-3), EventKind = "Reject" }, path: "ESGammaConcentrationResponse", isLong: false, close: 99.5m) == "OptionsGate:GammaUnsignedShortRequiresCallWall", "unmapped gamma rejection cannot choose direction");
+Check(Gate(currentEvidence with { UnderlyingPrice = 5002m, UnderlyingPrice5mAgo = 5000m, EventLevel = 5000m, EventTouchedAtUtc = now.AddMinutes(-6), EventKind = "CrossHold" }, path: "ESGammaConcentrationResponse") == "OptionsGate:GammaUnsignedLongRequiresPutWall", "unsigned gamma cannot use an unrelated expired event");
 Check(Gate(currentEvidence with { Status = "PriceReady", UnderlyingPrice5mAgo = null }, path: "ObservationConfirm") == "OptionsGate:ESResponseWarmingUp", "price-only structural path still needs ES history");
 Check(Gate(currentEvidence with { UnderlyingPrice = 5020m, UnderlyingPrice5mAgo = 5018m, AnchorEstablishedAtUtc = now.AddSeconds(1) }, path: "ESExpectedMoveExpansion") == "OptionsGate:ExpectedMoveAnchorInvalid", "future expected move anchor rejected");
-Check(Gate(Context(es: 5002m, prior: 5000m), path: "ESGammaConcentrationResponse") is null, "gamma concentration response allowed");
+Check(Gate(Context(es: 5002m, prior: 5000m), path: "ESGammaConcentrationResponse") == "OptionsGate:GammaUnsignedLongRequiresPutWall", "unsigned gamma requires a signed wall mapping");
 Check(Gate(Context(es: 4992m, prior: 4989m) with { ResponseLow = 4989m }, path: "ESWallRejectionReversal") is null, "touched put wall reclaimed allows long");
 Check(Gate(Context(es: 4992m, prior: 4989m), path: "ESWallRejectionReversal") == "OptionsGate:ESWallTouchNotReclaimed", "wall proximity without touch is rejected");
 Check(Gate(Context() with { PriceReferenceAtUtc = null }, path: "ESResponseAlignedBreakout") == "OptionsGate:ESResponseWarmingUp", "new path cannot use missing response reference");
