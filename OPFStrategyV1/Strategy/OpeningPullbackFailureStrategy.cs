@@ -663,7 +663,10 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             _actualDailyLossLimitDollars = settings.NqDailyLossLimitDollars;
             _actualWeeklyLongLossLimitDollars = settings.NqWeeklyLongLossLimitDollars;
         }
-        _actualCommissionPerContractRoundTrip = settings.ActualCommissionPerContractRoundTrip;
+        _actualCommissionPerContractRoundTrip = CommissionSchedule.Resolve(
+            ResolveFeishuProductCode(),
+            settings.ActualCommissionPerContractRoundTrip,
+            settings.ActualCommissionByInstrument);
         ReplayUseFullLossGuard = settings.ActualUseFullLossGuard;
         ReplayUseConsecutiveLossGuard = settings.ActualUseConsecutiveLossGuard;
         ActualMinEstimatedRr = settings.ActualMinEstimatedRr;

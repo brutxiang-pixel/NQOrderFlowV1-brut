@@ -1,9 +1,9 @@
 {
-  "Version": "ACTUAL_EXEC_2.52",
+  "Version": "ACTUAL_EXEC_2.53",
   "EnableActualOrders": false,
   "ManualAlertEnabled": true,
   "ExecutionMode": "ManualAlert",
-  "ActualExecutionPaths": "ObservationConfirm|ObservationConfirm_WideStop1_5R|BreakawayFvg|BreakawayFvg_Qualified|FailureReverse_ObservationInvalidated_WideStop1_5R|FailureReverse_RetestFailed|SignificantZoneFirstTouchLong|SignificantZoneFirstTouchShort",
+  "ActualExecutionPaths": "BreakawayFvg_Qualified|FailureReverse_RetestFailed|ESResponseAlignedBreakout|ESWallRejectionReversal|ESExpectedMoveExpansion|ESGammaConcentrationResponse",
   "ActualAllowResearchPaths": false,
   "ActualOrderQuantity": 1,
   "ActualTargetR": 1.5,
@@ -11,6 +11,12 @@
   "ActualDailyLossLimitDollars": 200.0,
   "ActualWeeklyLongLossLimitDollars": 0.0,
   "ActualCommissionPerContractRoundTrip": 1.2,
+  "ActualCommissionByInstrument": {
+    "MNQ": 1.18,
+    "MES": 1.18,
+    "NQ": 3.98,
+    "ES": 3.98
+  },
   "ActualUseFullLossGuard": false,
   "ActualUseConsecutiveLossGuard": false,
   "ActualTimeInForce": "Day",

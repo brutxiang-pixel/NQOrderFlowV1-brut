@@ -1,7 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup><Compile Include="../../../Strategy/FeishuTradeNotification.cs" Link="FeishuTradeNotification.cs" /></ItemGroup>
-  <ItemGroup><Compile Include="../../../Strategy/BreakEvenPolicy.cs" Link="BreakEvenPolicy.cs" /></ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../../Strategy/BreakEvenPolicy.cs" Link="BreakEvenPolicy.cs" />
+    <Compile Include="../../../Core/Configuration/CommissionSchedule.cs" Link="CommissionSchedule.cs" />
+    <Compile Include="../../../Core/Configuration/ActualExecutionSettings.cs" Link="ActualExecutionSettings.cs" />
+  </ItemGroup>
   <ItemGroup><Compile Include="../../../Strategy/FeishuNotificationSender.cs" Link="FeishuNotificationSender.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../Strategy/StartupTestOrderLatch.cs" Link="StartupTestOrderLatch.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../Strategy/ExecutionFillDeduplicator.cs" Link="ExecutionFillDeduplicator.cs" /></ItemGroup>

@@ -44,6 +44,7 @@ public sealed record ActualExecutionSettings(
     public string FeishuWebhookUrl { get; init; } = string.Empty;
     public decimal NqDailyLossLimitDollars { get; init; } = 600m;
     public decimal NqWeeklyLongLossLimitDollars { get; init; } = 2000m;
+    public Dictionary<string, decimal> ActualCommissionByInstrument { get; init; } = CommissionSchedule.CreateDefaults();
 
     public static ActualExecutionSettings Default()
     {

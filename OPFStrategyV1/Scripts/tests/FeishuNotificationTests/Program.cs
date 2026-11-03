@@ -1,4 +1,5 @@
 using OPFStrategyV1.Strategy;
+using OPFStrategyV1.Core.Configuration;
 using System.Text.Json;
 
 async Task VerifyRetry(FeishuSendResult[] responses, int expectedCalls, bool expectedSuccess)
@@ -35,6 +36,27 @@ var beExit = FeishuTradeNotification.FormatCompletedExit("be", "MNQ", "Short", 3
 if (!beExit.Contains("保本止损") || !beExit.Contains("$+0.30") || !beExit.Contains("$1.20"))
     throw new Exception("Break-even exit must show fees and net result.");
 Console.WriteLine("PASS fee-covered long/short stops, MNQ/NQ tick rounding and break-even net notification");
+var fees = CommissionSchedule.CreateDefaults();
+if (CommissionSchedule.Resolve("MNQZ6", 1.2m, fees) != 1.18m ||
+    CommissionSchedule.Resolve("MES", 1.2m, fees) != 1.18m ||
+    CommissionSchedule.Resolve("NQ", 1.2m, fees) != 3.98m ||
+    CommissionSchedule.Resolve("ES", 1.2m, fees) != 3.98m ||
+    CommissionSchedule.Resolve("YM", 1.2m, fees) != 1.2m ||
+    CommissionSchedule.Resolve("NQ", 1.2m, new Dictionary<string, decimal> { ["NQ"] = 4.25m }) != 4.25m)
+    throw new Exception("Instrument fee schedule/default fallback failed.");
+if (BreakEvenPolicy.Stop(100m, true, CommissionSchedule.Resolve("NQ", 1.2m, fees), 20m, .25m) != 100.25m ||
+    BreakEvenPolicy.Stop(100m, false, CommissionSchedule.Resolve("NQ", 1.2m, fees), 20m, .25m) != 99.75m)
+    throw new Exception("NQ fee-covered break-even stop must use the per-instrument rate.");
+Console.WriteLine("PASS per-instrument round-trip fees, symbol suffix matching and legacy fallback");
+var legacySettingsJson = JsonSerializer.Serialize(ActualExecutionSettings.Default());
+var legacySettingsNode = System.Text.Json.Nodes.JsonNode.Parse(legacySettingsJson)!;
+legacySettingsNode.AsObject().Remove("ActualCommissionByInstrument");
+var legacySettings = JsonSerializer.Deserialize<ActualExecutionSettings>(legacySettingsNode.ToJsonString())!;
+if (legacySettings.ActualCommissionPerContractRoundTrip != 1.2m ||
+    CommissionSchedule.Resolve("MNQ", legacySettings.ActualCommissionPerContractRoundTrip, legacySettings.ActualCommissionByInstrument) != 1.18m ||
+    CommissionSchedule.Resolve("ES", legacySettings.ActualCommissionPerContractRoundTrip, legacySettings.ActualCommissionByInstrument) != 3.98m)
+    throw new Exception("Legacy settings must receive the new instrument schedule while preserving the legacy fallback.");
+Console.WriteLine("PASS legacy config deserialization retains the new fee schedule and unchanged fallback");
 var entry = FeishuTradeNotification.FormatConfirmedEntry("trade-1", "MNQ", "Long", 100m, 95m, 107.5m, "ObservationConfirm", utc);
 var exit = FeishuTradeNotification.FormatCompletedExit("trade-1", "MNQ", "Long", 100m, 95m, "SL", -5m, -10m, "ObservationConfirm", utc.AddMinutes(5));
 if (!entry.Contains("trade-1/OPEN") || !exit.Contains("trade-1/CLOSE") ||

@@ -1,6 +1,6 @@
-# 当前 6 条实际下单路径规则与 2 条研究路径
+# 当前 6 条实际下单路径规则与研究路径
 
-更新时间：2026-10-26（北京时间），OPF_INTRADAY_2.9
+更新时间：2026-11-03（北京时间），OPF_INTRADAY_2.10
 
 ## 2.9 两条路径转研究、NQ 入场质量与扩张阶段
 
@@ -18,9 +18,9 @@
 
 | 路径 | 阶段一保护 | 原生 TP | 阶段二锁盈触发 | 锁定位置 |
 |---|---:|---:|---:|---:|
-| ObservationConfirm | 0.75R | 1.5R | 1.25R | +0.25R |
+| ObservationConfirm（研究） | 0.75R | 1.5R | 1.25R | +0.25R |
 | BreakawayFvg_Qualified | 0.75R | 1.5R | 1.25R | +0.5R |
-| FailureReverse_ObservationInvalidated_WideStop1_5R | 1R | 4R | 2R | +0.5R |
+| FailureReverse_ObservationInvalidated_WideStop1_5R（研究） | 1R | 4R | 2R | +0.5R |
 | FailureReverse_RetestFailed | 1R | 1.5R | 1.25R | +0.5R |
 | ESResponseAlignedBreakout | 0.75R | 1.5R | 1.25R | +0.5R |
 | ESWallRejectionReversal | 1R | 1.5R | 1.25R | +0.5R |
@@ -38,12 +38,10 @@
 
 本文以当前实际配置和策略代码为准，记录当前自动下单的 6 条路径。`ObservationConfirm`、`FailureReverse_ObservationInvalidated_WideStop1_5R` 和 `NativeIcebergReaction` 仅记录研究，不实际下单。
 
-当前实际配置：
+当前实际配置（6条）：
 
 ```text
-ObservationConfirm
 BreakawayFvg_Qualified
-FailureReverse_ObservationInvalidated_WideStop1_5R
 FailureReverse_RetestFailed
 ESResponseAlignedBreakout
 ESWallRejectionReversal
@@ -83,7 +81,7 @@ ESGammaConcentrationResponse
 | 往返手续费模型   |   每手 1.20 美元 |
 | ES 期权代理门禁 |           开启 |
 
-## 二、ObservationConfirm
+## 二、ObservationConfirm（仅研究，停止实际下单）
 
 ### 逻辑
 
@@ -155,7 +153,7 @@ Qualified 候选进入实时确认，不是创建 FVG 后立即成交：
 - Qualified 生成条件通常使风险不超过 8.5 点。
 - 默认目标约 1.5R；部分历史退出分支可能使用更高目标或保本保护。
 
-## 四、FailureReverse_ObservationInvalidated_WideStop1_5R
+## 四、FailureReverse_ObservationInvalidated_WideStop1_5R（仅研究，停止实际下单）
 
 ### 逻辑
 
@@ -397,20 +395,20 @@ DealerGammaUnknown
 - 目标通常 1.5R。
 - 达到约 1R 后进入保本保护。
 
-## 十一、方向与历史路径说明
+## 十一、方向与历史路径说明（6条执行 + 研究候选）
 
 | 路径                                                 | 当前实际主要方向     | 核心触发                |
 | -------------------------------------------------- | ------------ | ------------------- |
-| ObservationConfirm                                 | Long / Short | 显著区触达后确认            |
+| ObservationConfirm                                 | 研究记录     | 显著区触达后确认            |
 | BreakawayFvg_Qualified                             | 主要 Long      | 新 Bull FVG 突破质量确认   |
-| FailureReverse_ObservationInvalidated_WideStop1_5R | Short        | Bull 区失效后的反转        |
+| FailureReverse_ObservationInvalidated_WideStop1_5R | 研究记录     | Bull 区失效后的反转        |
 | FailureReverse_RetestFailed                        | Short        | 反转后的回测失败            |
 | ESResponseAlignedBreakout                          | Long / Short | ES 与 NQ/MNQ 突破方向一致  |
 | ESWallRejectionReversal                            | Long / Short | Put/Call Wall 触达后拒绝 |
 | ESExpectedMoveExpansion                            | Long / Short | ES 相对锚点扩张           |
 | ESGammaConcentrationResponse                       | Long / Short | Gamma 集中位附近响应       |
 
-以下路径不在当前8条自动下单配置中：
+以下路径不在当前6条自动下单配置中：
 
 - `SignificantZoneFirstTouchLong`
 - `SignificantZoneFirstTouchShort`
