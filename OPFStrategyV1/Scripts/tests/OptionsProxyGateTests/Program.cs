@@ -27,6 +27,16 @@ var profile = OPFStrategyV1.Core.Profiles.ProfileCatalog.Select("MNQ_0.1", "MNQ_
 var ids = Enumerable.Range(0, 100).AsParallel().Select(_ => OPFStrategyV1.Core.Snapshots.ConfigSnapshot.Create(
     profile, "test", "test", OPFStrategyV1.Core.Configuration.ActualExecutionSettings.Default()).SnapshotId).ToArray();
 AssertClock(ids.Distinct().Count() == ids.Length, "simultaneous strategy instances have unique log IDs");
+var settingsType = typeof(OPFStrategyV1.Core.Configuration.ActualExecutionSettings);
+var normalizeSettings = settingsType.GetMethod("Normalize", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+var defaults = OPFStrategyV1.Core.Configuration.ActualExecutionSettings.Default();
+var unlimitedSettings = (OPFStrategyV1.Core.Configuration.ActualExecutionSettings)normalizeSettings.Invoke(null, new object[] { defaults with { ActualMaxTradesPerDay = 0 } })!;
+var cappedSettings = (OPFStrategyV1.Core.Configuration.ActualExecutionSettings)normalizeSettings.Invoke(null, new object[] { defaults with { ActualMaxTradesPerDay = 7 } })!;
+var fallbackSettings = (OPFStrategyV1.Core.Configuration.ActualExecutionSettings)normalizeSettings.Invoke(null, new object[] { defaults with { ActualMaxTradesPerDay = -1 } })!;
+AssertClock(unlimitedSettings.ActualMaxTradesPerDay == 0, "daily trade cap zero remains unlimited after config normalization");
+AssertClock(cappedSettings.ActualMaxTradesPerDay == 7, "positive daily trade cap remains configured");
+AssertClock(defaults.ActualMaxTradesPerDay == 0, "default daily trade cap is unlimited");
+AssertClock(fallbackSettings.ActualMaxTradesPerDay == 0, "negative daily trade cap falls back to unlimited default");
 var warmEngine = new OPFStrategyV1.Regime.TrendScoreEngine();
 OPFStrategyV1.Regime.RegimeResult? warmResult = null;
 for (var i = 0; i < 80; i++)

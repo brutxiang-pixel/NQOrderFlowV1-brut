@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Remove="Scripts\tests\**\*.cs" />
+    <Compile Remove="Scripts\tests\**\*.cs;outputs\**\*.cs;work\**\*.cs;tools\**\*.cs" />
     <None Remove="Scripts\tests\**\bin\**;Scripts\tests\**\obj\**" />
   </ItemGroup>
 
@@ -46,6 +46,12 @@
   </ItemGroup>
 
 
+  <Target Name="BackupBeforeBuild" BeforeTargets="PrepareForBuild" Condition="'$(RunRepositorySnapshot)' == 'true'">
+    <Exec Command="node &quot;$(MSBuildProjectDirectory)\..\tools\Backup\snapshot.cjs&quot; before-build" />
+  </Target>
+  <Target Name="BackupBeforeDeploy" BeforeTargets="CopyToATAS" Condition="'$(DeployToATAS)' == 'true' and '$(RunRepositorySnapshot)' == 'true'">
+    <Exec Command="node &quot;$(MSBuildProjectDirectory)\..\tools\Backup\snapshot.cjs&quot; before-deploy" />
+  </Target>
   <Target Name="CopyToATAS" AfterTargets="Build" Condition="'$(DeployToATAS)' == 'true'">
     <Copy SourceFiles="$(TargetPath)"
           DestinationFolder="$(APPDATA)\ATAS\Strategies"

@@ -1,0 +1,25 @@
+{
+  "baseline": "rose-goal-v1",
+  "candidate": "OPF_INTRADAY_2.16",
+  "stage": "before-release",
+  "tradingBehaviorChanged": true,
+  "checks": {
+    "failureContext": "NativeIceberg仅支持NQ，不是Rose策略。逆势结构与亏损后同向重建为用户批准的入场过滤；失败结构按实际完成亏损事件记录。",
+    "entryAlternatives": "顺势仍为原2秒停留和10秒主动方向量比>=0.15；逆势与失败后重试要求1 tick突破、回踩锚点并在顺势侧1 tick停留1秒。",
+    "pullbackAnchors": "逆势锚点为冰山前30秒局部极值；失败后锚点为失败时前30秒极值与实际入场价更远者。事件寿命30秒；量化门槛max(4 ticks,0.1ATR)、回踩锚点和1秒停留均为研究假设。",
+    "exitAttribution": "保护观察只纳入实际入场成交后逐笔及开始晚于成交时间的整根K线；实际止损成交仍可能因滑点亏损。",
+    "causalityAndFlow": "只读事件时间之前成交来确定锚点和5秒反向位移；顺序不一致的逐笔拒绝。延迟切仓重新验证事件和结构。",
+    "singleContractRisk": "实际SL/TP、手数和原保护R值不改；入场过滤可能改变成交时机，不改变允许仓位。",
+    "opportunityAndCosts": "多一个结构确认会降低成交数及回报速度，可能漏掉快速反转；事件仍受30秒失效限制。尚无Replay盈利结论。",
+    "goalGap": "本轮工程修复与NQ冰山入场过滤未经MNQ盲测，不能证明MNQ单手日均净200-300美元或净胜率60%。"
+  },
+  "deviations": [
+    {
+      "change": "NQ原生冰山逆势结构确认与同向亏损后结构重建门禁",
+      "reason": "2026-11-05连续反向Long案例及对错误保护触发的复核",
+      "tradeoff": "确认延迟可能错失V反，但减少未确认反转入场；等待Replay验证",
+      "decision": "approved",
+      "userEvidence": "用户于2026-11-05明确同意3项建议全部实施"
+    }
+  ]
+}

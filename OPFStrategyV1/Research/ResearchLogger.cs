@@ -334,6 +334,8 @@ public sealed class ResearchLogger
         _compact = string.Equals(logMode, "Compact", StringComparison.OrdinalIgnoreCase);
     }
 
+    public string DirectoryPath => _directory;
+
     internal void AppendValidationPacket(string snapshotId, string kind, object packet)
     {
         var json = JsonSerializer.Serialize(packet);

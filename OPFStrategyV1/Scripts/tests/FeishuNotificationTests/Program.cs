@@ -27,6 +27,14 @@ if (!fills.TryAccept("fill-1", "ENTRY") || fills.TryAccept("fill-1", "ENTRY") ||
 Console.WriteLine("PASS fill ID deduplication, partial fills and missing ID fallback");
 
 var utc = new DateTimeOffset(2026, 10, 13, 1, 20, 30, TimeSpan.Zero);
+var switchExit = FeishuTradeNotification.FormatCompletedExit("switch", "MNQ", "Long", 100m, 99m, "TIME_STOP", -1m, -2m,
+    "ESResponseAlignedBreakout", utc, 1.18m, filledQuantity: 1m, exitDetail: "NativeIcebergDirectionSwitch");
+if (!switchExit.Contains("策略性换向退出（冰山新方向）") || switchExit.Contains("FLATTEN"))
+    throw new Exception("Strategy direction switch must be distinguishable from abnormal flatten.");
+var icebergExit = FeishuTradeNotification.FormatCompletedExit("ice", "NQ", "Long", 100m, 99m, "TIME_STOP", -1m, -20m,
+    "CrossMarketIcebergOrderFlowReaction", utc, 3.98m, filledQuantity: 1m, exitDetail: "IcebergNoProgressStructureFailed");
+if (!icebergExit.Contains("冰山无进展且结构失守｜TIME_STOP") || icebergExit.Contains("FLATTEN"))
+    throw new Exception("Iceberg strategy exit must have an explicit normal exit reason.");
 if (BreakEvenPolicy.Stop(30763.75m, false, 1.2m, 2m, .25m) != 30763m ||
     BreakEvenPolicy.Stop(30763.75m, true, 1.2m, 2m, .25m) != 30764.5m ||
     BreakEvenPolicy.Stop(100m, false, 1.2m, 20m, .25m) != 99.75m ||
@@ -67,6 +75,17 @@ if (!entry.Contains("【开仓】") || !exit.Contains("【平仓】") ||
     !entry.Contains("trade-1") || !exit.Contains("trade-1") || !exit.Contains("-10.00"))
     throw new Exception("Trade notifications must identify the same trade and its result.");
 using var payload = JsonDocument.Parse(FeishuTradeNotification.CreatePayload(entry));
+foreach (var quantity in new[] { 1m, 2m, 3m })
+{
+    var sizedEntry = FeishuTradeNotification.FormatConfirmedEntry("quantity", "MNQ", "Short", 27779.833333m, 27800.25m, 27749.25m, "ESExpectedMoveExpansion", utc, quantity);
+    var sizedExit = FeishuTradeNotification.FormatCompletedExit("quantity", "MNQ", "Short", 27779.833333m, 27802.666667m, "SL", -22.833334m, -137m, "ESExpectedMoveExpansion", utc, 3.54m, false, quantity);
+    if (!sizedEntry.Contains($"实际开仓手数: {quantity}") || !sizedExit.Contains($"实际平仓手数: {quantity}"))
+        throw new Exception("Notifications must show actual fill quantity, independent of rounded average price.");
+}
+var slippedProtection = FeishuTradeNotification.FormatCompletedExit("slipped", "NQ", "Short", 27844.833333m, 27849.75m, "SL", -4.916667m, -295m, "CrossMarketIcebergOrderFlowReaction", utc, 11.94m, true, 3m);
+if (slippedProtection.Contains("保本止损") || !slippedProtection.Contains("保护止损") || !slippedProtection.Contains("实际成交仍亏损"))
+    throw new Exception("Moved stop with negative actual net PnL must not claim break-even.");
+Console.WriteLine("PASS actual 1/2/3 contract notifications and slipped protection loss classification");
 if (payload.RootElement.GetProperty("content").GetProperty("text").GetString() != entry)
     throw new Exception("Payload text was altered.");
 foreach (var test in new (string Body, int? Code)[]

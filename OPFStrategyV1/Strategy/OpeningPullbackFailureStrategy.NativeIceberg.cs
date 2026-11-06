@@ -19,6 +19,9 @@ public sealed partial class OpeningPullbackFailureStrategy
     private readonly ConcurrentQueue<IcebergEvent> _nativeIcebergUpdates = new();
     private string _nativeIcebergHud = "Iceberg: NOT_SUBSCRIBED";
     private IcebergSwitch? _pendingIcebergSwitch;
+    private readonly Dictionary<string, IcebergStructureConfirmation> _nativeIcebergStructures = new();
+    private readonly Dictionary<TradeSide, (DateTime Time, decimal Anchor)> _nativeIcebergFailures = new();
+    private DateTime _nativeIcebergStructureDay;
     private readonly ConcurrentQueue<NativeIcebergEvent> _nativeIcebergArchiveWrites = new();
     private NativeIcebergEvent[] _nativeIcebergReplay = Array.Empty<NativeIcebergEvent>();
     private DateTime _nativeIcebergReplayDay;
@@ -31,6 +34,9 @@ public sealed partial class OpeningPullbackFailureStrategy
         _nativeIcebergConsumed.Clear();
         _nativeIcebergHistory.Clear();
         _pendingIcebergSwitch = null;
+        _nativeIcebergStructures.Clear();
+        _nativeIcebergFailures.Clear();
+        _nativeIcebergStructureDay = default;
         _nativeIcebergReplayDay = default;
         while (_nativeIcebergUpdates.TryDequeue(out _)) { }
         try
@@ -120,8 +126,22 @@ public sealed partial class OpeningPullbackFailureStrategy
     private static string IcebergContract(string instrument) => instrument.StartsWith("MNQ", StringComparison.OrdinalIgnoreCase)
         ? instrument[1..] : instrument.StartsWith("MES", StringComparison.OrdinalIgnoreCase) ? instrument[1..] : instrument;
 
+    private static bool IsNativeIcebergExecutionProduct(string? productCode) =>
+        productCode?.StartsWith("NQ", StringComparison.OrdinalIgnoreCase) == true ||
+        productCode?.StartsWith("MNQ", StringComparison.OrdinalIgnoreCase) == true;
+
     private void EvaluateNativeIceberg(OpfCandle live)
     {
+        var day = GlobexTradingDayKey(live.Time);
+        if (day != _nativeIcebergStructureDay)
+        {
+            _nativeIcebergStructureDay = day;
+            _nativeIcebergStructures.Clear();
+            _nativeIcebergFailures.Clear();
+        }
+        foreach (var key in _nativeIcebergStructures.Keys.Where(key =>
+            !_nativeIcebergs.TryGetValue(key, out var item) || live.Time - item.Time > TimeSpan.FromSeconds(30)).ToArray())
+            _nativeIcebergStructures.Remove(key);
         while (_nativeIcebergArchiveWrites.TryDequeue(out var archive))
         {
             try { NativeIcebergArchive.Append(NativeIcebergArchiveDirectory, archive); }
@@ -154,6 +174,12 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
         if (_pendingIcebergSwitch is { } waiting)
         {
+            if (!IsNativeIcebergExecutionProduct(Security?.Code))
+            {
+                LogLiveReadinessInfo($"ICEBERG_ARBITRATION_REJECT_UNSUPPORTED_PRODUCT product={Security?.Code ?? "-"} event={waiting.EventKey}");
+                _pendingIcebergSwitch = null;
+                return;
+            }
             if (live.Time > waiting.Expires || Math.Abs(live.Close - waiting.Price) > Math.Abs(waiting.Price - waiting.Stop) * .5m ||
                 (waiting.Signal.Side == TradeSide.Long ? live.Close <= waiting.Stop : live.Close >= waiting.Stop) ||
                 _nativeIcebergs.TryGetValue(waiting.EventKey, out var changed) && changed.Deleted)
@@ -166,7 +192,7 @@ public sealed partial class OpeningPullbackFailureStrategy
                 !_replayExecutionsByTradeId.Values.Any(x => x.ProtectionCleanupPending || x.ExitCompleted && CountWorkingProtectionOrders(x) > 0))
             {
                 _pendingIcebergSwitch = null;
-                SubmitNativeIceberg(waiting.Signal, live, waiting.Stop);
+                SubmitNativeIceberg(waiting.Signal, live, waiting.Stop, waiting.EventKey);
             }
             else ScheduleProtectionCleanupIfNeeded("IcebergSwitch");
             return;
@@ -176,9 +202,9 @@ public sealed partial class OpeningPullbackFailureStrategy
             var item = pair.Value;
             if (!IsHistoricalReplayTime(live.Time) && item.Time < _intradayStartedUtc) continue;
             if (live.Time < item.Time || live.Time - item.Time > TimeSpan.FromSeconds(30) || item.Deleted || _nativeIcebergConsumed.Contains(pair.Key)) continue;
+            if (!NativeIcebergStructureReady(pair.Key, item, live)) continue;
             var tick = _snapshot!.InstrumentProfile.TickSize;
             var trigger = item.Price;
-            var stop = item.Side == TradeSide.Long ? item.Price - tick * 4m : item.Price + tick * 4m;
             var distance = item.Side == TradeSide.Long ? live.Close - trigger : trigger - live.Close;
             var key = "ICE|" + pair.Key;
             if (distance < tick * 2m || distance > Math.Max(tick * 8m, CalculateAtr14(live) * .2m))
@@ -199,9 +225,15 @@ public sealed partial class OpeningPullbackFailureStrategy
                     LogLiveReadinessInfo($"NATIVE_ICEBERG_WAIT_LOCAL_FLOW event={pair.Key} side={item.Side} signed={signedVolume:0.##} volume={volume:0.##}");
                 continue;
             }
+            (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] structureTape;
+            lock (_intradaySync) structureTape = _entryTape.Where(x => x.Time <= live.Time && x.Time >= live.Time.AddSeconds(-30)).ToArray();
+            if (structureTape.Length == 0) continue;
+            var stop = IntradayEntryPolicy.IcebergStructuralStop(item.Side == TradeSide.Long, live.Close, item.Price,
+                structureTape.Min(x => x.Price), structureTape.Max(x => x.Price), CalculateAtr14(live), tick);
             var risk = Math.Abs(live.Close - stop);
             var fees = _actualCommissionPerContractRoundTrip / _snapshot.InstrumentProfile.PointValue + tick * 2m;
-            if (risk * .75m <= fees) continue;
+            if (risk * IntradayEntryPolicy.IcebergTargetR <= fees) continue;
+            LogLiveReadinessInfo($"ICEBERG_STRUCTURE_STOP_V213 event={pair.Key} iceberg={item.Price} stop={stop} risk={risk} low={structureTape.Min(x => x.Price)} high={structureTape.Max(x => x.Price)} atr={CalculateAtr14(live)}");
             _nativeIcebergConsumed.Add(pair.Key);
             _nativeIcebergHud = $"Iceberg: CONFIRMED {item.Side} @{item.Price:0.##}";
             var es = ReadEsOptionsProxyAsOf(live.Time);
@@ -214,7 +246,7 @@ public sealed partial class OpeningPullbackFailureStrategy
                 es.PriceReferenceAtUtc is { } esReference && esReference <= live.Time && live.Time - esReference <= TimeSpan.FromSeconds(90) &&
                 es.UnderlyingPrice.HasValue && es.UnderlyingPrice60sAgo.HasValue &&
                 (item.Side == TradeSide.Long ? es.UnderlyingPrice > es.UnderlyingPrice60sAgo : es.UnderlyingPrice < es.UnderlyingPrice60sAgo);
-            var size = IntradayEntryPolicy.EvidenceSize(optionContext, esReaction, true, 3m);
+            var size = IntradayEntryPolicy.EvidenceSize(optionContext, esReaction, true, IntradayEntryPolicy.ProductQuantityLimit(Security?.Code ?? string.Empty));
             _nativeIcebergHud = $"Iceberg: {item.Side} S{size.Score}/3 x{size.Quantity:0}";
             var score = new ScoreBreakdown("CrossMarketIceberg", 100m, 45m, true,
                 new[]
@@ -227,43 +259,60 @@ public sealed partial class OpeningPullbackFailureStrategy
             var eventInstrument = IcebergContract(item.Instrument);
             var signal = new CandidateSignal($"ICE-{item.Instrument}-{item.Id}-{item.Time:yyyyMMddHHmmss}", _snapshot.SnapshotId, live.Time, live.Bar, item.Side,
                 SetupType.TrendPullback, SignalStage.Triggered, null, score, score, new[] { "NativeRefreshConfirmed", "IntradayReaction", "CrossMarketIcebergOrderFlowReaction", $"ICE_EVENT_KEY:{eventInstrument}|{item.Id}|{item.Time:O}", $"EvidenceQty:{size.Quantity.ToString(System.Globalization.CultureInfo.InvariantCulture)}" });
+            var exitStructure = item.Side == TradeSide.Long ? Math.Min(item.Price, structureTape.Min(x => x.Price)) : Math.Max(item.Price, structureTape.Max(x => x.Price));
+            signal = signal with { SkipReasons = signal.SkipReasons.Concat(new[] { $"ICE_EXIT_STRUCTURE:{exitStructure.ToString(System.Globalization.CultureInfo.InvariantCulture)}" }).ToArray() };
             _researchLogger?.AppendSignal(signal);
             LogLiveReadinessInfo($"NATIVE_ICEBERG_REACTION event={pair.Key} side={item.Side} price={item.Price} sourceTime={item.Time:O} reactionTime={live.Time:O} hidden={item.Hidden} filled={item.Filled} tapeRatio={(volume == 0 ? 0 : (item.Side == TradeSide.Long ? signedVolume : -signedVolume) / volume):0.000} score={size.Score}/3 qty={size.Quantity} esStatus={es.Status}");
             var active = ActiveReplayExecutions();
-            if (_manualAlertEnabled) { SubmitNativeIceberg(signal, live, stop); break; }
+            if (_manualAlertEnabled) { SubmitNativeIceberg(signal, live, stop, pair.Key); break; }
             var arbitration = IntradayEntryPolicy.IcebergArbitration(active.Count, active.Any(x => IsIcebergExecutionPath(x.ResearchPath)),
                 active.All(x => x.Side == item.Side), active.All(x => x.BracketSubmitted && IsWorkingExecutionOrder(x.StopOrder)),
                 GetCurrentAccountPosition() == 0m, !_replayExecutionsByTradeId.Values.Any(x => x.ProtectionCleanupPending || x.ExitCompleted && CountWorkingProtectionOrders(x) > 0),
                 active.Sum(x => x.InitialRiskPoints * _snapshot.InstrumentProfile.PointValue * RemainingExecutionQuantity(x)) + risk * _snapshot.InstrumentProfile.PointValue * size.Quantity);
             LogLiveReadinessInfo($"ICEBERG_ARBITRATION event={pair.Key} decision={arbitration}");
-            if (arbitration == "Enter") SubmitNativeIceberg(signal, live, stop);
+            if (arbitration == "Enter") SubmitNativeIceberg(signal, live, stop, pair.Key);
             else if (arbitration is "FlattenThenWait" or "WaitProtection" or "WaitCleanup")
             {
-                if (!ActualOrdersEnabled || _manualAlertEnabled || _liveReadinessBlocked ||
-                    _dailyPnlScopeUnresolved || _manualInterventionLatch ||
-                    _actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars ||
-                    ReplayMaxTradesPerDay > 0 && _replayTradesToday >= ReplayMaxTradesPerDay) continue;
-                if (IsGlobexCloseoutLockWindow(live.Time, out _) || IsUsCashOpenBlackout(live.Time, out _) || IsLiveLatencyBlocked(live.Time, out _)) continue;
+                var expectedPosition = active.Sum(x => (x.Side == TradeSide.Long ? 1m : -1m) * RemainingExecutionQuantity(x));
+                if (GetCurrentAccountPosition() != expectedPosition) continue;
+                var permitted = false;
+                var instant = live with { Open = live.Close, High = live.Close, Low = live.Close };
+                TrySubmitReplayExecution(signal, instant, "CrossMarketIcebergOrderFlowReaction", stop, risk,
+                    allowDelayedExpansion: false, switchPreflightPassed: () => permitted = true);
+                if (!permitted)
+                {
+                    LogLiveReadinessInfo($"ICEBERG_SWITCH_PREFLIGHT_REJECT event={pair.Key} oldPositionRetained=true");
+                    continue;
+                }
                 _pendingIcebergSwitch = new IcebergSwitch(signal, stop, live.Close, live.Time.AddSeconds(30), pair.Key);
                 if (arbitration == "FlattenThenWait")
+                {
                     foreach (var execution in active) EnqueueExecutionAction("IcebergSwitchFlatten", async () =>
-                        await SubmitEmergencyFlattenAsync(execution, RemainingExecutionQuantity(execution), "NativeIcebergDirectionSwitch"));
+                        await SubmitIcebergSwitchExitAsync(execution, live.Close));
+                }
             }
             break;
         }
     }
 
-    private void SubmitNativeIceberg(CandidateSignal signal, OpfCandle live, decimal stop)
+    private void SubmitNativeIceberg(CandidateSignal signal, OpfCandle live, decimal stop, string eventKey)
     {
+        // Cleanup may delay a direction switch: recheck the actual event and structure.
+        if (!_nativeIcebergs.TryGetValue(eventKey, out var item) || item.Deleted || live.Time < item.Time ||
+            live.Time - item.Time > TimeSpan.FromSeconds(30) || !NativeIcebergStructureReady(eventKey, item, live))
+        {
+            LogLiveReadinessInfo($"ICEBERG_REJECT_V216 event={eventKey} reason=StructureOrEventChangedAfterWait");
+            return;
+        }
         var product = (Security?.Code ?? string.Empty).ToUpperInvariant();
-        if (!product.StartsWith("NQ", StringComparison.Ordinal))
+        if (!IsNativeIcebergExecutionProduct(product))
         {
             LogLiveReadinessInfo($"ICEBERG_EXECUTION_UNSUPPORTED_PRODUCT product={product}");
             return;
         }
         var risk = Math.Abs(live.Close - stop);
         var feePoints = _actualCommissionPerContractRoundTrip / _snapshot!.InstrumentProfile.PointValue + _snapshot.InstrumentProfile.TickSize * 2m;
-        if (risk * .75m <= feePoints)
+        if (risk * IntradayEntryPolicy.IcebergTargetR <= feePoints)
         { LogLiveReadinessInfo("ICEBERG_REJECT targetDoesNotCoverCostsAfterWait"); return; }
         var instant = live with { Open = live.Close, High = live.Close, Low = live.Close };
         signal = signal with { Time = live.Time, Bar = live.Bar };
@@ -273,16 +322,162 @@ public sealed partial class OpeningPullbackFailureStrategy
         TrySubmitReplayExecution(signal, instant, path, stop, risk, allowDelayedExpansion: false);
     }
 
+    private async Task SubmitIcebergSwitchExitAsync(ReplayExecutionState execution, decimal reference)
+    {
+        if (execution.ExitCompleted || execution.TimeStopExitPendingV208 || execution.EmergencyFlattenSubmitted ||
+            Portfolio is null || Security is null) return;
+        var position = GetCurrentAccountPosition();
+        if (Math.Sign(position) != (execution.Side == TradeSide.Long ? 1 : -1)) return;
+        var quantity = Math.Min(Math.Abs(position), RemainingExecutionQuantity(execution));
+        if (quantity <= 0m) return;
+        execution.TimeStopReason = "NativeIcebergDirectionSwitch";
+        execution.TimeStopReferencePriceV209 = reference;
+        execution.TimeStopExitPendingV208 = true;
+        var order = new Order
+        {
+            Portfolio = Portfolio, Security = Security, Type = OrderTypes.Market,
+            Direction = execution.Side == TradeSide.Long ? OrderDirections.Sell : OrderDirections.Buy,
+            QuantityToFill = quantity, TimeInForce = ReplayTimeInForce,
+            Comment = $"OPF|{execution.TradeId}|TIME_STOP|{execution.TimeStopReason}", AutoCancel = false
+        };
+        execution.TimeStopOrderV208 = order;
+        AppendExecutionEvent(execution, "STRATEGY_SWITCH_EXIT_SEND", "TIME_STOP", reference, quantity, execution.TimeStopReason);
+        try { await OpenOrderAsync(order); }
+        catch
+        {
+            execution.TimeStopExitPendingV208 = false;
+            _pendingIcebergSwitch = null;
+            throw;
+        }
+    }
+
+    private bool NativeIcebergStructureReady(string key, IcebergEvent item, OpfCandle live)
+    {
+        string reason;
+        var hasFailure = _nativeIcebergFailures.TryGetValue(item.Side, out var failure);
+        if (hasFailure && item.Time <= failure.Time) reason = "WAIT_FRESH_EVENT_AFTER_LOSS";
+        else
+        {
+            if (!_nativeIcebergStructures.TryGetValue(key, out var confirmation))
+            {
+                (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] before;
+                lock (_intradaySync) before = _entryTape.Where(x => x.Time < item.Time && x.Time >= item.Time.AddSeconds(-30)).ToArray();
+                if (before.Length < 2 || before[^1].Time - before[0].Time < TimeSpan.FromSeconds(5))
+                {
+                    LogNativeIcebergStructureWait(key, "WAIT_PRE_EVENT_CONTEXT", item.Side);
+                    return false;
+                }
+                var isLong = item.Side == TradeSide.Long;
+                var anchor = isLong ? before.Max(x => x.Price) : before.Min(x => x.Price);
+                if (hasFailure) anchor = isLong ? Math.Max(anchor, failure.Anchor) : Math.Min(anchor, failure.Anchor);
+                var opposed = IcebergStructureConfirmation.CounterTrend(isLong, before[0].Price, before[^1].Price,
+                    CalculateAtr14(live), _snapshot!.InstrumentProfile.TickSize);
+                confirmation = new IcebergStructureConfirmation(isLong, anchor, opposed || hasFailure);
+                _nativeIcebergStructures[key] = confirmation;
+                LogLiveReadinessInfo($"ICEBERG_STRUCTURE_PLAN_V216 event={key} side={item.Side} counterTrend={opposed} previousLoss={hasFailure} anchor={anchor} contextFrom={before[0].Time:O} contextTo={before[^1].Time:O}");
+            }
+            reason = confirmation.Observe(live.Close, _snapshot!.InstrumentProfile.TickSize, live.Time);
+            if (IcebergStructureConfirmation.Ready(reason)) return true;
+        }
+        LogNativeIcebergStructureWait(key, reason, item.Side);
+        return false;
+    }
+
+    private void LogNativeIcebergStructureWait(string key, string reason, TradeSide side)
+    {
+        _nativeIcebergHud = $"Iceberg: {side} {reason}";
+        if (_reactionAuditKeys.Add($"ICE_STRUCTURE|{key}|{reason}"))
+            LogLiveReadinessInfo($"ICEBERG_STRUCTURE_WAIT_V216 event={key} side={side} reason={reason}");
+    }
+
+    private void MarkNativeIcebergFailed(ReplayExecutionState execution)
+    {
+        var time = execution.ExitTime ?? execution.CreatedTime;
+        if (_nativeIcebergFailures.TryGetValue(execution.Side, out var previous) && previous.Time >= time) return;
+        (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] before;
+        lock (_intradaySync) before = _entryTape.Where(x => x.Time <= time && x.Time >= time.AddSeconds(-30)).ToArray();
+        var entry = execution.EntryAvgPrice;
+        var anchor = execution.Side == TradeSide.Long
+            ? Math.Max(entry, before.Length == 0 ? entry : before.Max(x => x.Price))
+            : Math.Min(entry, before.Length == 0 ? entry : before.Min(x => x.Price));
+        if (_nativeIcebergFailures.TryGetValue(execution.Side, out previous))
+            anchor = execution.Side == TradeSide.Long ? Math.Max(anchor, previous.Anchor) : Math.Min(anchor, previous.Anchor);
+        _nativeIcebergFailures[execution.Side] = (time, anchor);
+        _nativeIcebergStructures.Clear();
+        LogLiveReadinessInfo($"ICEBERG_FAILURE_REBUILD_V216 trade={execution.TradeId} side={execution.Side} anchor={anchor} time={time:O}");
+    }
+
+    private void ObserveNativeIcebergStructure(OpfCandle live)
+    {
+        foreach (var pair in _nativeIcebergs.ToArray())
+        {
+            var item = pair.Value;
+            if (item.Deleted || item.Time > live.Time || live.Time - item.Time > TimeSpan.FromSeconds(30)) continue;
+            var isLong = item.Side == TradeSide.Long;
+            var tick = _snapshot!.InstrumentProfile.TickSize;
+            var priceAtEvent = live.Close;
+            (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] before;
+            lock (_intradaySync) before = _entryTape.Where(x => x.Time < item.Time && x.Time >= item.Time.AddSeconds(-30)).ToArray();
+            if (before.Length < 2 || before[^1].Time - before[0].Time < TimeSpan.FromSeconds(5)) continue;
+            var anchor = isLong ? before.Max(x => x.Price) : before.Min(x => x.Price);
+            var opposed = IcebergStructureConfirmation.CounterTrend(isLong, before[0].Price, before[^1].Price, CalculateAtr14(live), tick);
+            if (!_nativeIcebergStructures.TryGetValue(pair.Key, out var confirmation))
+            {
+                var failed = _nativeIcebergFailures.TryGetValue(item.Side, out var failure);
+                if (failed && item.Time <= failure.Time) continue;
+                if (failed) anchor = isLong ? Math.Max(anchor, failure.Anchor) : Math.Min(anchor, failure.Anchor);
+                confirmation = new IcebergStructureConfirmation(isLong, anchor, opposed || failed);
+                _nativeIcebergStructures[pair.Key] = confirmation;
+                LogLiveReadinessInfo($"ICEBERG_STRUCTURE_PLAN_V216 event={pair.Key} side={item.Side} counterTrend={opposed} previousLoss={failed} anchor={anchor}");
+            }
+            priceAtEvent = live.Close;
+            var reason = confirmation.Observe(priceAtEvent, tick, live.Time);
+            if (reason is "WAIT_STRUCTURE_RETEST" or "WAIT_STRUCTURE_RECLAIM")
+                LogNativeIcebergStructureWait(pair.Key, reason, item.Side);
+        }
+    }
+
     private void ScheduleIcebergNoProgress(OpfCandle live)
     {
         foreach (var execution in ActiveReplayExecutions().Where(x => IsIcebergExecutionPath(x.ResearchPath)))
         {
             if (execution.EntryFilledQty <= 0m) continue;
+            execution.IcebergObservedSince ??= live.Time;
             var favorable = execution.Side == TradeSide.Long ? live.Close - execution.EntryAvgPrice : execution.EntryAvgPrice - live.Close;
             execution.IcebergMaxFavorable = Math.Max(execution.IcebergMaxFavorable, favorable);
-            if (live.Time - execution.CreatedTime < TimeSpan.FromSeconds(45) ||
-                execution.IcebergMaxFavorable >= execution.InitialRiskPoints * .25m || execution.EmergencyFlattenSubmitted) continue;
-            EnqueueExecutionAction("IcebergNoProgress", async () => await SubmitEmergencyFlattenAsync(execution, RemainingExecutionQuantity(execution), "IcebergNoProgress45s"));
+            (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] tape;
+            lock (_intradaySync) tape = _entryTape.Where(x => x.Time <= live.Time && x.Time >= live.Time.AddSeconds(-10)).ToArray();
+            if (!IntradayEntryPolicy.IcebergNoProgressExit(execution.Side == TradeSide.Long, live.Time - execution.IcebergObservedSince.Value,
+                execution.IcebergMaxFavorable, execution.InitialRiskPoints, live.Close, execution.IcebergExitStructure,
+                tape.Sum(x => x.Signed), tape.Sum(x => x.Volume)))
+            { execution.IcebergFailureSince = null; continue; }
+            if (execution.IcebergFailureLastObserved is not { } lastObserved || live.Time - lastObserved > TimeSpan.FromSeconds(1))
+                execution.IcebergFailureSince = live.Time;
+            execution.IcebergFailureLastObserved = live.Time;
+            execution.IcebergFailureSince ??= live.Time;
+            if (live.Time - execution.IcebergFailureSince.Value < TimeSpan.FromSeconds(5) ||
+                execution.TimeStopExitPendingV208 || execution.EmergencyFlattenSubmitted) continue;
+            execution.TimeStopExitPendingV208 = true;
+            execution.TimeStopReason = "IcebergNoProgressStructureFailed";
+            execution.TimeStopReferencePriceV209 = live.Close;
+            AppendExecutionEvent(execution, "ICEBERG_STRUCTURE_EXIT_TRIGGERED_V214", "TIME_STOP", live.Close, RemainingExecutionQuantity(execution),
+                $"elapsed={(live.Time - execution.CreatedTime).TotalSeconds:0.0}|structure={execution.IcebergExitStructure}|mfe={execution.IcebergMaxFavorable}");
+            EnqueueExecutionAction("IcebergStructureExit", async () =>
+            {
+                if (execution.ExitCompleted) return;
+                var position = GetCurrentAccountPosition();
+                var qty = Math.Min(Math.Abs(position), RemainingExecutionQuantity(execution));
+                if (Portfolio is null || Security is null || qty <= 0m || Math.Sign(position) != (execution.Side == TradeSide.Long ? 1 : -1))
+                { execution.TimeStopExitPendingV208 = false; return; }
+                var order = new Order { Portfolio = Portfolio, Security = Security, Type = OrderTypes.Market,
+                    Direction = execution.Side == TradeSide.Long ? OrderDirections.Sell : OrderDirections.Buy,
+                    QuantityToFill = qty, TimeInForce = ReplayTimeInForce,
+                    Comment = $"OPF|{execution.TradeId}|TIME_STOP|{execution.TimeStopReason}", AutoCancel = false };
+                execution.TimeStopOrderV208 = order;
+                AppendExecutionEvent(execution, "ICEBERG_STRUCTURE_EXIT_SEND_V214", "TIME_STOP", live.Close, qty, execution.TimeStopReason);
+                try { await OpenOrderAsync(order); }
+                catch { execution.TimeStopExitPendingV208 = false; AppendExecutionEvent(execution, "ICEBERG_STRUCTURE_EXIT_REJECTED_V214", "TIME_STOP", live.Close, qty, "protectionRetained"); throw; }
+            });
         }
     }
 
@@ -303,7 +498,7 @@ public sealed partial class OpeningPullbackFailureStrategy
     {
         if (path is not ("ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse" or "CrossMarketIcebergOrderFlowReaction"))
             return 1m;
-        const decimal maximum = 3m;
+        var maximum = IntradayEntryPolicy.ProductQuantityLimit(Security?.Code ?? string.Empty);
         var es = ReadEsOptionsProxyAsOf(decisionTime);
         var evidenceTime = IsHistoricalReplayTime(decisionTime) ? decisionTime : DateTime.UtcNow;
         var optionContext = es.Status == "ModelReady" && es.CapturedAtUtc <= evidenceTime &&

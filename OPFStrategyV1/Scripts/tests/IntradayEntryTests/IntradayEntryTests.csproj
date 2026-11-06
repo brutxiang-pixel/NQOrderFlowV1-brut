@@ -9,10 +9,13 @@
     <Compile Include="../../../Strategy/EsBreakoutEvent.cs" Link="EsBreakoutEvent.cs" />
     <Compile Include="../../../Strategy/BreakEvenPolicy.cs" Link="BreakEvenPolicy.cs" />
     <Compile Include="../../../Strategy/ProfitLockPolicy.cs" Link="ProfitLockPolicy.cs" />
+    <Compile Include="../../../Strategy/HistoricalExecutionArchive.cs" Link="HistoricalExecutionArchive.cs" />
     <Compile Include="../../../Strategy/ExecutionIdentity.cs" Link="ExecutionIdentity.cs" />
     <Compile Include="../../../Strategy/DynamicExitComparison.cs" Link="DynamicExitComparison.cs" />
     <Compile Include="../../../Strategy/ExecutionClock.cs" Link="ExecutionClock.cs" />
     <Compile Include="../../../Strategy/NativeIcebergArchive.cs" Link="NativeIcebergArchive.cs" />
+    <Compile Include="../../../Strategy/PostFillPriceObservation.cs" Link="PostFillPriceObservation.cs" />
+    <Compile Include="../../../Strategy/IcebergStructureConfirmation.cs" Link="IcebergStructureConfirmation.cs" />
     <Compile Include="../../../Strategy/AccountPnlScope.cs" Link="AccountPnlScope.cs" />
     <Compile Include="../../../Strategy/PhysicalEventExecutionDedup.cs" Link="PhysicalEventExecutionDedup.cs" />
     <Compile Include="../../../Core/MarketData/OpfCandle.cs" Link="OpfCandle.cs" />

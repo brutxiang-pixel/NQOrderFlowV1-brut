@@ -282,6 +282,24 @@ if (projectDirectory is null)
     throw new InvalidOperationException("Assertion failed [significant-zone-history-startup-order]: project directory was not found");
 
 var strategySource = File.ReadAllText(Path.Combine(projectDirectory.FullName, "Strategy", "OpeningPullbackFailureStrategy.cs"));
+var entryStart = strategySource.IndexOf("private void TrySubmitReplayExecution(", StringComparison.Ordinal);
+var preflightEnd = strategySource.IndexOf("switchPreflightPassed();", entryStart, StringComparison.Ordinal);
+var orderCreation = strategySource.IndexOf("var entryOrder = new Order", entryStart, StringComparison.Ordinal);
+if (preflightEnd < entryStart || preflightEnd >= orderCreation)
+    throw new InvalidOperationException("Switch preflight must finish before any entry order is created.");
+var sharedGates = strategySource[entryStart..preflightEnd];
+foreach (var gate in new[] { "ContextEntryReason", "OptionsEntryGateReason", "NqCrossMarketQualityReason",
+    "IsReplayExecutionPathEnabled", "IsRestoredPriorityPathAllowed", "ActualExecutionRiskSkipReasons",
+    "IsWeeklyLongLossGateActive", "DailyTradeLimit", "DailyTarget", "DailyLoss", "FullLossLimit", "ConsecutiveLossLimit" })
+    if (!sharedGates.Contains(gate, StringComparison.Ordinal))
+        throw new InvalidOperationException("Switch bypassed actual entry gate: " + gate);
+var icebergSource = File.ReadAllText(Path.Combine(projectDirectory.FullName, "Strategy", "OpeningPullbackFailureStrategy.NativeIceberg.cs"));
+var permissionCheck = icebergSource.IndexOf("if (!permitted)", StringComparison.Ordinal);
+var flattenQueue = icebergSource.IndexOf("EnqueueExecutionAction(\"IcebergSwitchFlatten\"", StringComparison.Ordinal);
+if (permissionCheck < 0 || permissionCheck > flattenQueue ||
+    icebergSource.Contains("SubmitEmergencyFlattenAsync(execution, RemainingExecutionQuantity(execution), \"NativeIcebergDirectionSwitch\")", StringComparison.Ordinal))
+    throw new InvalidOperationException("Rejected new direction must never flatten the old position; switch is a normal strategy exit.");
+Console.WriteLine("PASS switch uses actual entry gates before normal strategy exit; no order constructed during preflight");
 if (strategySource.Contains("GlobexCloseout:SL", StringComparison.Ordinal) ||
     strategySource.Contains("GlobexCloseout:TP", StringComparison.Ordinal) ||
     !strategySource.Contains("GLOBEX_CLOSEOUT_FLATTEN_REJECTED_PROTECTION_RETAINED", StringComparison.Ordinal))

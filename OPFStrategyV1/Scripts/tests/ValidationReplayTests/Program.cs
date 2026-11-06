@@ -44,11 +44,23 @@ var paths = new[] { "ObservationConfirm", "BreakawayFvg_Qualified",
 var syntheticPackets = new List<OptionsGatePacket>();
 foreach (var path in paths)
 {
-    var input = path == "ESWallRejectionReversal" ? context with { PutWallProxy = 5000m } : context;
+    var input = path switch
+    {
+        "ESWallRejectionReversal" => context with { PutWallProxy = 5000m },
+        "ESGammaConcentrationResponse" => context with { PutWallProxy = 5000m },
+        _ => context
+    };
     var packet = new OptionsGatePacket("synthetic", path, "MNQ", path, now, true, evidence, 10m, input, null);
     syntheticPackets.Add(packet);
     var decoded = JsonSerializer.Deserialize<OptionsGatePacket>(JsonSerializer.Serialize(packet))!;
     Check(decoded.Replay() is null, path + " frozen input round trip");
+    if (path == "ESGammaConcentrationResponse")
+    {
+        var unmapped = packet with { Context = input with { PutWallProxy = 4990m } };
+        var decodedUnmapped = JsonSerializer.Deserialize<OptionsGatePacket>(JsonSerializer.Serialize(unmapped))!;
+        Check(decodedUnmapped.Replay() == "OptionsGate:GammaUnsignedLongRequiresPutWall",
+            "ESGammaConcentrationResponse rejects unmapped frozen input round trip");
+    }
     Check((packet with { Context = input with { CapturedAtUtc = now.AddSeconds(1) } }).Replay() == "OptionsGate:FutureData", path + " rejects future input");
 }
 var reaction = new ReactionPacket("synthetic", "s", "MNQ", "ObservationConfirm", true, 101m, 100m, 98m,

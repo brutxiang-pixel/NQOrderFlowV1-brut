@@ -7,7 +7,7 @@
   "ActualAllowResearchPaths": false,
   "ActualOrderQuantity": 1,
   "ActualTargetR": 1.5,
-  "ActualMaxTradesPerDay": 20,
+  "ActualMaxTradesPerDay": 0,
   "ActualDailyLossLimitDollars": 200.0,
   "ActualWeeklyLongLossLimitDollars": 0.0,
   "ActualCommissionPerContractRoundTrip": 1.2,

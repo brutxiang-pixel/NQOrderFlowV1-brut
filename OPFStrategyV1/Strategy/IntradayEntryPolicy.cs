@@ -6,6 +6,33 @@ public sealed record CompletedFrame(string Name, DateTime Time, decimal High, de
 
 public static class IntradayEntryPolicy
 {
+    public const decimal IcebergTargetR = 1.5m;
+    public const decimal IcebergBreakEvenR = .75m;
+
+    public static bool IcebergNoProgressExit(bool isLong, TimeSpan elapsed, decimal maxFavorable,
+        decimal risk, decimal price, decimal structure, decimal signedVolume, decimal volume) =>
+        elapsed >= TimeSpan.FromSeconds(120) && risk > 0m && maxFavorable < risk * .25m &&
+        structure > 0m && (isLong ? price < structure : price > structure) && volume > 0m &&
+        (isLong ? -signedVolume : signedVolume) / volume >= .15m;
+
+    public static decimal IcebergStructuralStop(bool isLong, decimal entry, decimal icebergPrice,
+        decimal recentLow, decimal recentHigh, decimal atr, decimal tick)
+    {
+        var buffer = Math.Max(tick * 4m, Math.Max(0m, recentHigh - recentLow) * .25m);
+        var minimumRisk = Math.Max(tick * 8m, atr * .2m);
+        var stop = isLong
+            ? Math.Min(Math.Min(icebergPrice, recentLow) - buffer, entry - minimumRisk)
+            : Math.Max(Math.Max(icebergPrice, recentHigh) + buffer, entry + minimumRisk);
+        return (isLong ? Math.Floor(stop / tick) : Math.Ceiling(stop / tick)) * tick;
+    }
+
+    public static decimal ProductQuantityLimit(string productCode) =>
+        productCode.StartsWith("MNQ", StringComparison.OrdinalIgnoreCase) ? 2m :
+        productCode.StartsWith("NQ", StringComparison.OrdinalIgnoreCase) ? 1m : 3m;
+
+    public static decimal AvailableEntryQuantity(string productCode, decimal requested, decimal managedQuantity) =>
+        Math.Max(0m, Math.Min(requested, ProductQuantityLimit(productCode) - managedQuantity));
+
     public static (int Score, decimal Quantity) EvidenceSize(bool optionContext, bool esPriceReaction, bool localFlow,
         decimal configuredMaximum)
     {

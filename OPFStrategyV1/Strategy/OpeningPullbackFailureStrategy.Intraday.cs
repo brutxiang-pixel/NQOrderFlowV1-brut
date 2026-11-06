@@ -118,7 +118,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             _lastEntryTradeTime = trade.Time;
             _entryTape.Enqueue((trade.Time, trade.Price, trade.Volume, trade.Direction == ATAS.Indicators.TradeDirection.Buy ? trade.Volume :
                 trade.Direction == ATAS.Indicators.TradeDirection.Sell ? -trade.Volume : 0m));
-            while (_entryTape.Count > 0 && _entryTape.Peek().Time < trade.Time.AddSeconds(-30)) _entryTape.Dequeue();
+            while (_entryTape.Count > 0 && _entryTape.Peek().Time < trade.Time.AddSeconds(-60)) _entryTape.Dequeue();
         }
     }
 
@@ -202,6 +202,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         foreach (var tracker in _researchTrackers.Where(x => x.Signal.SkipReasons.Contains("IntradayReaction") && x.EntryTime <= now))
             tracker.Update(live with { High = price, Low = price });
         RefreshCompletedContext(now);
+        ObserveNativeIcebergStructure(live);
         ScheduleIcebergNoProgress(live);
         EvaluateNativeIceberg(live); // Priority before ordinary candidates.
         if (_pendingIcebergSwitch is not null) return;

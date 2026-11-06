@@ -34,6 +34,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         RecordZoneBehaviorTrade(trade);
         RecordMarketExecutionTapeTrade(trade);
         RecordEntryTrade(trade);
+        UpdateActiveProtectionObservation(trade.Price, trade.Time);
     }
 
     protected override void OnNewTrades(IEnumerable<MarketDataArg> trades)
@@ -41,7 +42,10 @@ public sealed partial class OpeningPullbackFailureStrategy
         var batch = trades as ICollection<MarketDataArg> ?? trades.ToArray();
         base.OnNewTrades(batch);
         foreach (var trade in batch)
+        {
             RecordMicrostructureEvent("OnNewTrades", trade);
+            UpdateActiveProtectionObservation(trade.Price, trade.Time);
+        }
     }
 
     protected override void MarketDepthChanged(MarketDataArg depth)
