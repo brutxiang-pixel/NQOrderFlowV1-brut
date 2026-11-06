@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable></PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../../Strategy/EntryExitPolicyParameters.cs" Link="EntryExitPolicyParameters.cs" />
     <Compile Include="../../../Strategy/OptionsProxyExpiry.cs" Link="OptionsProxyExpiry.cs" />
     <Compile Include="../../../Strategy/ValidationPacket.cs" Link="ValidationPacket.cs" />
     <Compile Include="../../../Strategy/OptionsProxyEntryGate.cs" Link="OptionsProxyEntryGate.cs" />

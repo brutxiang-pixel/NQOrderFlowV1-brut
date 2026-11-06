@@ -24,6 +24,10 @@ public sealed record ConfigSnapshot(
     ActualExecutionSettings ActualExecutionSettings)
 {
     public string AccountScope { get; init; } = "unresolved";
+    public string OpeningRangeDefinition { get; init; } = Regime.TrendScoreEngine.OpeningRangeDefinition;
+    public string EntryExitPolicyVersion { get; init; } = Strategy.EntryExitPolicyParameters.Version;
+    public string ConfigFileSha256 { get; init; } = string.Empty;
+    public string EffectiveSettingsSha256 { get; init; } = string.Empty;
     public static ConfigSnapshot Create(
         ProfileSelection profileSelection,
         string actualExecutionConfigPath,
@@ -50,6 +54,12 @@ public sealed record ConfigSnapshot(
             ActualExecutionConfigPath: actualExecutionConfigPath,
             ActualExecutionConfigStatus: actualExecutionConfigStatus,
             ActualExecutionSettings: actualExecutionSettings with { FeishuWebhookUrl = string.IsNullOrEmpty(actualExecutionSettings.FeishuWebhookUrl) ? string.Empty : "REDACTED" })
-        { AccountScope = accountScope };
+        {
+            AccountScope = accountScope,
+            ConfigFileSha256 = File.Exists(actualExecutionConfigPath)
+                ? Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(actualExecutionConfigPath))) : string.Empty,
+            EffectiveSettingsSha256 = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(actualExecutionSettings with { FeishuWebhookUrl = string.Empty })))
+        };
     }
 }

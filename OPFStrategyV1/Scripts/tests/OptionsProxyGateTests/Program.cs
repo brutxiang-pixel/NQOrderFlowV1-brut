@@ -30,6 +30,50 @@ AssertClock(ids.Distinct().Count() == ids.Length, "simultaneous strategy instanc
 var settingsType = typeof(OPFStrategyV1.Core.Configuration.ActualExecutionSettings);
 var normalizeSettings = settingsType.GetMethod("Normalize", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
 var defaults = OPFStrategyV1.Core.Configuration.ActualExecutionSettings.Default();
+var configTestPath = Path.Combine(Path.GetTempPath(), "opf-config-review-" + Guid.NewGuid() + ".json");
+try
+{
+    void WriteSettings(OPFStrategyV1.Core.Configuration.ActualExecutionSettings settings) =>
+        File.WriteAllText(configTestPath, System.Text.Json.JsonSerializer.Serialize(settings));
+    void RejectPreserving(string content)
+    {
+        File.WriteAllText(configTestPath, content);
+        var rejected = false;
+        try { OPFStrategyV1.Core.Configuration.ActualExecutionSettings.LoadFromPath(configTestPath, out _); }
+        catch (InvalidDataException) { rejected = true; }
+        AssertClock(rejected && File.ReadAllText(configTestPath) == content, "invalid config fails closed without rewriting");
+    }
+    RejectPreserving(System.Text.Json.JsonSerializer.Serialize(defaults with { Version = "ACTUAL_EXEC_2.53" }));
+    RejectPreserving("{invalid");
+    RejectPreserving("null");
+    RejectPreserving(System.Text.Json.JsonSerializer.Serialize(defaults with { ActualExecutionPaths = "UnknownPath" }));
+    WriteSettings(defaults with { ActualExecutionPaths = "ESExpectedMoveExpansion", ExecutionMode = "Auto" });
+    var selected = OPFStrategyV1.Core.Configuration.ActualExecutionSettings.LoadFromPath(configTestPath, out _);
+    AssertClock(selected.ActualExecutionPaths == "ESExpectedMoveExpansion" && selected.EnableActualOrders,
+        "configured subset stays a subset and Auto remains Auto");
+    WriteSettings(defaults with { ActualExecutionPaths = "" });
+    AssertClock(OPFStrategyV1.Core.Configuration.ActualExecutionSettings.LoadFromPath(configTestPath, out _).ActualExecutionPaths == "",
+        "empty path list does not enable default paths");
+}
+finally { File.Delete(configTestPath); }
+foreach (var openUtc in new[] { new DateTime(2026, 7, 6, 13, 30, 0), new DateTime(2026, 11, 6, 14, 30, 0) })
+{
+    var engine = new OPFStrategyV1.Regime.TrendScoreEngine();
+    var index = 0;
+    OPFStrategyV1.Regime.RegimeResult Feed(DateTime at, decimal high, decimal low, decimal close) =>
+        engine.Update(new OPFStrategyV1.Core.MarketData.OpfCandle(index++, at, close, high, low, close, 100m, 100m));
+    Feed(openUtc.Date, 1000m, 1m, 500m);
+    var before = Feed(openUtc.AddMinutes(-5), 999m, 2m, 500m);
+    AssertClock(before.BullTrendScore.Components.Single(x => x.Name == "OpeningRangeSide").RawValue == "OpeningRangeUnavailable", "midnight and preopen cannot define opening range");
+    for (var minute = 0; minute < 30; minute += 5) Feed(openUtc.AddMinutes(minute), 110m, 90m, 100m);
+    var forming = Feed(openUtc.AddMinutes(29), 110m, 90m, 100m);
+    AssertClock(forming.BullTrendScore.Components.Single(x => x.Name == "OpeningRangeSide").RawValue == "OpeningRangeUnavailable", "opening range cannot score before 10 ET");
+    OPFStrategyV1.Regime.RegimeResult? after = null;
+    for (var minute = 30; minute < 55; minute += 5) after = Feed(openUtc.AddMinutes(minute), 130m, 115m, 120m);
+    AssertClock(after!.BullTrendScore.Components.Single(x => x.Name == "OpeningRangeSide").Passed, "cash opening range excludes post-10 ET highs in summer and winter");
+    var reset = Feed(openUtc.AddDays(1).AddHours(-2), 130m, 115m, 120m);
+    AssertClock(reset.BullTrendScore.Components.Single(x => x.Name == "OpeningRangeSide").RawValue == "OpeningRangeUnavailable", "new Eastern date cannot reuse prior opening range");
+}
 var unlimitedSettings = (OPFStrategyV1.Core.Configuration.ActualExecutionSettings)normalizeSettings.Invoke(null, new object[] { defaults with { ActualMaxTradesPerDay = 0 } })!;
 var cappedSettings = (OPFStrategyV1.Core.Configuration.ActualExecutionSettings)normalizeSettings.Invoke(null, new object[] { defaults with { ActualMaxTradesPerDay = 7 } })!;
 var fallbackSettings = (OPFStrategyV1.Core.Configuration.ActualExecutionSettings)normalizeSettings.Invoke(null, new object[] { defaults with { ActualMaxTradesPerDay = -1 } })!;

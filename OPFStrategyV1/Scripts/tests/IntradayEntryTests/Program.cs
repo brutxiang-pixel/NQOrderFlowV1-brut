@@ -3,6 +3,15 @@ using OPFStrategyV1.Core.MarketData;
 
 var now = new DateTime(2026, 10, 14, 10, 0, 0, DateTimeKind.Utc);
 void Check(bool value, string name) { if (!value) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); }
+foreach (var path in new[] { "BreakawayFvg_Qualified", "FailureReverse_RetestFailed", "ESResponseAlignedBreakout", "ESWallRejectionReversal", "ESExpectedMoveExpansion", "ESGammaConcentrationResponse", "CrossMarketIcebergOrderFlowReaction" })
+foreach (var isLong in new[] { true, false })
+{
+    Check(EntryExitPolicyParameters.TryGetExit(isLong, path, out var target, out var be, out var exitBars) && target == 1.5m,
+        "versioned exit target preserved " + path + "/" + isLong);
+    var expectedBe = path is "FailureReverse_RetestFailed" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse" ? 1m : .75m;
+    Check(be == expectedBe && exitBars == (path == "BreakawayFvg_Qualified" ? 12 : path == "FailureReverse_RetestFailed" ? 36 : 0),
+        "versioned protection and time stop preserved " + path + "/" + isLong);
+}
 foreach (var path in new[] { "ESResponseAlignedBreakout", "ESWallRejectionReversal", "ESExpectedMoveExpansion", "ESGammaConcentrationResponse", "CrossMarketIcebergOrderFlowReaction" })
 {
     Check(ProfitLockPolicy.TryGet(path, 0, out var stage1) && stage1.TriggerR == 1m && stage1.LockR == .25m, path + " stage1");

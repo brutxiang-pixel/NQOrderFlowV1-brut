@@ -6,8 +6,8 @@ public sealed record CompletedFrame(string Name, DateTime Time, decimal High, de
 
 public static class IntradayEntryPolicy
 {
-    public const decimal IcebergTargetR = 1.5m;
-    public const decimal IcebergBreakEvenR = .75m;
+    public const decimal IcebergTargetR = EntryExitPolicyParameters.IcebergTargetR;
+    public const decimal IcebergBreakEvenR = EntryExitPolicyParameters.IcebergBreakEvenR;
 
     public static bool IcebergNoProgressExit(bool isLong, TimeSpan elapsed, decimal maxFavorable,
         decimal risk, decimal price, decimal structure, decimal signedVolume, decimal volume) =>

@@ -3,6 +3,8 @@
   <ItemGroup><Compile Include="../../../Strategy/OptionsProxyEntryGate.cs" Link="OptionsProxyEntryGate.cs" /><Compile Include="../../../Strategy/OptionsProxyExpiry.cs" Link="OptionsProxyExpiry.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../Strategy/OptionsProxySnapshotStore.cs" Link="OptionsProxySnapshotStore.cs" /></ItemGroup>
   <ItemGroup>
+    <Compile Include="../../../Strategy/EntryExitPolicyParameters.cs" Link="EntryExitPolicyParameters.cs" />
+    <Compile Include="../../../Strategy/IntradayEntryPolicy.cs" Link="IntradayEntryPolicy.cs" />
     <Compile Include="../../../Core/MarketData/OpfCandle.cs" Link="OpfCandle.cs" />
     <Compile Include="../../../Core/Scoring/*.cs" Link="Scoring/%(Filename).cs" />
     <Compile Include="../../../Regime/*.cs" Link="Regime/%(Filename).cs" />

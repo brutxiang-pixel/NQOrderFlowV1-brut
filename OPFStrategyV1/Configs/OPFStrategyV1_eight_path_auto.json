@@ -1,5 +1,5 @@
 {
-  "Version": "ACTUAL_EXEC_2.53",
+  "Version": "ACTUAL_EXEC_2.54",
   "EnableActualOrders": true,
   "ManualAlertEnabled": false,
   "ExecutionMode": "Auto",
@@ -10,6 +10,7 @@
   "ActualMaxTradesPerDay": 0,
   "ActualDailyLossLimitDollars": 200.0,
   "ActualWeeklyLongLossLimitDollars": 0.0,
+  "NqWeeklyLongLossLimitDollars": 0.0,
   "ActualCommissionPerContractRoundTrip": 1.2,
   "ActualCommissionByInstrument": {
     "MNQ": 1.18,

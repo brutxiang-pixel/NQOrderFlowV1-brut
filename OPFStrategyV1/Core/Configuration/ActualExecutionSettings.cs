@@ -43,13 +43,13 @@ public sealed record ActualExecutionSettings(
     public bool FeishuNotificationEnabled { get; init; }
     public string FeishuWebhookUrl { get; init; } = string.Empty;
     public decimal NqDailyLossLimitDollars { get; init; } = 600m;
-    public decimal NqWeeklyLongLossLimitDollars { get; init; } = 2000m;
+    public decimal NqWeeklyLongLossLimitDollars { get; init; } = 0m;
     public Dictionary<string, decimal> ActualCommissionByInstrument { get; init; } = CommissionSchedule.CreateDefaults();
 
     public static ActualExecutionSettings Default()
     {
         return new ActualExecutionSettings(
-            Version: "ACTUAL_EXEC_2.53",
+            Version: "ACTUAL_EXEC_2.54",
             EnableActualOrders: false,
             ManualAlertEnabled: true,
             ExecutionMode: "ManualAlert",
@@ -94,6 +94,11 @@ public sealed record ActualExecutionSettings(
         Directory.CreateDirectory(directory);
         path = Path.Combine(directory, "OPFStrategyV1_actual_execution.json");
 
+        return LoadFromPath(path, out status);
+    }
+
+    public static ActualExecutionSettings LoadFromPath(string path, out string status)
+    {
         var options = new JsonSerializerOptions
         {
             PropertyNameCaseInsensitive = true,
@@ -115,23 +120,19 @@ public sealed record ActualExecutionSettings(
             {
                 if (!string.Equals(loaded.Version, Default().Version, StringComparison.OrdinalIgnoreCase))
                 {
-                    var upgraded = Default();
-                    File.WriteAllText(path, JsonSerializer.Serialize(upgraded, options));
-                    status = "upgradedDefault";
-                    return upgraded;
+                    throw new InvalidDataException($"Execution config version mismatch: expected {Default().Version}, found {loaded.Version}. File preserved: {path}");
                 }
 
                 status = "loaded";
                 return Normalize(loaded);
             }
         }
-        catch
+        catch (JsonException exception)
         {
+            throw new InvalidDataException($"Invalid execution config JSON. File preserved: {path}", exception);
         }
 
-        var fallback = Default();
-        status = "fallbackDefault";
-        return fallback;
+        throw new InvalidDataException($"Execution config is null. File preserved: {path}");
     }
 
     private static ActualExecutionSettings Normalize(ActualExecutionSettings settings)
@@ -190,10 +191,11 @@ public sealed record ActualExecutionSettings(
         var allowed = fallback.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(path => !retired.Contains(path))
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var paths = (string.IsNullOrWhiteSpace(configured) ? fallback : configured).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(path => allowed.Contains(path) && !retired.Contains(path))
-            .Concat(allowed)
-            .Distinct(StringComparer.OrdinalIgnoreCase);
+        var paths = (configured ?? string.Empty).Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var invalid = paths.Where(path => !allowed.Contains(path)).ToArray();
+        if (invalid.Length > 0)
+            throw new InvalidDataException($"Unknown or retired execution paths: {string.Join('|', invalid)}. File preserved.");
         return string.Join('|', paths);
     }
 }

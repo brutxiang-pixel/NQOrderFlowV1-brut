@@ -12,9 +12,14 @@ public sealed class TrendScoreEngine
     private DateTime _sessionDate = DateTime.MinValue;
     private decimal _openingRangeHigh;
     private decimal _openingRangeLow;
+    private bool _openingRangeObserved;
+    private DateTime _easternTime;
+    private static readonly TimeZoneInfo Eastern = TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time");
+    public const string OpeningRangeDefinition = "Chart=UTC;America/New_York;09:30<=barStart<10:00;ready>=10:00";
 
     public RegimeResult Update(OpfCandle candle)
     {
+        _easternTime = TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc), Eastern);
         ResetSessionIfNeeded(candle);
         _candles.Add(candle);
         UpdateOpeningRange(candle);
@@ -34,21 +39,23 @@ public sealed class TrendScoreEngine
 
     private void ResetSessionIfNeeded(OpfCandle candle)
     {
-        if (_sessionDate == candle.Time.Date)
+        if (_sessionDate == _easternTime.Date)
             return;
 
-        _sessionDate = candle.Time.Date;
-        _openingRangeHigh = candle.High;
-        _openingRangeLow = candle.Low;
+        _sessionDate = _easternTime.Date;
+        _openingRangeHigh = 0m;
+        _openingRangeLow = 0m;
+        _openingRangeObserved = false;
     }
 
     private void UpdateOpeningRange(OpfCandle candle)
     {
-        if (candle.Time.TimeOfDay > TimeSpan.FromMinutes(30))
+        if (_easternTime.TimeOfDay < new TimeSpan(9, 30, 0) || _easternTime.TimeOfDay >= new TimeSpan(10, 0, 0))
             return;
 
-        _openingRangeHigh = Math.Max(_openingRangeHigh, candle.High);
-        _openingRangeLow = Math.Min(_openingRangeLow, candle.Low);
+        _openingRangeHigh = _openingRangeObserved ? Math.Max(_openingRangeHigh, candle.High) : candle.High;
+        _openingRangeLow = _openingRangeObserved ? Math.Min(_openingRangeLow, candle.Low) : candle.Low;
+        _openingRangeObserved = true;
     }
 
     private void UpdateSwings()
@@ -129,7 +136,8 @@ public sealed class TrendScoreEngine
     private ScoreComponent OpeningRangeSide(bool bullish)
     {
         const decimal weight = 20m;
-        if (_openingRangeHigh <= _openingRangeLow || _candles.Count < 5)
+        if (!_openingRangeObserved || _easternTime.TimeOfDay < new TimeSpan(10, 0, 0) ||
+            _openingRangeHigh <= _openingRangeLow || _candles.Count < 5)
             return Component("OpeningRangeSide", "OpeningRangeUnavailable", false, weight);
 
         var recent = _candles.TakeLast(5).ToArray();

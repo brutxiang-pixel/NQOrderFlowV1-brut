@@ -23,6 +23,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using static OPFStrategyV1.Strategy.EntryExitPolicyParameters;
 
 namespace OPFStrategyV1.Strategy;
 
@@ -46,50 +47,11 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal DailyVolumeQualityRescueMaxRiskPoints = 22m;
     private const decimal DailyVolumeQualityRescueMinEstimatedRr = 0.8m;
     private const int DailyVolumeQualityRescueMaxTradesPerDay = 4;
-    private const decimal ZoneBirthVolumeV122MinSetupQualityScore = 45m;
     private const decimal PrimaryZoneBirthMinSetupQualityV221 = 45m;
     private const int PrimaryObservationConfirmMinRegimeBarsV223 = 8;
     private const decimal PrimaryBreakawayMinSetupQualityV223 = 88m;
     private const decimal PrimaryBreakawayMinRiskPointsV223 = 12m;
-    private const decimal ZoneBirthVolumeV122MaxRiskPoints = 25m;
-    private const decimal ZoneBirthVolumeV122MinEstimatedRr = 0.3m;
-    private const decimal StrictVolumeV122MinSetupQualityScore = 45m;
-    private const decimal StrictVolumeV122MaxRiskPoints = 25m;
-    private const decimal StrictVolumeV122MinEstimatedRr = 0.5m;
-    private const decimal BreakawayVolumeV128MinSetupQualityScore = 76m;
-    private const decimal BreakawayVolumeV128LongMaxRiskPoints = 25m;
-    private const decimal BreakawayVolumeV128ShortMaxRiskPoints = 30m;
-    private const decimal BreakawayVolumeV128MinEstimatedRr = 1m;
-    private const decimal BreakawayLongSelectiveV134MinSetupQualityScore = 95m;
-    private const decimal BreakawayLongSelectiveV134MaxRiskPoints = 18m;
-    private const decimal BreakawayLongSelectiveV134MinEstimatedRr = 1.5m;
     private const int PartialEntryFinalizeDelayMs = 250;
-    private const decimal ObservationLongVolumeV123MinSetupQualityScore = 70m;
-    private const decimal ObservationLongVolumeV123MaxRiskPoints = 18m;
-    private const decimal ObservationLongVolumeV123MinEstimatedRr = 0.8m;
-    private const decimal UnknownMicroRiskVolumeV126MinSetupQualityScore = 45m;
-    private const decimal UnknownMicroRiskVolumeV126MaxRiskPoints = 8.5m;
-    private const decimal UnknownMicroRiskVolumeV126MinEstimatedRr = 1.5m;
-    private const decimal ObservationShortVolumeV124MinSetupQualityScore = 60m;
-    private const decimal ObservationShortVolumeV124MaxRiskPoints = 18m;
-    private const decimal ObservationShortVolumeV124MinEstimatedRr = 1m;
-    private const decimal ObservationConfirmLongV137MaxRiskPoints = 12m;
-    private const decimal ObservationConfirmWideStopVolumeV131LongMinSetupQualityScore = 70m;
-    private const decimal ObservationConfirmWideStopVolumeV131ShortMinSetupQualityScore = 60m;
-    private const decimal ObservationConfirmWideStopVolumeV131MaxRiskPoints = 22m;
-    private const decimal ObservationConfirmWideStopVolumeV131MinEstimatedRr = 0.8m;
-    private const decimal ObservationConfirmWideStopLongExpansionV157MaxRiskPoints = 25m;
-    private const int ObservationConfirmWideStopLongExpansionV163MaxTradesPerDay = 1;
-    private const decimal ObservationConfirmWideStopLowRiskV132MinSetupQualityScore = 56m;
-    private const decimal ObservationConfirmWideStopLowRiskV132MaxRiskPoints = 18m;
-    private const decimal ObservationConfirmWideStopLowRiskV132MinEstimatedRr = 0.5m;
-    private const decimal ObservationConfirmRisk22V132MinSetupQualityScore = 70m;
-    private const decimal ObservationConfirmRisk22V132MaxRiskPoints = 22m;
-    private const decimal ObservationConfirmRisk22V132MinEstimatedRr = 0.8m;
-    private const decimal SelectiveProfitTargetV145R = 2.0m;
-    private const decimal ObservationConfirmLongTarget2RV161MinRiskPoints = 8m;
-    private const decimal ObservationConfirmLongTarget2RV161MaxRiskPoints = 11m;
-    private const decimal ObservationConfirmLongTarget2RV161R = 2m;
     private const decimal AggressiveExpansionV164MaxRiskPoints = 25m;
     private const decimal AggressiveExpansionV164TargetR = 3m;
     private const decimal DynamicExpansionV168TargetR = 2.5m;
@@ -103,11 +65,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private const bool EnableDeferredContinuationV209 = false;
     private const decimal DeferredContinuationTargetRV208 = 3m;
     private const int DeferredContinuationMaxBarsV208 = 18;
-    private const decimal BreakawayShortTargetRV209 = 4m;
-    private const decimal BreakawayShortBreakEvenTriggerRV209 = 1.5m;
-    private const int LongPolicyTimeStopBarsV209 = 36;
-    private const int ShortPolicyTimeStopBarsV209 = 36;
-    private const int FastPolicyTimeStopBarsV209 = 12;
     private const int DecisionTapeCalibrationMaxBars = 36;
     private const decimal ProtectBreakEvenTriggerRV186 = 1m;
     private const decimal ProtectBreakEvenTargetRV186 = 3m;
@@ -453,9 +410,23 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         _decisionTapeTurnSequence = 0;
         _decisionTapeTurnDirection = 0;
 
-        var actualExecutionSettings = ActualExecutionSettings.LoadOrCreateDefault(
-            out var actualExecutionConfigPath,
-            out var actualExecutionConfigStatus);
+        EnableReplayOrders = false;
+        _snapshot = null;
+        ActualExecutionSettings actualExecutionSettings;
+        string actualExecutionConfigPath;
+        string actualExecutionConfigStatus;
+        try
+        {
+            actualExecutionSettings = ActualExecutionSettings.LoadOrCreateDefault(
+                out actualExecutionConfigPath,
+                out actualExecutionConfigStatus);
+        }
+        catch (InvalidDataException exception)
+        {
+            _hudText = "CONFIG ERROR\n" + exception.Message;
+            _compactHudText = "CONFIG ERROR | Auto disabled";
+            return;
+        }
         ApplyActualExecutionSettings(actualExecutionSettings);
         ReplayOrderQuantity = 1m;
         ApplyRunMode(actualExecutionSettings.RunMode);
@@ -478,7 +449,13 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             profileSelection,
             actualExecutionConfigPath,
             actualExecutionConfigStatus,
-            actualExecutionSettings, LiveAccountScope.FromPortfolio(Portfolio));
+            actualExecutionSettings with
+            {
+                EnableActualOrders = ActualOrdersEnabled,
+                ManualAlertEnabled = _manualAlertEnabled,
+                ExecutionMode = ActualOrdersEnabled ? "Auto" : _manualAlertEnabled ? "ManualAlert" : "Disabled",
+                ActualExecutionPaths = ReplayExecutionPath
+            }, LiveAccountScope.FromPortfolio(Portfolio));
         RestoreHistoricalSignificantZones();
 
         if (EnableResearchLogging)
@@ -953,6 +930,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     protected override void OnCalculate(int bar, decimal value)
     {
+        if (_snapshot is null)
+            return;
         if (bar == CurrentBar - 1 && _snapshot is not null)
             RestoreHistoricalOrdersForCurrentContext();
         if (bar == CurrentBar - 1 && value > 0m &&
@@ -5485,52 +5464,10 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     }
 
     private static bool TryGetActualExitPolicyV209(
-        TradeSide side,
-        string researchPath,
-        out decimal targetR,
-        out decimal breakEvenTriggerR,
-        out int timeStopBars,
-        decimal risk = 0m)
-    {
-        targetR = 0m;
-        breakEvenTriggerR = 0m;
-        timeStopBars = 0;
-
-        if (researchPath is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction")
-            (targetR, breakEvenTriggerR, timeStopBars) = (IntradayEntryPolicy.IcebergTargetR, IntradayEntryPolicy.IcebergBreakEvenR, 0);
-        else if (researchPath == "ObservationConfirm")
-            (targetR, breakEvenTriggerR, timeStopBars) = (1.5m, .75m, 6);
-        else if (researchPath == "BreakawayFvg_Qualified")
-            (targetR, breakEvenTriggerR, timeStopBars) = (1.5m, .75m, FastPolicyTimeStopBarsV209);
-        else if (researchPath == "FailureReverse_RetestFailed")
-            (targetR, breakEvenTriggerR, timeStopBars) = (1.5m, 1m, ShortPolicyTimeStopBarsV209);
-        else if (researchPath == "FailureReverse_ObservationInvalidated_WideStop1_5R")
-            (targetR, breakEvenTriggerR, timeStopBars) = (4m, 1m, ShortPolicyTimeStopBarsV209);
-        else if (IsStaticDynamicExitV215(side, researchPath, risk))
-            (targetR, timeStopBars) = (1.5m, 12);
-        else if (researchPath == "ESResponseAlignedBreakout")
-            (targetR, breakEvenTriggerR) = (1.5m, 0.75m);
-        else if (researchPath is "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse")
-            (targetR, breakEvenTriggerR) = (1.5m, 1m);
-        else if (side == TradeSide.Short && string.Equals(researchPath, "BreakawayFvg", StringComparison.OrdinalIgnoreCase))
-            (targetR, breakEvenTriggerR, timeStopBars) = (BreakawayShortTargetRV209, BreakawayShortBreakEvenTriggerRV209, ShortPolicyTimeStopBarsV209);
-        else if (side == TradeSide.Long && string.Equals(researchPath, "ObservationConfirm", StringComparison.OrdinalIgnoreCase))
-            // The overnight NQ sample reached >1R and returned to the original stop.
-            // Keep the 4R objective, but protect the trade after the first R.
-            (targetR, breakEvenTriggerR, timeStopBars) = (4m, 1m, LongPolicyTimeStopBarsV209);
-        else if (side == TradeSide.Long && string.Equals(researchPath, "ObservationConfirm_WideStop1_5R", StringComparison.OrdinalIgnoreCase))
-            (targetR, timeStopBars) = (3m, FastPolicyTimeStopBarsV209);
-        else if (side == TradeSide.Long && string.Equals(researchPath, "ObservationStrict_Other", StringComparison.OrdinalIgnoreCase))
-            (targetR, timeStopBars) = (3m, FastPolicyTimeStopBarsV209);
-        else if (side == TradeSide.Long && string.Equals(researchPath, "AlmostConfirmed", StringComparison.OrdinalIgnoreCase))
-            (targetR, timeStopBars) = (4m, LongPolicyTimeStopBarsV209);
-        else if (side == TradeSide.Short && string.Equals(researchPath, "FailureReverse_ObservationInvalidated_WideStop1_5R", StringComparison.OrdinalIgnoreCase))
-            (targetR, timeStopBars) = (4m, ShortPolicyTimeStopBarsV209);
-        else if (side == TradeSide.Short && string.Equals(researchPath, "FailureReverse_PreEntryConfirmedWideStopShort", StringComparison.OrdinalIgnoreCase))
-            (targetR, timeStopBars) = (4m, ShortPolicyTimeStopBarsV209);
-
-        return targetR > 0m;
-    }
+        TradeSide side, string researchPath, out decimal targetR,
+        out decimal breakEvenTriggerR, out int timeStopBars, decimal risk = 0m) =>
+        EntryExitPolicyParameters.TryGetExit(side == TradeSide.Long, researchPath,
+            out targetR, out breakEvenTriggerR, out timeStopBars, risk);
 
     private static bool IsStaticDynamicExitV215(TradeSide side, string researchPath, decimal risk)
     {
@@ -6261,7 +6198,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         reason = _weeklyLongLossGateTriggered
             ? $"WeeklyLongLossV219:week={_liveAccountPnlWeekStart:yyyy-MM-dd}|accountNet={_liveAccountWeeklyNetPnlDollars:0.##}|longNet={_liveLongWeeklyNetPnlDollars:0.##}|limit={_actualWeeklyLongLossLimitDollars:0.##}|trigger={_weeklyLongLossGateTrigger}"
             : string.Empty;
-        return _weeklyLongLossGateTriggered;
+        return _actualWeeklyLongLossLimitDollars > 0m && _weeklyLongLossGateTriggered;
     }
 
     private void TriggerWeeklyLongLossGateIfNeeded()
