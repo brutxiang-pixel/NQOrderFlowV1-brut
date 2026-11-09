@@ -1313,11 +1313,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (!ActualOrdersEnabled || order is null)
             return;
         if (!IsOwnExecutionProduct(order)) return;
-        if (!TryParseExecutionComment(order.Comment, out var tradeId, out var role))
-            return;
-        var execution = FindReplayExecution(tradeId);
-        if (execution is null)
-            return;
+        if (!TryResolveExecutionOrder(order, out var execution, out var role)) return;
+        var tradeId = execution.TradeId;
 
         if (ShouldIgnoreStaleHistoricalTargetOrderV183(execution, role, order, out var staleTargetReason))
         {
@@ -5796,11 +5793,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (trade.Order is null)
             return;
         if (!IsOwnExecutionProduct(trade.Order)) return;
-        if (!TryParseExecutionComment(trade.Order.Comment, out var tradeId, out var role))
-            return;
-        var execution = FindReplayExecution(tradeId);
-        if (execution is null)
-            return;
+        if (!TryResolveExecutionOrder(trade.Order, out var execution, out var role)) return;
+        var tradeId = execution.TradeId;
         if (!IsExpectedTradeOrder(execution, role, trade.Order, out var mismatchReason))
         {
             LogExecutionInfo($"EXEC_TRADE_ORDER_MISMATCH trade={tradeId} role={role} {mismatchReason}");
@@ -7115,7 +7109,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             QuantityToFill = legQuantity,
             TimeInForce = ReplayTimeInForce,
             OCOGroup = oco,
-            Comment = $"OPF|{execution.TradeId}|{stopRole}|{execution.SignalId}",
+            Comment = ExecutionIdentity.SplitComment(execution.TradeId, runner, true),
             AutoCancel = false
         };
         var target = new Order
@@ -7128,7 +7122,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             QuantityToFill = legQuantity,
             TimeInForce = ReplayTimeInForce,
             OCOGroup = oco,
-            Comment = $"OPF|{execution.TradeId}|{targetRole}|{execution.SignalId}",
+            Comment = ExecutionIdentity.SplitComment(execution.TradeId, runner, false),
             AutoCancel = false
         };
 
@@ -8866,8 +8860,40 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return false;
 
         tradeId = parts[1];
-        role = parts[2];
+        role = ExecutionIdentity.NormalizeRole(parts[2]);
         return true;
+    }
+
+    private bool TryResolveExecutionOrder(Order order, out ReplayExecutionState execution, out string role)
+    {
+        execution = null!;
+        role = string.Empty;
+        if (!IsOwnExecutionProduct(order)) return false;
+        if (TryParseExecutionComment(order.Comment, out var tradeId, out var parsedRole) && FindReplayExecution(tradeId) is { } found)
+        {
+            execution = found;
+            role = parsedRole;
+        }
+        foreach (var candidate in execution is null ? _replayExecutionsByTradeId.Values : new[] { execution }.AsEnumerable())
+        {
+            var known = new[] { ("ENTRY", candidate.EntryOrder), ("BASE_SL", candidate.StopOrder),
+                ("BASE_TP", candidate.TargetOrder), ("RUNNER_SL", candidate.RunnerStopOrder), ("RUNNER_TP", candidate.RunnerTargetOrder) };
+            foreach (var (knownRole, expected) in known)
+            {
+                if (order.ExtId == 0 || expected is null || order.ExtId != expected.ExtId) continue;
+                execution = candidate;
+                role = !candidate.ZoneBirthSplitRunnerV172 && knownRole == "BASE_SL" ? "SL" :
+                    !candidate.ZoneBirthSplitRunnerV172 && knownRole == "BASE_TP" ? "TP" : knownRole;
+                return true;
+            }
+        }
+        // Older connectors may truncate the role after the complete trade identity.
+        if (execution is not null && role == "RUNNER_" && execution.ZoneBirthSplitRunnerV172)
+        {
+            role = order.Type == OrderTypes.Stop ? "RUNNER_SL" : order.Type == OrderTypes.Limit ? "RUNNER_TP" : role;
+        }
+        return execution is not null && role is "ENTRY" or "SL" or "TP" or "BASE_SL" or "BASE_TP" or
+            "RUNNER_SL" or "RUNNER_TP" or "TIME_STOP" or "FLATTEN" or ReplayStopExitRole;
     }
 
     private static bool IsProtectiveExitRole(string role)
@@ -9186,6 +9212,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private ReplayExecutionState? FindReplayExecution(string tradeId)
     {
+        if (tradeId.StartsWith('@'))
+            return _replayExecutionsByTradeId.Values.FirstOrDefault(x => ExecutionIdentity.OrderKey(x.TradeId) == tradeId);
         if (_replayExecutionsByTradeId.TryGetValue(tradeId, out var registered))
             return registered;
         if (_replayExecution is not null && string.Equals(_replayExecution.TradeId, tradeId, StringComparison.OrdinalIgnoreCase))

@@ -52,6 +52,30 @@ static void VerifyIcebergSplitLifecycle()
     }
     var iceberg = State(true);
     var legacy = State(false);
+    var identityType = strategyType.Assembly.GetType("OPFStrategyV1.Strategy.ExecutionIdentity")!;
+    var splitComment = identityType.GetMethod("SplitComment")!;
+    var parse = strategyType.GetMethod("TryParseExecutionComment", flags)!;
+    var strategy = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(strategyType);
+    var registryField = strategyType.GetField("_replayExecutionsByTradeId", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+    var registry = (System.Collections.IDictionary)Activator.CreateInstance(registryField.FieldType)!;
+    registry.Add("split-test", iceberg);
+    registryField.SetValue(strategy, registry);
+    var find = strategyType.GetMethod("FindReplayExecution", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+    foreach (var runner in new[] { false, true })
+    foreach (var stop in new[] { false, true })
+    {
+        var comment = (string)splitComment.Invoke(null, new object[] { "split-test", runner, stop })!;
+        object?[] parsed = { comment, null, null };
+        var expectedRole = runner ? stop ? "RUNNER_SL" : "RUNNER_TP" : stop ? "BASE_SL" : "BASE_TP";
+        if (!(bool)parse.Invoke(null, parsed)! || (string)parsed[2]! != expectedRole ||
+            !ReferenceEquals(find.Invoke(strategy, new[] { parsed[1] }), iceberg))
+            throw new InvalidOperationException("Compact split callback must resolve the original execution and exact leg");
+    }
+    object?[] legacyParsed = { "OPF|split-test|RUNNER_SL|signal", null, null };
+    if (!(bool)parse.Invoke(null, legacyParsed)! || (string)legacyParsed[2]! != "RUNNER_SL" ||
+        !ReferenceEquals(find.Invoke(strategy, new[] { legacyParsed[1] }), iceberg))
+        throw new InvalidOperationException("Legacy full execution identity must remain readable");
+    Console.WriteLine("PASS split callback identity: four compact roles resolve original execution, legacy comment remains compatible");
     var baseQuantity = strategyType.GetMethod("SplitBaseQuantity", flags)!;
     if ((decimal)baseQuantity.Invoke(null, new[] { iceberg })! != 1m ||
         (decimal)baseQuantity.Invoke(null, new[] { legacy })! != 2m)

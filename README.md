@@ -4,7 +4,8 @@
 
 | 状态 | 策略全称 | 研究结构 | 执行配置 | 入口/证据 |
 | --- | --- | --- | --- | --- |
-| 当前已部署，待重启验收，模拟账户 Auto | OPF_INTRADAY_2.19 | OPF_RESEARCH_2.34 | ACTUAL_EXEC_2.54 | DLL SHA256：`C566AD94AF56ABE96D45402A47B306C9597F9F60DBE5237187B41D62A08EE20C`；[冻结配置](OPFStrategyV1/Configs/OPFStrategyV1_sim_forward_2.19.json) |
+| 当前已部署，模拟账户 Auto | OPF_INTRADAY_2.19 | OPF_RESEARCH_2.34 | ACTUAL_EXEC_2.54 | 已发现分批退出回报截断缺陷；[冻结配置](OPFStrategyV1/Configs/OPFStrategyV1_sim_forward_2.19.json) |
+| 已构建测试，待关闭平台后部署 | OPF_INTRADAY_2.20 | OPF_RESEARCH_2.34 | ACTUAL_EXEC_2.54 | DLL SHA256：`6F1829FAEE960C4A3A09671B78F6A46EA00C6D9FBC3207CA42984C82FEF45253`；[修复说明](OPFStrategyV1/Docs/2026-11-09_split_callback_2.20.md) |
 
 版本引用必须使用表内全称；策略版本、研究 schema、执行配置版本互不等同。候选评分定义为 `OPF_SCORING_0.2`，入场扩展阈值和逐路径退出表为 `OPF_ENTRY_EXIT_2.19`，见 [参数表](OPFStrategyV1/Strategy/EntryExitPolicyParameters.cs)。`ActualTargetR` 仅是未匹配路径的兜底，七条实际路径使用版本化退出表；两手冰山另外执行1R/1.5R分批目标。冰山回踩、数量降级及结构保护见 [2.19交付说明](OPFStrategyV1/Docs/2026-11-09_iceberg_execution_2.19.md)。
 

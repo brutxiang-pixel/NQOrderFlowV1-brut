@@ -3,6 +3,17 @@ using OPFStrategyV1.Core.MarketData;
 
 var now = new DateTime(2026, 10, 14, 10, 0, 0, DateTimeKind.Utc);
 void Check(bool value, string name) { if (!value) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); }
+var longIcebergId = "20261109-1336-Short-727-CrossMarketIcebergOrderFlowReaction-ICE-ICE-NQZ6-6884993374025-20261109133617-MNQZ6-61053c86";
+Check(($"OPF|{longIcebergId}|RUNNER_SL|signal")[..128].Split('|')[2] == "RUNNER_", "reproduce actual truncated runner role at 128 characters");
+foreach (var runner in new[] { false, true })
+foreach (var stop in new[] { false, true })
+{
+    var comment = ExecutionIdentity.SplitComment(longIcebergId, runner, stop);
+    Check(comment.Length < 64, "split comment remains bounded independently of trade ID length");
+    Check(comment.Split('|')[1] == ExecutionIdentity.OrderKey(longIcebergId), "compact split identity maps to original trade");
+    Check(ExecutionIdentity.NormalizeRole(comment.Split('|')[2]) == (runner ? stop ? "RUNNER_SL" : "RUNNER_TP" : stop ? "BASE_SL" : "BASE_TP"), "compact role preserves exact leg and order type");
+}
+Check(ExecutionIdentity.OrderKey(longIcebergId) != ExecutionIdentity.OrderKey(longIcebergId + "other"), "different trade identities remain isolated");
 foreach (var path in new[] { "BreakawayFvg_Qualified", "FailureReverse_RetestFailed", "ESResponseAlignedBreakout", "ESWallRejectionReversal", "ESExpectedMoveExpansion", "ESGammaConcentrationResponse", "CrossMarketIcebergOrderFlowReaction" })
 foreach (var isLong in new[] { true, false })
 {
