@@ -26,6 +26,7 @@
 ## 冻结与验证
 
 - 策略：OPF_INTRADAY_2.19；参数：OPF_ENTRY_EXIT_2.19；研究schema：OPF_RESEARCH_2.34；评分：OPF_SCORING_0.2；执行配置：ACTUAL_EXEC_2.54。
+- 实施提交：`61d6c5c`；冻结配置SHA256：`F7A03812EC9D6699E43879DE13E3515B25AD3D3AECBD32CCC45E72B0AA594BE1`。与2.18候选JSON相同，但DLL及代码身份不同，不能合并统计。
 - 配置：`Configs/OPFStrategyV1_sim_forward_2.19.json`。参数与2.18候选一致，策略行为由2.19 DLL及版本化参数定义；不以相同JSON哈希冒充相同策略。日笔数不限、周Long亏损门关闭；其他已有风险门不变。
 - Release构建：0警告、0错误；DLL SHA256：`C566AD94AF56ABE96D45402A47B306C9597F9F60DBE5237187B41D62A08EE20C`。
 - IntradayEntryTests 211项通过；OptionsProxyGateTests 95项通过；ValidationReplayTests 31项通过；FeishuNotificationTests 10项通过；LiveProtectionFailClosedTests通过，新增真实执行状态的1+1数量、首腿退出隔离、runner成交归属、全平分配及旧2+1数量回归。
