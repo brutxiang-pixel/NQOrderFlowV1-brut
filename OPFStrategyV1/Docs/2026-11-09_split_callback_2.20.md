@@ -1,6 +1,8 @@
 # 2.20 分批退出成交识别修复
 
-状态：已构建测试，尚未部署。当前运行版本仍为2.19。参数仍为OPF_ENTRY_EXIT_2.19，配置仍为ACTUAL_EXEC_2.54；不调整交易规则。
+状态：2026-11-09 22:01:36北京时间已部署，待用户启动ATAS验收。参数仍为OPF_ENTRY_EXIT_2.19，配置仍为ACTUAL_EXEC_2.54；不调整交易规则。
+
+部署前确认经典版及X进程均退出。旧DLL备份于`OPFStrategyV1/bin/deployment-backups/before-2.20-20261109-220136/OPFStrategyV1.dll`；部署路径为`C:/Users/Administrator/AppData/Roaming/ATAS/Strategies/OPFStrategyV1.dll`，复制后SHA256与下方构建哈希一致。没有重新构建或修改活动配置。
 
 ## 故障及证据
 
