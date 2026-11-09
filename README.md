@@ -4,12 +4,11 @@
 
 | 状态 | 策略全称 | 研究结构 | 执行配置 | 入口/证据 |
 | --- | --- | --- | --- | --- |
-| 当前部署，模拟账户 Auto | OPF_INTRADAY_2.17 | OPF_RESEARCH_2.34 | ACTUAL_EXEC_2.53 | 部署 DLL SHA256：`8B512738E740F91371541BC798C0732FF9E85AD896F14538645DDC98BD28DA30` |
-| 本轮候选，尚未部署 | OPF_INTRADAY_2.19 | OPF_RESEARCH_2.34 | ACTUAL_EXEC_2.54 | [冻结配置](OPFStrategyV1/Configs/OPFStrategyV1_sim_forward_2.19.json)，配置参数与2.18候选相同，策略行为及DLL身份不同 |
+| 当前已部署，待重启验收，模拟账户 Auto | OPF_INTRADAY_2.19 | OPF_RESEARCH_2.34 | ACTUAL_EXEC_2.54 | DLL SHA256：`C566AD94AF56ABE96D45402A47B306C9597F9F60DBE5237187B41D62A08EE20C`；[冻结配置](OPFStrategyV1/Configs/OPFStrategyV1_sim_forward_2.19.json) |
 
 版本引用必须使用表内全称；策略版本、研究 schema、执行配置版本互不等同。候选评分定义为 `OPF_SCORING_0.2`，入场扩展阈值和逐路径退出表为 `OPF_ENTRY_EXIT_2.19`，见 [参数表](OPFStrategyV1/Strategy/EntryExitPolicyParameters.cs)。`ActualTargetR` 仅是未匹配路径的兜底，七条实际路径使用版本化退出表；两手冰山另外执行1R/1.5R分批目标。冰山回踩、数量降级及结构保护见 [2.19交付说明](OPFStrategyV1/Docs/2026-11-09_iceberg_execution_2.19.md)。
 
-活动配置文件：`%APPDATA%/ATAS/StrategyConfigs/OPFStrategyV1_actual_execution.json`。本轮读取的原文件 SHA256 为 `62158DAEE9E3DC523D072434D66064AF3280C9817D5E17AD887F9C58746C49A7`，未替换。最近已核对的 NQ/MNQ 启动快照为 2026-11-06 06:52 UTC，AccountScope=`DEMO2AC94`、Auto、七路径；这是已有会话证据，下一次启动仍须重新核对有效模式和账户。
+活动配置文件：`%APPDATA%/ATAS/StrategyConfigs/OPFStrategyV1_actual_execution.json`。2026-11-09 16:55北京时间部署：从2.53迁移到2.54并显式加入已启用冰山路径；其他字段及本机飞书凭据逐项比较一致。部署后本机配置SHA256为 `6143AD003C2DE624CFB3DCC5A17D1230EA7FE7A683ADE4019CD44BB996B594B3`。已确认平台退出后备份并复制DLL；新版本启动账户、Auto及七路径仍待ConfigSnapshot验收，不能把部署当成运行验证。
 
 七条实际路径：`BreakawayFvg_Qualified`、`FailureReverse_RetestFailed`、`ESResponseAlignedBreakout`、`ESWallRejectionReversal`、`ESExpectedMoveExpansion`、`ESGammaConcentrationResponse`、`CrossMarketIcebergOrderFlowReaction`。兼容名 `NativeIcebergReaction` 不额外算一条路径。NQ 最多一手、MNQ 最多两手。
 

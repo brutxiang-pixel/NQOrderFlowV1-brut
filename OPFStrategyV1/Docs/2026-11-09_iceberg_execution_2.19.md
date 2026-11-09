@@ -36,6 +36,8 @@
 
 ## 部署与平台验收
 
+2026-11-09 16:55北京时间部署完成：确认ATAS进程退出，旧DLL与活动配置备份至`bin/deployment-backups/before-2.19-20261109-165458/`。部署DLL哈希与上文测试产物一致；活动配置仅将2.53改为2.54并显式加入冰山路径，其余全部字段（含本机飞书凭据）逐项比较一致。部署配置SHA256为`6143AD003C2DE624CFB3DCC5A17D1230EA7FE7A683ADE4019CD44BB996B594B3`。未重新构建，未启动平台；下面“仍在运行/尚未覆盖”是交付时历史状态，当前以本段为准。等待用户重启后核对新启动快照和模拟成交链路。
+
 交付时经典ATAS进程仍在运行，本版尚未覆盖线上2.17 DLL及活动2.53配置。关闭平台后应备份这两个精确文件，再部署2.19 DLL，并将配置迁移到2.54：保留本机飞书凭据及其他实际参数，明确加入已启用冰山路径；不能直接拿脱敏模板覆盖本地webhook。部署后核对文件哈希与新ConfigSnapshot。
 
 重启后先确认HUD版本2.19、模拟账户Auto和数量上限；冰山候选应记录ICEBERG_STRUCTURE_PLAN/WAIT和ICEBERG_STRUCTURE_STOP_V219。1手为合法降级，不等于故障。若成交2手，确认BASE_SL/BASE_TP与RUNNER_SL/RUNNER_TP各1手、两组OCO；第一手TP后第二手SL仍在。观察ICEBERG_PROTECT_MODIFY_SEND/MODIFIED，若失败应仍有原SL；全部退出后不得遗留任一保护单。核对EXIT_FILLED时间与ExitBar不早于创建K线。
