@@ -33,6 +33,30 @@ public static class IntradayEntryPolicy
     public static decimal AvailableEntryQuantity(string productCode, decimal requested, decimal managedQuantity) =>
         Math.Max(0m, Math.Min(requested, ProductQuantityLimit(productCode) - managedQuantity));
 
+    public static bool IcebergTrendAligned(bool isLong, IReadOnlyDictionary<string, CompletedFrame> frames) =>
+        new[] { "15M", "1H", "4H" }.All(name => frames.TryGetValue(name, out var frame) &&
+            frame.Count >= 4 && (isLong ? frame.Slope > 0m : frame.Slope < 0m));
+
+    public static decimal IcebergQuantity(decimal evidenceQuantity, bool retested, bool trendAligned,
+        decimal risk, decimal atr, decimal pointValue) =>
+        evidenceQuantity >= 2m && retested && trendAligned && risk > 0m && atr > 0m && pointValue > 0m &&
+        risk <= atr * EntryExitPolicyParameters.IcebergSecondContractMaxAtrRisk &&
+        risk * pointValue * 2m <= EntryExitPolicyParameters.IcebergTwoContractMaxRiskDollars ? 2m : 1m;
+
+    public static decimal IcebergRunnerStop(bool isLong, decimal entry, decimal risk, decimal mfe,
+        decimal feeStop, decimal low, decimal high, decimal atr, decimal tick)
+    {
+        if (risk <= 0m || mfe < risk * .75m) return 0m;
+        var lockR = mfe >= risk * 1.25m ? .5m : mfe >= risk ? .25m : 0m;
+        var stop = isLong ? Math.Max(feeStop, entry + risk * lockR) : Math.Min(feeStop, entry - risk * lockR);
+        if (mfe >= risk && low > 0m && high >= low)
+        {
+            var buffer = Math.Max(tick * 4m, atr * .15m);
+            stop = isLong ? Math.Max(stop, low - buffer) : Math.Min(stop, high + buffer);
+        }
+        return (isLong ? Math.Floor(stop / tick) : Math.Ceiling(stop / tick)) * tick;
+    }
+
     public static (int Score, decimal Quantity) EvidenceSize(bool optionContext, bool esPriceReaction, bool localFlow,
         decimal configuredMaximum)
     {

@@ -221,3 +221,36 @@ shortFill.Start(100m, fillAt);
 shortFill.ObserveRange(80m, 120m, fillAt);
 shortFill.ObservePrice(99m, fillAt.AddSeconds(1));
 Check(shortFill.Low == 99m && shortFill.High == 100m, "short entry-bar pre-fill low cannot trigger protective movement");
+
+Check(counterShort.RetestConfirmed && counterLong.RetestConfirmed, "both directions record confirmed retest");
+counterShort.Observe(101m, .25m, now.AddSeconds(5));
+Check(!counterShort.RetestConfirmed, "failed structure clears retest sizing permission");
+Check(IntradayEntryPolicy.IcebergQuantity(2m, true, true, 14.5m, 43.5m, 2m) == 2m, "retested aligned low-risk MNQ may use two contracts");
+Check(IntradayEntryPolicy.IcebergQuantity(2m, false, true, 14.5m, 43.5m, 2m) == 1m, "0713 unretested pursuit cannot receive two contracts");
+Check(IntradayEntryPolicy.IcebergQuantity(2m, true, false, 26.5m, 34.5m, 2m) == 1m, "0525 mixed higher frames reduce quantity");
+Check(IntradayEntryPolicy.IcebergQuantity(2m, true, true, 26m, 60m, 2m) == 1m, "two-contract dollar risk above 100 reduces quantity");
+Check(IntradayEntryPolicy.IcebergQuantity(2m, true, true, 20m, 30m, 2m) == 1m, "wide ATR risk reduces quantity");
+Check(IntradayEntryPolicy.IcebergQuantity(1m, true, true, 5m, 30m, 20m) == 1m, "NQ one-contract cap remains");
+var frames219 = new Dictionary<string, CompletedFrame>();
+foreach (var name in new[] { "15M", "1H", "4H" }) frames219[name] = new(name, now, 110m, 90m, 100m, -5m, 4);
+Check(IntradayEntryPolicy.IcebergTrendAligned(false, frames219), "short higher frames align");
+Check(!IntradayEntryPolicy.IcebergTrendAligned(true, frames219), "opposite direction does not align");
+frames219.Remove("1H");
+Check(!IntradayEntryPolicy.IcebergTrendAligned(false, frames219), "missing frame gives one contract rather than assumed alignment");
+Check(IntradayEntryPolicy.IcebergStructuralStop(false, 27022.25m, 27026.5m, 27021.25m, 27042.75m, 43.5m, .25m) > 27042.75m,
+    "0713 pre-event minute high remains outside short stop");
+Check(IntradayEntryPolicy.IcebergStructuralStop(true, 100m, 99m, 90m, 102m, 30m, .25m) < 90m,
+    "long stop remains beyond frozen structure");
+Check(IntradayEntryPolicy.IcebergRunnerStop(false, 100m, 20m, 14m, 99.25m, 0m, 0m, 40m, .25m) == 0m,
+    "runner is not tightened before 0.75R");
+Check(IntradayEntryPolicy.IcebergRunnerStop(false, 100m, 20m, 15m, 99.25m, 0m, 0m, 40m, .25m) == 99.25m,
+    "runner 0.75R covers configured fees");
+Check(IntradayEntryPolicy.IcebergRunnerStop(false, 100m, 20m, 20m, 99.25m, 79m, 84m, 40m, .25m) == 90m,
+    "runner 1R protects post-fill rebound structure with ATR room");
+Check(IntradayEntryPolicy.IcebergRunnerStop(true, 100m, 20m, 25m, 100.75m, 0m, 0m, 40m, .25m) == 110m,
+    "long runner 1.25R locks 0.5R");
+var bars219 = new[] { now, now.AddMinutes(5), now.AddMinutes(10) };
+Check(ExecutionClock.BarAt(now.AddMinutes(8), 3, 1, i => bars219[i]) == 1, "fill belongs to live five-minute bar not prior closed bar");
+Check(ExecutionClock.BarAt(now.AddMinutes(10), 3, 1, i => bars219[i]) == 2, "exact boundary fill belongs to new bar");
+Check(ExecutionClock.BarAt(now.AddMinutes(2), 3, 1, i => bars219[i]) == 1, "exit bar never precedes entry creation bar");
+Check(ExecutionClock.BarAt(now.AddMinutes(6), 3, 0, i => bars219[i]) == 1, "historical mapping does not select future bar");

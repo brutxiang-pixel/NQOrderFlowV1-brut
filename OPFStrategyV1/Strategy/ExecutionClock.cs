@@ -2,6 +2,22 @@ namespace OPFStrategyV1.Strategy;
 
 public static class ExecutionClock
 {
+    public static int BarAt(DateTime time, int count, int minimumBar, Func<int, DateTime?> candleTime)
+    {
+        var low = 0;
+        var high = count - 1;
+        var result = minimumBar;
+        while (low <= high)
+        {
+            var middle = low + (high - low) / 2;
+            var observed = candleTime(middle);
+            if (!observed.HasValue) break;
+            if (observed.Value <= time) { result = middle; low = middle + 1; }
+            else high = middle - 1;
+        }
+        return Math.Max(minimumBar, result);
+    }
+
     public static bool TimeStopDue(int elapsedBars, int maxBars) => maxBars > 0 && elapsedBars >= maxBars;
 
     public static DateTime ExitTimestamp(DateTime entry, DateTime? fill, DateTime marketTime, DateTime receivedUtc, bool replay)

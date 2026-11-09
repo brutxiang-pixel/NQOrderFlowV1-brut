@@ -29,6 +29,52 @@ foreach (var testCase in cases)
 
 Console.WriteLine($"PASS LiveProtectionFailClosedGuard cases={cases.Length}");
 
+System.Runtime.Loader.AssemblyLoadContext.Default.Resolving += (context, name) =>
+{
+    var path = System.IO.Path.Combine(@"D:\Program Files (x86)\ATAS Platform", name.Name + ".dll");
+    return System.IO.File.Exists(path) ? context.LoadFromAssemblyPath(path) : null;
+};
+VerifyIcebergSplitLifecycle();
+
+[System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+static void VerifyIcebergSplitLifecycle()
+{
+    const System.Reflection.BindingFlags flags = System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic;
+    var strategyType = typeof(OpeningPullbackFailureStrategy);
+    var stateType = strategyType.GetNestedType("ReplayExecutionState", System.Reflection.BindingFlags.NonPublic)!;
+    object State(bool iceberg)
+    {
+        var state = Activator.CreateInstance(stateType, new object[] { "split-test", "signal", TradeSide.Short,
+            iceberg ? "CrossMarketIcebergOrderFlowReaction" : "ZoneBirthResearch", 650,
+            DateTime.UtcNow, 100m, iceberg ? 2m : 3m, 120m, 80m, 20m, 50m, 1.5m, new Order() })!;
+        stateType.GetProperty("IcebergSplit")!.SetValue(state, iceberg);
+        return state;
+    }
+    var iceberg = State(true);
+    var legacy = State(false);
+    var baseQuantity = strategyType.GetMethod("SplitBaseQuantity", flags)!;
+    if ((decimal)baseQuantity.Invoke(null, new[] { iceberg })! != 1m ||
+        (decimal)baseQuantity.Invoke(null, new[] { legacy })! != 2m)
+        throw new InvalidOperationException("Iceberg 1+1 and legacy 2+1 quantities must remain independent");
+    var record = strategyType.GetMethod("RecordZoneBirthSplitLegExitV172", flags)!;
+    record.Invoke(null, new[] { iceberg, "BASE_TP", (object)1m });
+    var baseExited = strategyType.GetMethod("IsZoneBirthBaseLegExitedV172", flags)!;
+    var runnerExited = strategyType.GetMethod("IsZoneBirthRunnerLegExitedV172", flags)!;
+    if (!(bool)baseExited.Invoke(null, new[] { iceberg })! || (bool)runnerExited.Invoke(null, new[] { iceberg })!)
+        throw new InvalidOperationException("First target completes only the base contract");
+    record.Invoke(null, new[] { iceberg, "RUNNER_SL", (object)1m });
+    if (!(bool)runnerExited.Invoke(null, new[] { iceberg })! ||
+        (decimal)stateType.GetProperty("BaseExitFilledQty")!.GetValue(iceberg)! != 1m ||
+        (decimal)stateType.GetProperty("RunnerExitFilledQty")!.GetValue(iceberg)! != 1m)
+        throw new InvalidOperationException("Runner stop must not be allocated to the completed base contract");
+    var flattened = State(true);
+    record.Invoke(null, new[] { flattened, "TIME_STOP", (object)2m });
+    if ((decimal)stateType.GetProperty("BaseExitFilledQty")!.GetValue(flattened)! != 1m ||
+        (decimal)stateType.GetProperty("RunnerExitFilledQty")!.GetValue(flattened)! != 1m)
+        throw new InvalidOperationException("Full flatten must allocate one contract to each iceberg leg");
+    Console.WriteLine("PASS iceberg split lifecycle: base quantity, first target isolation, runner fill, flatten allocation, legacy quantity");
+}
+
 var connectorlessCases = new[]
 {
     ("flat-bound-context", false, true, true, 0m, false, true),

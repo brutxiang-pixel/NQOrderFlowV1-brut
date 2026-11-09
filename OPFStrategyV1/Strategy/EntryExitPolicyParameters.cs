@@ -1,9 +1,11 @@
 namespace OPFStrategyV1.Strategy;
 
-// Frozen values from OPF_INTRADAY_2.17; extraction does not retune thresholds.
+// Frozen entry/exit parameters; 2.19 adds iceberg split execution and retest sizing.
 public static class EntryExitPolicyParameters
 {
-    public const string Version = "OPF_ENTRY_EXIT_2.18";
+    public const string Version = "OPF_ENTRY_EXIT_2.19";
+    public const decimal IcebergSecondContractMaxAtrRisk = .5m;
+    public const decimal IcebergTwoContractMaxRiskDollars = 100m;
     public const decimal IcebergTargetR = 1.5m;
     public const decimal IcebergBreakEvenR = .75m;
     public const decimal ZoneBirthVolumeV122MinSetupQualityScore = 45m;

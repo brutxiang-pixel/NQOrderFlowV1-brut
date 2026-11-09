@@ -4,6 +4,11 @@ namespace OPFStrategyV1.Strategy;
 public sealed class IcebergStructureConfirmation(bool isLong, decimal anchor, bool required)
 {
     public decimal Anchor { get; } = anchor;
+    public decimal FrozenLow { get; init; }
+    public decimal FrozenHigh { get; init; }
+    public decimal FrozenAtr { get; init; }
+    public bool TrendAligned { get; init; }
+    public bool RetestConfirmed { get; private set; }
     private DateTime? _breakTime;
     private DateTime? _retestTime;
     private DateTime? _reclaimTime;
@@ -21,6 +26,7 @@ public sealed class IcebergStructureConfirmation(bool isLong, decimal anchor, bo
         if (displacement < -tick)
         {
             _breakTime = null; _retestTime = null; _reclaimTime = null;
+            RetestConfirmed = false;
             return "WAIT_STRUCTURE_BREAK";
         }
         if (_breakTime is null)
@@ -33,9 +39,10 @@ public sealed class IcebergStructureConfirmation(bool isLong, decimal anchor, bo
             if (time > _breakTime && displacement <= 0m) _retestTime = time;
             return "WAIT_STRUCTURE_RECLAIM";
         }
-        if (displacement < tick) { _reclaimTime = null; return "WAIT_STRUCTURE_RECLAIM"; }
+        if (displacement < tick) { _reclaimTime = null; RetestConfirmed = false; return "WAIT_STRUCTURE_RECLAIM"; }
         _reclaimTime ??= time;
-        return time - _reclaimTime.Value >= TimeSpan.FromSeconds(1)
+        RetestConfirmed = time - _reclaimTime.Value >= TimeSpan.FromSeconds(1);
+        return RetestConfirmed
             ? "STRUCTURE_CONFIRMED" : "WAIT_STRUCTURE_RECLAIM";
     }
 

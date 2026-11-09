@@ -76,7 +76,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         var provider = DataProvider?.CandlesDataProvider;
         if (provider?.IsAvailable == true)
         {
-            foreach (var item in new[] { ("15M", CandleSeriesTimeFrame.Minutes(15)), ("30M", CandleSeriesTimeFrame.Minutes(30)),
+            foreach (var item in new[] { ("5M", CandleSeriesTimeFrame.Minutes(5)), ("15M", CandleSeriesTimeFrame.Minutes(15)), ("30M", CandleSeriesTimeFrame.Minutes(30)),
                 ("1H", CandleSeriesTimeFrame.Hours(1)), ("4H", CandleSeriesTimeFrame.Hours(4)),
                 ("6H", CandleSeriesTimeFrame.Hours(6)), ("D", CandleSeriesTimeFrame.Daily()) })
             {
