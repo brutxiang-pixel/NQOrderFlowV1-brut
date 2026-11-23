@@ -30,6 +30,10 @@ public sealed class OpfResearchIndicator : Indicator
     private readonly ValueDataSeries _zeroGammaSeries = CreateSeries("GEX_ZeroGamma_Regime", System.Drawing.Color.MediumPurple);
     private readonly ValueDataSeries _volatilityTriggerSeries = CreateSeries("GEX_VolatilityTrigger", System.Drawing.Color.DarkOrange);
     private readonly RangeDataSeries[] _zoneSeries = CreateZoneSeries();
+    private readonly ValueDataSeries _bidIcebergs = CreateSeries("Native_Buy_Iceberg", System.Drawing.Color.LimeGreen);
+    private readonly ValueDataSeries _askIcebergs = CreateSeries("Native_Sell_Iceberg", System.Drawing.Color.OrangeRed);
+    private readonly object _icebergSync = new();
+    private (long Time, decimal Price) _bidIceberg, _askIceberg;
     private readonly Dictionary<string, decimal> _gexLevels = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<(decimal Low, decimal High, DateTime Created)> _zones = new();
     private readonly Dictionary<string, IOptionQuoteSubscription> _optionSubscriptions = new(StringComparer.OrdinalIgnoreCase);
@@ -63,6 +67,10 @@ public sealed class OpfResearchIndicator : Indicator
         DataSeries.Add(_putWallSeries);
         DataSeries.Add(_zeroGammaSeries);
         DataSeries.Add(_volatilityTriggerSeries);
+        _bidIcebergs.VisualType = VisualMode.Dots;
+        _askIcebergs.VisualType = VisualMode.Dots;
+        DataSeries.Add(_bidIcebergs);
+        DataSeries.Add(_askIcebergs);
         foreach (var series in _zoneSeries)
             DataSeries.Add(series);
         LoadHistoricalZones();
@@ -125,6 +133,20 @@ public sealed class OpfResearchIndicator : Indicator
     private void OnMboIcebergsChanged(IReadOnlyList<MboIcebergRecord> records)
     {
         var now = DateTime.UtcNow;
+        var nowMs = new DateTimeOffset(now).ToUnixTimeMilliseconds();
+        lock (_icebergSync)
+        {
+            foreach (var record in records)
+            {
+                if (!record.NativeRefreshConfirmed || record.DeleteConfirmed || record.Hidden <= 0m ||
+                    record.Price <= 0m || record.LastMs < nowMs - 5000 || record.LastMs > nowMs)
+                    continue;
+                if (record.Side == MboOrderSide.Bid && record.LastMs > _bidIceberg.Time)
+                    _bidIceberg = (record.LastMs, record.Price);
+                if (record.Side == MboOrderSide.Ask && record.LastMs > _askIceberg.Time)
+                    _askIceberg = (record.LastMs, record.Price);
+            }
+        }
         if (now - _lastIcebergAlertUtc < TimeSpan.FromSeconds(30))
             return;
         var iceberg = records.FirstOrDefault(x => x.NativeRefreshConfirmed && x.Hidden > 0m);
@@ -144,6 +166,16 @@ public sealed class OpfResearchIndicator : Indicator
         _lastPrice = candle.Close;
         _zoneReferencePrice = candles[0].GetCandle(candles[0].Count - 1).Close;
         _probeSeries[bar] = candle.Close;
+        if (bar == candles[0].Count - 1)
+        {
+            var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            lock (_icebergSync)
+            {
+                if (_bidIceberg.Price > 0m && _bidIceberg.Time >= nowMs - 5000) _bidIcebergs[bar] = _bidIceberg.Price;
+                if (_askIceberg.Price > 0m && _askIceberg.Time >= nowMs - 5000) _askIcebergs[bar] = _askIceberg.Price;
+                _bidIceberg.Price = _askIceberg.Price = 0m;
+            }
+        }
         if (DateTime.UtcNow - _lastGexSnapshotLoadUtc >= TimeSpan.FromSeconds(30))
             LoadLocalGexSnapshot();
         if (DateTime.UtcNow - _lastZoneLoadUtc >= TimeSpan.FromSeconds(30))
@@ -173,8 +205,6 @@ public sealed class OpfResearchIndicator : Indicator
         {
             _tradingCore = FindTradingCore();
             _optionsSubscriptionService = TryGetService<OptionsSubscriptionService>();
-            if (_optionsSubscriptionService is null && _tradingCore is not null)
-                _optionsSubscriptionService = new OptionsSubscriptionService(_tradingCore);
 
             if (TryLoadFromOptionsBoard())
             {

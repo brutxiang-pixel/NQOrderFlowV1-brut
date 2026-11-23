@@ -9,6 +9,14 @@
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(BuildForATASX)' == 'true'">
+    <ATASPlatformDir Condition="'$(ATASXDir)' == ''">$(ProgramW6432)\ATAS X</ATASPlatformDir>
+    <ATASPlatformDir Condition="'$(ATASXDir)' != ''">$(ATASXDir)</ATASPlatformDir>
+    <DefineConstants>$(DefineConstants);OPF_ATAS_X</DefineConstants>
+    <OutputPath>bin\ATASX\$(Configuration)\</OutputPath>
+    <Version>3.0.0-preview.1</Version>
+  </PropertyGroup>
+
   <ItemGroup>
     <EmbeddedResource Include="Models\opf_v197_knn_shadow_model.json.gz" />
   </ItemGroup>
@@ -52,7 +60,7 @@
   <Target Name="BackupBeforeDeploy" BeforeTargets="CopyToATAS" Condition="'$(DeployToATAS)' == 'true' and '$(RunRepositorySnapshot)' == 'true'">
     <Exec Command="node &quot;$(MSBuildProjectDirectory)\..\tools\Backup\snapshot.cjs&quot; before-deploy" />
   </Target>
-  <Target Name="CopyToATAS" AfterTargets="Build" Condition="'$(DeployToATAS)' == 'true'">
+  <Target Name="CopyToATAS" AfterTargets="Build" Condition="'$(DeployToATAS)' == 'true' and '$(BuildForATASX)' != 'true'">
     <Copy SourceFiles="$(TargetPath)"
           DestinationFolder="$(APPDATA)\ATAS\Strategies"
           OverwriteReadOnlyFiles="true" />

@@ -26,7 +26,7 @@ public sealed partial class OpeningPullbackFailureStrategy
     private NativeIcebergEvent[] _nativeIcebergReplay = Array.Empty<NativeIcebergEvent>();
     private DateTime _nativeIcebergReplayDay;
     private string NativeIcebergArchiveDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "ATAS", "StrategyLogs", "OPFStrategyV1", "NativeIcebergArchive");
+        OPFStrategyV1.Core.Versions.StrategyVersions.PlatformDataDirectory, "StrategyLogs", "OPFStrategyV1", "NativeIcebergArchive");
 
     private void InitializeNativeIceberg()
     {

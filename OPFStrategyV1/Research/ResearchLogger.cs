@@ -329,7 +329,7 @@ public sealed class ResearchLogger
     public ResearchLogger(string strategyName, string logMode = "Full")
     {
         var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        _directory = Path.Combine(root, "ATAS", "StrategyLogs", strategyName);
+        _directory = Path.Combine(root, OPFStrategyV1.Core.Versions.StrategyVersions.PlatformDataDirectory, "StrategyLogs", strategyName);
         Directory.CreateDirectory(_directory);
         _compact = string.Equals(logMode, "Compact", StringComparison.OrdinalIgnoreCase);
     }

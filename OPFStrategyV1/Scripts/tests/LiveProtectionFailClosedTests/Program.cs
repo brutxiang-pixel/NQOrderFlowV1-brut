@@ -29,6 +29,55 @@ foreach (var testCase in cases)
 
 Console.WriteLine($"PASS LiveProtectionFailClosedGuard cases={cases.Length}");
 
+await LiveProtectionFailClosedGuard.AwaitRegistrationAsync(Task.CompletedTask, TimeSpan.FromSeconds(1));
+var pendingRegistration = new TaskCompletionSource();
+try
+{
+    await LiveProtectionFailClosedGuard.AwaitRegistrationAsync(pendingRegistration.Task, TimeSpan.FromMilliseconds(20));
+    throw new InvalidOperationException("Unacknowledged protection registration must time out");
+}
+catch (TimeoutException) { }
+pendingRegistration.SetException(new InvalidOperationException("late registration failure"));
+try
+{
+    await LiveProtectionFailClosedGuard.AwaitRegistrationAsync(Task.FromException(new InvalidOperationException("rejected")), TimeSpan.FromSeconds(1));
+    throw new Exception("Registration rejection must propagate");
+}
+catch (InvalidOperationException ex) when (ex.Message == "rejected") { }
+Console.WriteLine("PASS registration success, timeout, late failure and rejection");
+foreach (var state in new[] { "None", "Rejected", "Failed", "Canceled" })
+    if (LiveProtectionFailClosedGuard.RegistrationAcknowledged(state))
+        throw new InvalidOperationException($"Unconfirmed registration accepted: {state}");
+foreach (var state in new[] { "Active", "Done" })
+    if (!LiveProtectionFailClosedGuard.RegistrationAcknowledged(state))
+        throw new InvalidOperationException($"Confirmed registration rejected: {state}");
+Console.WriteLine("PASS registration acknowledgement excludes None and failures");
+var cqgFirst = new TaskCompletionSource<bool>();
+var secondSubmitted = false;
+var pair = LiveProtectionFailClosedGuard.RegisterPairAsync(
+    () => cqgFirst.Task,
+    () => { secondSubmitted = true; cqgFirst.SetResult(true); return Task.FromResult(true); });
+if (!await pair.WaitAsync(TimeSpan.FromSeconds(1)) || !secondSubmitted)
+    throw new InvalidOperationException("CQG OCO pair must submit sibling before waiting for first acknowledgement");
+if (await LiveProtectionFailClosedGuard.RegisterPairAsync(() => Task.FromResult(false), () => Task.FromResult(true)))
+    throw new InvalidOperationException("One rejected OCO leg must fail the pair");
+Console.WriteLine("PASS CQG buffered OCO pair and single-leg rejection");
+
+var positionCases = new[]
+{
+    ("exit-fill-but-account-short-remains", -1m, 0m, false),
+    ("exit-fill-left-reversed-long", 1m, 0m, false),
+    ("account-flat-after-exit", 0m, 0m, true),
+    ("other-managed-long-remains", 1m, 1m, true)
+};
+foreach (var testCase in positionCases)
+{
+    var actual = LiveProtectionFailClosedGuard.AccountPositionMatchesExpected(testCase.Item2, testCase.Item3);
+    if (actual != testCase.Item4)
+        throw new InvalidOperationException($"Assertion failed [{testCase.Item1}]: expected={testCase.Item4} actual={actual}");
+}
+Console.WriteLine($"PASS live exit account-position reconciliation cases={positionCases.Length}");
+
 System.Runtime.Loader.AssemblyLoadContext.Default.Resolving += (context, name) =>
 {
     var path = System.IO.Path.Combine(@"D:\Program Files (x86)\ATAS Platform", name.Name + ".dll");

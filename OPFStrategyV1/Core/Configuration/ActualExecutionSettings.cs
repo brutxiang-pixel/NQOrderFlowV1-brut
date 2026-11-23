@@ -90,7 +90,7 @@ public sealed record ActualExecutionSettings(
     public static ActualExecutionSettings LoadOrCreateDefault(out string path, out string status)
     {
         var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-        var directory = Path.Combine(root, "ATAS", "StrategyConfigs");
+        var directory = Path.Combine(root, OPFStrategyV1.Core.Versions.StrategyVersions.PlatformDataDirectory, "StrategyConfigs");
         Directory.CreateDirectory(directory);
         path = Path.Combine(directory, "OPFStrategyV1_actual_execution.json");
 

@@ -228,6 +228,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private DateTime _nextAccountConnectorResolutionUtc;
     private DateTime? _lastLiveCalculationUtc;
     private DateTime _nextCompletedProtectionAuditUtc;
+    private DateTime _nextPendingExitReconcileUtc;
     private bool _latencyGateActive;
     private DateTime? _latencyHealthySinceUtc;
     private bool _orphanPositionFlattenPending;
@@ -948,6 +949,11 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             }
             ScheduleProtectionCleanupIfNeeded("CompletedTradeAudit");
         }
+        if (ActualOrdersEnabled && bar == CurrentBar - 1 && DateTime.UtcNow >= _nextPendingExitReconcileUtc)
+        {
+            _nextPendingExitReconcileUtc = DateTime.UtcNow.AddSeconds(1);
+            SchedulePendingLiveExitReconciliationsV221();
+        }
         CaptureDecisionTapeMarketTurn(bar, value);
         var isNewBar = bar > _lastSeenBar;
         _lastSeenBar = Math.Max(_lastSeenBar, bar);
@@ -1379,7 +1385,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         MarkProtectiveExitCallbackPendingV187(execution, role, order, source);
-        if (execution.ExitCompleted && IsWorkingExecutionOrder(order) &&
+        if ((execution.ExitCompleted || execution.EmergencyFlattenSubmitted && IsProtectiveExitRole(role)) && IsWorkingExecutionOrder(order) &&
             (IsProtectiveExitRole(role) || role == "ENTRY"))
         {
             execution.ProtectionCleanupDone = false;
@@ -5900,6 +5906,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
                 return;
             }
 
+            NotifyFeishuConfirmedEntry(execution);
             if (!execution.BracketSubmitted)
                 await SubmitReplayBracketAsync(execution);
             return;
@@ -6029,9 +6036,58 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
                 (execution.EntryOrder is null || !IsDoneOrder(execution.EntryOrder)))
                 return;
 
+            if (ActualOrdersEnabled && !execution.HistoricalReplayAtCreation)
+            {
+                execution.LiveExitReconcilePendingV221 = true;
+                execution.LiveExitReconcileRoleV221 = role;
+                await TryFinalizeReconciledLiveExitV221(execution);
+                return;
+            }
+
             var finalExitPrice = execution.ExitAvgPrice > 0m ? execution.ExitAvgPrice : trade.Price;
             await FinalizeCompletedExecutionExitAsync(execution, finalExitPrice, role);
         }
+    }
+
+    private void SchedulePendingLiveExitReconciliationsV221()
+    {
+        foreach (var execution in _replayExecutionsByTradeId.Values
+                     .Where(x => x.LiveExitReconcilePendingV221 && !x.ExitCompleted).ToArray())
+        {
+            EnqueueExecutionAction($"LiveExitReconcileV221:{execution.TradeId}", async () =>
+                await TryFinalizeReconciledLiveExitV221(execution));
+        }
+    }
+
+    private async Task TryFinalizeReconciledLiveExitV221(ReplayExecutionState execution)
+    {
+        if (!execution.LiveExitReconcilePendingV221 || execution.ExitCompleted || !IsRegisteredReplayExecution(execution))
+            return;
+
+        var expectedPosition = ActiveReplayExecutions().Sum(x =>
+            (x.Side == TradeSide.Long ? 1m : -1m) * RemainingExecutionQuantity(x));
+        var connectorReady = Connector?.IsConnected == true;
+        var actualPosition = connectorReady ? GetCurrentAccountPosition() : decimal.MinValue;
+        if (!connectorReady || !LiveProtectionFailClosedGuard.AccountPositionMatchesExpected(actualPosition, expectedPosition))
+        {
+            var now = DateTime.UtcNow;
+            var reason = $"trade={execution.TradeId}|actual={(connectorReady ? actualPosition.ToString("0.########", CultureInfo.InvariantCulture) : "unavailable")}|expected={expectedPosition:0.########}|connectorReady={connectorReady}";
+            if (!execution.LiveExitMismatchReportedV221 || now - execution.LiveExitMismatchLastLoggedUtcV221 >= TimeSpan.FromSeconds(5))
+            {
+                execution.LiveExitMismatchReportedV221 = true;
+                execution.LiveExitMismatchLastLoggedUtcV221 = now;
+                LogExecutionInfo($"EXEC_EXIT_ACCOUNT_POSITION_MISMATCH_V221 {reason}");
+                AppendExecutionEvent(execution, "EXIT_ACCOUNT_POSITION_MISMATCH_V221", execution.LiveExitReconcileRoleV221, execution.ExitAvgPrice, execution.ExitFilledQty, reason);
+                SetLiveReadinessBlocked("ExitAccountPositionMismatch", $"Exit fills were reported for {execution.TradeId}, but account position does not match managed executions. No CLOSE notification was sent; verify the position manually.");
+            }
+            return;
+        }
+
+        execution.LiveExitReconcilePendingV221 = false;
+        AppendExecutionEvent(execution, "EXIT_ACCOUNT_POSITION_RECONCILED_V221", execution.LiveExitReconcileRoleV221, execution.ExitAvgPrice, execution.ExitFilledQty, $"actual={actualPosition:0.########}|expected={expectedPosition:0.########}");
+        var finalExitPrice = execution.ExitAvgPrice > 0m ? execution.ExitAvgPrice : execution.CreatedPrice;
+        await FinalizeCompletedExecutionExitAsync(execution, finalExitPrice, execution.LiveExitReconcileRoleV221);
+        ReconcileLiveExecutionState("ExitPositionConfirmed");
     }
 
     private async Task FinalizeCompletedExecutionExitAsync(ReplayExecutionState execution, decimal finalExitPrice, string role)
@@ -6270,7 +6326,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         try
         {
             var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var directory = Path.Combine(root, "ATAS", "StrategyLogs", "OPFStrategyV1");
+            var directory = Path.Combine(root, StrategyVersions.PlatformDataDirectory, "StrategyLogs", "OPFStrategyV1");
             if (Directory.Exists(directory))
             {
                 var restoredTradeIds = new HashSet<string>(StringComparer.Ordinal);
@@ -6339,13 +6395,13 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         try
         {
             var root = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var directory = Path.Combine(root, "ATAS", "StrategyLogs", "OPFStrategyV1");
+            var directory = Path.Combine(root, StrategyVersions.PlatformDataDirectory, "StrategyLogs", "OPFStrategyV1");
             if (!Directory.Exists(directory))
                 return;
 
             var restored = new HashSet<string>(StringComparer.Ordinal);
             var legacyIdentity = new LegacyPnlIdentity();
-            var platformLogDirectory = Path.Combine(root, "ATAS", "Logs");
+            var platformLogDirectory = Path.Combine(root, StrategyVersions.PlatformDataDirectory, "Logs");
             if (Directory.Exists(platformLogDirectory))
             {
                 foreach (var platformLog in Directory.EnumerateFiles(platformLogDirectory, "app_*.log")
@@ -6886,11 +6942,27 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             _recentExecutionHudItems.Dequeue();
     }
 
+    private async Task<bool> OpenProtectionPairV223Async(ReplayExecutionState execution, Order stop, string stopRole, Order target, string targetRole)
+    {
+        // CQG buffers the first OCO member until its sibling is submitted.
+        var accepted = await LiveProtectionFailClosedGuard.RegisterPairAsync(
+            () => OpenProtectionOrderAsync(execution, stop, stopRole),
+            () => OpenProtectionOrderAsync(execution, target, targetRole));
+        if (!accepted) return false;
+        AppendExecutionEvent(execution, $"{stopRole}_SENT", stopRole, stop.TriggerPrice, stop.QuantityToFill, stop.OCOGroup ?? string.Empty);
+        AppendExecutionEvent(execution, $"{targetRole}_SENT", targetRole, target.Price, target.QuantityToFill, target.OCOGroup ?? string.Empty);
+        if (IsDoneOrder(stop)) await TryCancelExecutionOrderAsync(target, $"Immediate{stopRole}");
+        if (IsDoneOrder(target)) await TryCancelExecutionOrderAsync(stop, $"Immediate{targetRole}");
+        return true;
+    }
+
     private async Task<bool> OpenProtectionOrderAsync(ReplayExecutionState execution, Order order, string role)
     {
         try
         {
-            await OpenOrderAsync(order);
+            await LiveProtectionFailClosedGuard.AwaitRegistrationAsync(OpenOrderAsync(order), TimeSpan.FromSeconds(5));
+            if (!LiveProtectionFailClosedGuard.RegistrationAcknowledged(order.State.ToString()))
+                throw new InvalidOperationException($"Protection registration returned without an active or completed order: {order.State}");
             return true;
         }
         catch (Exception ex)
@@ -6898,6 +6970,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             var message = $"role={role}|err={ex.GetType().Name}:{ex.Message}";
             LogExecutionInfo($"EXEC_PROTECTION_SUBMIT_FAIL trade={execution.TradeId} {message}");
             AppendExecutionEvent(execution, "PROTECTION_SUBMIT_FAIL", role, order.Price > 0m ? order.Price : order.TriggerPrice, order.QuantityToFill, message);
+            SetLiveReadinessBlocked("ProtectionRegistrationFailed", $"Protection registration failed for {execution.TradeId}: {message}");
             NotifyLiveIssue($"ProtectionSubmitFail:{execution.TradeId}:{role}", $"Protection order submission failed for {execution.TradeId}. role={role}. Emergency flatten is being submitted.");
             await SubmitEmergencyFlattenAsync(execution, RemainingExecutionQuantity(execution), $"ProtectionSubmitFailed:{role}");
             return false;
@@ -7021,6 +7094,14 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         execution.StopOrder = sl;
         execution.TargetOrder = tp;
         execution.BracketQty = qty;
+        if (!IsHistoricalReplayTime(_lastResearchCandle?.Time ?? execution.CreatedTime))
+        {
+            if (!await OpenProtectionPairV223Async(execution, sl, "SL", tp, "TP")) return;
+            execution.BracketSubmitted = true;
+            ScheduleProtectionLossCheckIfNeeded("OcoPairSubmittedV223");
+            TryActivatePendingProtectedSecondaryV216(execution);
+            return;
+        }
         if (!await OpenProtectionOrderAsync(execution, sl, "SL"))
             return;
         LogExecutionInfo($"EXEC_SL_SENT trade={execution.TradeId} stop={execution.Stop:0.########} qty={qty}");
@@ -7072,11 +7153,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             _snapshot!.InstrumentProfile.TickSize);
         execution.BracketQty = SplitBaseQuantity(execution) + ZoneBirthSplitRunnerV172RunnerQuantity;
 
-        if (!await SubmitZoneBirthSplitLegV172Async(execution, false, execution.IcebergSplit))
+        var historicalSplit = IsHistoricalReplayTime(_lastResearchCandle?.Time ?? execution.CreatedTime);
+        if (!await SubmitZoneBirthSplitLegV172Async(execution, false, execution.IcebergSplit && historicalSplit))
             return;
-        if (!await SubmitZoneBirthSplitLegV172Async(execution, true, execution.IcebergSplit))
+        if (!await SubmitZoneBirthSplitLegV172Async(execution, true, execution.IcebergSplit && historicalSplit))
             return;
-        if (execution.IcebergSplit)
+        if (execution.IcebergSplit && historicalSplit)
         {
             if (!await SubmitSplitTargetAsync(execution, false)) return;
             if (!await SubmitSplitTargetAsync(execution, true)) return;
@@ -7136,6 +7218,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             execution.StopOrder = stop;
             execution.TargetOrder = target;
         }
+
+        if (!IsHistoricalReplayTime(_lastResearchCandle?.Time ?? execution.CreatedTime))
+            return await OpenProtectionPairV223Async(execution, stop, stopRole, target, targetRole);
 
         if (!await OpenProtectionOrderAsync(execution, stop, stopRole))
             return false;
@@ -8405,7 +8490,16 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             (execution.EntryAvgPrice > 0m ? execution.EntryAvgPrice : execution.CreatedPrice);
         LogExecutionInfo($"EXEC_EMERGENCY_FLATTEN_SEND trade={execution.TradeId} reason={reason} dir={direction} qty={qty:0.########} reference={execution.EmergencyFlattenReferencePriceV205:0.########}");
         AppendExecutionEvent(execution, "EMERGENCY_FLATTEN_SEND", "FLATTEN", execution.EmergencyFlattenReferencePriceV205, qty, $"{reason}|reference={execution.EmergencyFlattenReferencePriceV205:0.########}");
-        await OpenOrderAsync(order);
+        try
+        {
+            await LiveProtectionFailClosedGuard.AwaitRegistrationAsync(OpenOrderAsync(order), TimeSpan.FromSeconds(5));
+        }
+        catch (Exception ex)
+        {
+            AppendExecutionEvent(execution, "EMERGENCY_FLATTEN_UNCONFIRMED_V222", "FLATTEN", 0m, qty, ex.Message);
+            SetLiveReadinessBlocked("EmergencyFlattenUnconfirmed", $"Emergency exit not confirmed for {execution.TradeId}. Verify account position and orders immediately.");
+            NotifyLiveIssue($"EmergencyFlattenUnconfirmed:{execution.TradeId}", $"Emergency exit registration failed or timed out: {ex.Message}. Verify account position and orders immediately.");
+        }
     }
 
     private void LogExecutionInfo(string message)
@@ -10987,7 +11081,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (_historicalArchiveScope == scope) return;
         _historicalArchiveScope = scope;
         var directory = _researchLogger?.DirectoryPath ?? Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ATAS", "StrategyLogs", "OPFStrategyV1");
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), StrategyVersions.PlatformDataDirectory, "StrategyLogs", "OPFStrategyV1");
         try
         {
             var archive = HistoricalExecutionArchive.Load(directory, account, product);
@@ -11446,6 +11540,10 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         public decimal ExitAvgPrice { get; set; }
         public bool BracketSubmitted { get; set; }
         public bool ExitCompleted { get; set; }
+        public bool LiveExitReconcilePendingV221 { get; set; }
+        public bool LiveExitMismatchReportedV221 { get; set; }
+        public DateTime LiveExitMismatchLastLoggedUtcV221 { get; set; }
+        public string LiveExitReconcileRoleV221 { get; set; } = string.Empty;
         public bool FeishuEntryNotificationQueued { get; set; }
         public bool FeishuExitNotificationQueued { get; set; }
         public int? ExitBar { get; set; }

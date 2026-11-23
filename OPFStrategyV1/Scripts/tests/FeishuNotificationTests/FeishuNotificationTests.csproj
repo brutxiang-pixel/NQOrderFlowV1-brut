@@ -5,6 +5,7 @@
     <Compile Include="../../../Strategy/BreakEvenPolicy.cs" Link="BreakEvenPolicy.cs" />
     <Compile Include="../../../Core/Configuration/CommissionSchedule.cs" Link="CommissionSchedule.cs" />
     <Compile Include="../../../Core/Configuration/ActualExecutionSettings.cs" Link="ActualExecutionSettings.cs" />
+    <Compile Include="../../../Core/Versions/StrategyVersions.cs" Link="StrategyVersions.cs" />
   </ItemGroup>
   <ItemGroup><Compile Include="../../../Strategy/FeishuNotificationSender.cs" Link="FeishuNotificationSender.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../Strategy/StartupTestOrderLatch.cs" Link="StartupTestOrderLatch.cs" /></ItemGroup>

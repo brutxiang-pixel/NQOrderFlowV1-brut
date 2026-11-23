@@ -6,6 +6,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ATASXDir>C:\Program Files\ATAS X</ATASXDir>
     <AssemblyName>OPFIndicatorX</AssemblyName>
+    <Version>3.0.0-preview.1</Version>
     <RootNamespace>OPFIndicatorX</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
@@ -46,7 +47,7 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
-  <Target Name="CopyToATASX" AfterTargets="Build">
+  <Target Name="CopyToATASX" AfterTargets="Build" Condition="'$(DeployToATASX)' == 'true'">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(APPDATA)\ATAS X\Indicators" OverwriteReadOnlyFiles="true" Condition="Exists('$(APPDATA)\ATAS X\Indicators')" />
   </Target>
 </Project>

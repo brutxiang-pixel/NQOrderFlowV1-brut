@@ -167,7 +167,7 @@ public sealed partial class OpeningPullbackFailureStrategy
 
         try
         {
-            var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ATAS", "StrategyLogs", "OPFStrategyV1");
+            var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), OPFStrategyV1.Core.Versions.StrategyVersions.PlatformDataDirectory, "StrategyLogs", "OPFStrategyV1");
             _significantZoneHistoryLedger = new SignificantZoneHistoryLedger(directory);
             _historicalSignificantZones.Clear();
             foreach (var reference in _significantZoneHistoryLedger.Load(_snapshot.InstrumentProfile.Instrument, SignificantZoneHistoryModelVersion))
@@ -187,7 +187,7 @@ public sealed partial class OpeningPullbackFailureStrategy
 
         try
         {
-            _significantZoneHistoryLedger ??= new SignificantZoneHistoryLedger(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ATAS", "StrategyLogs", "OPFStrategyV1"));
+            _significantZoneHistoryLedger ??= new SignificantZoneHistoryLedger(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), OPFStrategyV1.Core.Versions.StrategyVersions.PlatformDataDirectory, "StrategyLogs", "OPFStrategyV1"));
             _significantZoneHistoryLedger.Append(_snapshot.InstrumentProfile.Instrument, SignificantZoneHistoryModelVersion, zone, updatedAt);
             _historicalSignificantZones[zone.ZoneId] = new SignificantZoneHistoricalReference(
                 _snapshot.InstrumentProfile.Instrument, SignificantZoneHistoryModelVersion, zone.ZoneId, zone.Side,

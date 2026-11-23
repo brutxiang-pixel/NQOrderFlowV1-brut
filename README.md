@@ -1,10 +1,12 @@
 # NQOrderFlowV1：运行与证据入口
 
-更新：2026-11-09。项目为经典 ATAS 图表策略，DLL 为 `OPFStrategyV1.dll`。Scalper、ATAS X 不属于本项目。
+ATAS X 3.0 迁移预览包含原生图表策略和 OPF X 指标。安装、配置隔离、MCP 权限及验收范围见 [ATAS X 迁移说明](docs/ATAS-X-3.0-preview.md)。
+
+更新：2026-11-12。项目为经典 ATAS 图表策略，DLL 为 `OPFStrategyV1.dll`。Scalper、ATAS X 不属于本项目。用户已切换真实账户；当前2.23已部署待启动验收，修复CQG等待OCO第二张而策略串行等待第一张的循环依赖，见 [CQG成对提交说明](OPFStrategyV1/Docs/2026-11-12_cqg_oco_pair_2.23.md)。下表2.21为历史记录。
 
 | 状态 | 策略全称 | 研究结构 | 执行配置 | 入口/证据 |
 | --- | --- | --- | --- | --- |
-| 当前已部署，待启动验收，模拟账户 Auto | OPF_INTRADAY_2.20 | OPF_RESEARCH_2.34 | ACTUAL_EXEC_2.54 | DLL SHA256：`6F1829FAEE960C4A3A09671B78F6A46EA00C6D9FBC3207CA42984C82FEF45253`；[修复说明](OPFStrategyV1/Docs/2026-11-09_split_callback_2.20.md) |
+| 当前已部署，待启动验收，模拟账户 Auto | OPF_INTRADAY_2.21 | OPF_RESEARCH_2.34 | ACTUAL_EXEC_2.54 | DLL SHA256：`FB3661346E4FF446034A88B66FEA5CF964538DF7365998DB949CEB905BB0F390`；退出成交后先核对账户净仓再归档/推送 CLOSE；[修复说明](OPFStrategyV1/Docs/2026-11-10_exit_position_reconciliation_2.21.md) |
 
 版本引用必须使用表内全称；策略版本、研究 schema、执行配置版本互不等同。候选评分定义为 `OPF_SCORING_0.2`，入场扩展阈值和逐路径退出表为 `OPF_ENTRY_EXIT_2.19`，见 [参数表](OPFStrategyV1/Strategy/EntryExitPolicyParameters.cs)。`ActualTargetR` 仅是未匹配路径的兜底，七条实际路径使用版本化退出表；两手冰山另外执行1R/1.5R分批目标。冰山回踩、数量降级及结构保护见 [2.19交付说明](OPFStrategyV1/Docs/2026-11-09_iceberg_execution_2.19.md)。
 

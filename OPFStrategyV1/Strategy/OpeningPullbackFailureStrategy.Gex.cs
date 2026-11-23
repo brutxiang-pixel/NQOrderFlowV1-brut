@@ -27,7 +27,7 @@ public sealed partial class OpeningPullbackFailureStrategy
     private DateTime? _gexLastForcedRefreshRequestUtc;
 
     private static string GexConfigDirectory() =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ATAS", "StrategyConfigs");
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), OPFStrategyV1.Core.Versions.StrategyVersions.PlatformDataDirectory, "StrategyConfigs");
 
     /// <summary>
     /// Re-reads the local GEX snapshot file from disk. Safe to call repeatedly (e.g. once per closed
