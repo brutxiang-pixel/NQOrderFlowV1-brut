@@ -14,8 +14,8 @@
     <ATASPlatformDir Condition="'$(ATASXDir)' != ''">$(ATASXDir)</ATASPlatformDir>
     <DefineConstants>$(DefineConstants);OPF_ATAS_X</DefineConstants>
     <OutputPath>bin\ATASX\$(Configuration)\</OutputPath>
-    <Version>3.0.0-preview.12</Version>
-    <FileVersion>3.0.0.12</FileVersion>
+    <Version>3.0.0-preview.13</Version>
+    <FileVersion>3.0.0.13</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>

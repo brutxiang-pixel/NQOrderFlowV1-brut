@@ -1,5 +1,9 @@
 # ATAS X 3.0 预览版迁移
 
+## 3.0.0-preview.13
+
+实际开仓手数由策略控制面板的 `Actual Order Quantity (Contracts)` 设置，默认 1 手，不再从实际执行 JSON 配置读取或写入。MNQ 可在控制面板设为 1 或 2 手，仍受 MNQ 2 手品种仓位上限约束；其他 ATAS X 品种继续受各自上限约束。冰山与普通实际开仓使用同一设置。旧 JSON 中遗留的 `ActualOrderQuantity` 字段不再参与下单数量计算。
+
 ## 3.0.0-preview.12
 
 NQ 的 `ESResponseAlignedBreakout` 停止新开空单，保留候选及拒绝日志。MNQ 同路径多空保留结构止损，计划或成交风险超过 15 点时走现有拒绝或紧急退出流程。旧版该路径有效上限为 50 点，不受 MNQ 通用 25 点档案值约束。

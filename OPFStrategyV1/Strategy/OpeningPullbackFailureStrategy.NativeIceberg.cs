@@ -477,9 +477,8 @@ public sealed partial class OpeningPullbackFailureStrategy
                 es.UnderlyingPrice.HasValue && es.UnderlyingPrice60sAgo.HasValue &&
                 (item.Side == TradeSide.Long ? es.UnderlyingPrice > es.UnderlyingPrice60sAgo : es.UnderlyingPrice < es.UnderlyingPrice60sAgo);
             var size = IntradayEntryPolicy.EvidenceSize(optionContext, esReaction, true, IntradayEntryPolicy.ProductQuantityLimit(Security?.Code ?? string.Empty));
-            size.Quantity = IntradayEntryPolicy.IcebergQuantity(size.Quantity, structure.RetestConfirmed, structure.TrendAligned,
-                risk, structure.FrozenAtr, _snapshot.InstrumentProfile.PointValue);
-            _nativeIcebergHud = $"Iceberg: {item.Side} S{size.Score}/3 x{size.Quantity:0}";
+            var configuredQuantity = ConfiguredExecutionQuantity;
+            _nativeIcebergHud = $"Iceberg: {item.Side} S{size.Score}/3 x{configuredQuantity:0}";
             var score = new ScoreBreakdown("CrossMarketIceberg", 100m, 45m, true,
                 new[]
                 {
@@ -493,7 +492,7 @@ public sealed partial class OpeningPullbackFailureStrategy
                 });
             var eventInstrument = IcebergContract(item.Instrument);
             var signal = new CandidateSignal($"ICE-{item.Instrument}-{item.Id}-{item.Time:yyyyMMddHHmmss}", _snapshot.SnapshotId, live.Time, live.Bar, item.Side,
-                SetupType.TrendPullback, SignalStage.Triggered, null, score, score, new[] { "NativeRefreshConfirmed", "IntradayReaction", "CrossMarketIcebergOrderFlowReaction", $"ICE_EVENT_KEY:{eventInstrument}|{item.Id}|{item.Time:O}", $"EvidenceQty:{size.Quantity.ToString(System.Globalization.CultureInfo.InvariantCulture)}" });
+                SetupType.TrendPullback, SignalStage.Triggered, null, score, score, new[] { "NativeRefreshConfirmed", "IntradayReaction", "CrossMarketIcebergOrderFlowReaction", $"ICE_EVENT_KEY:{eventInstrument}|{item.Id}|{item.Time:O}", $"ConfiguredQty:{configuredQuantity.ToString(System.Globalization.CultureInfo.InvariantCulture)}" });
             var exitStructure = item.Side == TradeSide.Long ? Math.Min(item.Price, structure.FrozenLow) : Math.Max(item.Price, structure.FrozenHigh);
             signal = signal with { SkipReasons = signal.SkipReasons.Concat(new[] { $"ICE_EXIT_STRUCTURE:{exitStructure.ToString(System.Globalization.CultureInfo.InvariantCulture)}" }).ToArray() };
             _researchLogger?.AppendSignal(signal);
@@ -502,13 +501,13 @@ public sealed partial class OpeningPullbackFailureStrategy
             if (nearestSweep is not null)
                 sweepDetail = $" mboSweepAligned={sweepAligned} mboSweepTime={nearestSweep.Time:O} mboSweepLevels={nearestSweep.PriceLevels}";
 #endif
-            LogLiveReadinessInfo($"NATIVE_ICEBERG_REACTION event={pair.Key} side={item.Side} price={item.Price} sourceTime={item.Time:O} reactionTime={live.Time:O} hidden={item.Hidden} filled={item.Filled} tapeRatio={tapeRatio:0.000}{sweepDetail} score={size.Score}/3 qty={size.Quantity} esStatus={es.Status}");
+            LogLiveReadinessInfo($"NATIVE_ICEBERG_REACTION event={pair.Key} side={item.Side} price={item.Price} sourceTime={item.Time:O} reactionTime={live.Time:O} hidden={item.Hidden} filled={item.Filled} tapeRatio={tapeRatio:0.000}{sweepDetail} score={size.Score}/3 qty={configuredQuantity} esStatus={es.Status}");
             var active = ActiveReplayExecutions();
             if (_manualAlertEnabled) { SubmitNativeIceberg(signal, live, stop, pair.Key); break; }
             var arbitration = IntradayEntryPolicy.IcebergArbitration(active.Count, active.Any(x => IsIcebergExecutionPath(x.ResearchPath)),
                 active.All(x => x.Side == item.Side), active.All(x => x.BracketSubmitted && IsWorkingExecutionOrder(x.StopOrder)),
                 GetCurrentAccountPosition() == 0m, !_replayExecutionsByTradeId.Values.Any(x => x.ProtectionCleanupPending || x.ExitCompleted && CountWorkingProtectionOrders(x) > 0),
-                active.Sum(x => x.InitialRiskPoints * _snapshot.InstrumentProfile.PointValue * RemainingExecutionQuantity(x)) + risk * _snapshot.InstrumentProfile.PointValue * size.Quantity);
+                active.Sum(x => x.InitialRiskPoints * _snapshot.InstrumentProfile.PointValue * RemainingExecutionQuantity(x)) + risk * _snapshot.InstrumentProfile.PointValue * configuredQuantity);
             LogLiveReadinessInfo($"ICEBERG_ARBITRATION event={pair.Key} decision={arbitration}");
             if (arbitration == "Enter") SubmitNativeIceberg(signal, live, stop, pair.Key);
             else if (arbitration is "FlattenThenWait" or "WaitProtection" or "WaitCleanup")
@@ -808,50 +807,4 @@ public sealed partial class OpeningPullbackFailureStrategy
         lock (_esOptionsProxySync) return _esOptionsProxy;
     }
 
-    private decimal EvidenceSizedExecutionQuantity(CandidateSignal signal, string path, DateTime decisionTime)
-    {
-        if (path is not ("ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse" or "CrossMarketIcebergOrderFlowReaction"))
-            return 1m;
-        var maximum = IntradayEntryPolicy.ProductQuantityLimit(Security?.Code ?? string.Empty);
-        var es = ReadEsOptionsProxyAsOf(decisionTime);
-        var evidenceTime = IsHistoricalReplayTime(decisionTime) ? decisionTime : DateTime.UtcNow;
-        var optionContext = es.Status == "ModelReady" && es.CapturedAtUtc <= evidenceTime &&
-            evidenceTime - es.CapturedAtUtc <= TimeSpan.FromSeconds(90) &&
-            es.OptionQuotesObservedAtUtc is { } quoteTime && quoteTime <= evidenceTime &&
-            evidenceTime - quoteTime <= TimeSpan.FromSeconds(90) && es.AtmQuotesReady == true &&
-            es.UnderlyingObservedAtUtc is { } underlyingTime && underlyingTime <= evidenceTime &&
-            evidenceTime - underlyingTime <= TimeSpan.FromSeconds(90) &&
-            es.LocalQuoteCoverage >= .5m && es.CallQuoteCoverage >= .5m && es.PutQuoteCoverage >= .5m;
-        var aligned = es.UnderlyingObservedAtUtc is { } observed && observed <= evidenceTime &&
-            evidenceTime - observed <= TimeSpan.FromSeconds(90) && es.PriceReferenceAtUtc is { } reference &&
-            reference <= evidenceTime && evidenceTime - reference <= TimeSpan.FromSeconds(90) &&
-            (signal.Side == TradeSide.Long
-            ? es.UnderlyingPrice.HasValue && es.UnderlyingPrice60sAgo.HasValue && es.UnderlyingPrice > es.UnderlyingPrice60sAgo
-            : es.UnderlyingPrice.HasValue && es.UnderlyingPrice60sAgo.HasValue && es.UnderlyingPrice < es.UnderlyingPrice60sAgo);
-        (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] tape;
-        lock (_intradaySync) tape = _entryTape.Where(x => x.Time <= decisionTime && x.Time >= decisionTime.AddSeconds(-10)).ToArray();
-        var volume = tape.Sum(x => x.Volume);
-        var signed = tape.Sum(x => x.Signed);
-        var flowRatio = volume == 0m ? 0m : (signal.Side == TradeSide.Long ? signed : -signed) / volume;
-        var flow = flowRatio >= (path == "CrossMarketIcebergOrderFlowReaction" ? .15m : .1m);
-        var barStrong = true;
-        if (path != "CrossMarketIcebergOrderFlowReaction" && _intradayEvidence.TryGetValue(signal.SignalId, out var evidence))
-        {
-            var range = evidence.High - evidence.Low;
-            if (range <= 0m) barStrong = false;
-            else
-            {
-                var body = Math.Abs(evidence.Close - evidence.Open) / range;
-                var close = signal.Side == TradeSide.Long ? (evidence.Close - evidence.Low) / range : (evidence.High - evidence.Close) / range;
-                var minBody = path == "ESResponseAlignedBreakout" ? .5m : path == "ESExpectedMoveExpansion" ? .4m : .25m;
-                var minClose = path == "ESResponseAlignedBreakout" ? .8m : path == "ESExpectedMoveExpansion" ? .65m : .25m;
-                barStrong = body >= minBody && close >= minClose;
-            }
-        }
-        flow &= barStrong;
-        var noRetest = signal.SkipReasons.Contains("LargeRiskBreakoutNoRetest", StringComparer.Ordinal);
-        var size = IntradayEntryPolicy.EvidenceSize(optionContext, aligned, flow, noRetest ? 1m : maximum);
-        LogLiveReadinessInfo($"EVIDENCE_SIZE path={path} signal={signal.SignalId} score={size.Score}/3 qty={size.Quantity} option={optionContext} esPrice={aligned} localFlow={flow} tapeRatio={flowRatio:0.000} barStrong={barStrong} noRetest={noRetest}");
-        return size.Quantity;
-    }
 }

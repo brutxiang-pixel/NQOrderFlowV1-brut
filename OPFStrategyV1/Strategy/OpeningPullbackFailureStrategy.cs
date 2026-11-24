@@ -363,6 +363,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     [DisplayName("Zone Behavior Ledger Data Collection Only")]
     public bool ZoneBehaviorLedgerDataOnly { get; set; }
 
+    private decimal ConfiguredExecutionQuantity => Math.Min(Math.Max(0m, ReplayOrderQuantity), IntradayEntryPolicy.ProductQuantityLimit(Security?.Code ?? string.Empty));
+
     private bool ActualOrdersEnabled => EnableReplayOrders && !RichBarDataCollectionOnly && !MicrostructureAuditCollectionOnly && !FootprintDataCollectionOnly && !SweepReclaimDataCollectionOnly && !ZoneBehaviorLedgerDataOnly && !MarketExecutionTapeDataOnly && !CandidateScenarioTapeDataOnly;
 
     [Category("OPF Execution")]
@@ -374,8 +376,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     public bool ReplayAllowResearchPaths { get; set; } = false;
 
     [Category("OPF Execution")]
-    [DisplayName("Actual Order Quantity")]
-    public decimal ReplayOrderQuantity { get; set; } = 2m;
+    [DisplayName("Actual Order Quantity (Contracts)")]
+    public decimal ReplayOrderQuantity { get; set; } = 1m;
 
     [Category("OPF Execution")]
     [DisplayName("Actual Target R")]
@@ -464,7 +466,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         EnableReplayOrders = chartAuto && actualExecutionSettings.ExecutionMode != "Disabled";
         _manualAlertEnabled = !EnableReplayOrders && actualExecutionSettings.ManualAlertEnabled;
 #endif
-        ReplayOrderQuantity = 1m;
         ApplyRunMode(actualExecutionSettings.RunMode);
         ApplyChartExecutionModeOverride();
         InitializeMicrostructureAudit();
@@ -680,7 +681,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         _manualAlertEnabled = settings.ManualAlertEnabled;
         ReplayExecutionPath = settings.ActualExecutionPaths;
         ReplayAllowResearchPaths = settings.ActualAllowResearchPaths;
-        ReplayOrderQuantity = settings.ActualOrderQuantity;
         ReplayTargetR = settings.ActualTargetR;
         ReplayMaxTradesPerDay = settings.ActualMaxTradesPerDay;
         _actualDailyLossLimitDollars = settings.ActualDailyLossLimitDollars;
@@ -2372,7 +2372,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (activeExecutions.Count == 1)
         {
             var primary = activeExecutions[0];
-            var quantity = EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time);
+            var quantity = ConfiguredExecutionQuantity;
             var combinedRisk = primary.InitialRiskPoints * _snapshot.InstrumentProfile.PointValue * RemainingExecutionQuantity(primary) +
                 risk * _snapshot.InstrumentProfile.PointValue * quantity;
             if (primary.Side != signal.Side)
@@ -3455,7 +3455,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (!isDeferredContinuation && switchPreflightPassed is null)
             StartShadowTradeTracking(signal, entryCandle, researchPath, stop, risk);
         var scalp = researchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath;
-        var requestedQty = scalp ? 1m : EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time);
+        var requestedQty = ConfiguredExecutionQuantity;
         if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
         {
             var reason = $"LiveDailyLoss:net={_liveAccountDailyNetPnlDollars:0.##},limit={_actualDailyLossLimitDollars:0.##}";
@@ -3804,7 +3804,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (targetR != ReplayTargetR)
             executeReasons.Add($"ActualTargetOverride:targetR={targetR:0.##},risk={risk:0.##},path={researchPath}");
         if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse" or "CrossMarketIcebergOrderFlowReaction")
-            executeReasons.Add($"EvidenceSizedQty:{qty:0.##}");
+            executeReasons.Add($"ConfiguredQty:{qty:0.##}");
         var executeReason = string.Join("|", executeReasons);
         execution.CountedAsObservationFiller = isObservationFiller;
         execution.CountedAsQualityRescue = IsDailyVolumeQualityRescue(signal, researchPath, risk);
@@ -4157,7 +4157,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         var entryQualityTag = BuildEntryQualityTag(signal, entryCandle, researchPath, risk);
         var loggedReason = string.IsNullOrEmpty(entryQualityTag) ? reason : reason + "|" + entryQualityTag;
         if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse" or "CrossMarketIcebergOrderFlowReaction")
-            loggedReason += $"|EvidenceSizedQty:{EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time):0.##}";
+            loggedReason += $"|ConfiguredQty:{ConfiguredExecutionQuantity:0.##}";
         var targetR = ActualTargetRFor(signal, researchPath, risk);
         var target = TargetFromRisk(signal.Side, entry, risk, targetR);
         var reward = EstimateActualExecutionReward(signal, researchPath, entry, risk);
@@ -5365,7 +5365,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 #endif
         if (researchPath is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction")
         {
-            var quantity = EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time);
+            var quantity = ConfiguredExecutionQuantity;
             var reject = StructureRiskPolicy.Reject(risk, _snapshot.InstrumentProfile.PointValue, quantity);
             var dollars = risk * _snapshot.InstrumentProfile.PointValue * quantity;
             if (reject is null && dollars > 600m) reject = $"IcebergDollarRiskExceeded:risk={dollars:0.##}|max=600";
@@ -5460,7 +5460,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             // Replace legacy stop-width cuts, retaining quality and daily-cap rules.
             reasons.RemoveAll(reason => !reason.StartsWith("OCWideStopLongExpansionV163DailyCap:", StringComparison.Ordinal) &&
                 !reason.StartsWith("ShortObservationMidRiskQualityCutV112:", StringComparison.Ordinal));
-            var quantity = EvidenceSizedExecutionQuantity(signal, researchPath, entryCandle.Time);
+            var quantity = ConfiguredExecutionQuantity;
             var reject = StructureRiskPolicy.Reject(risk, instrument.PointValue, quantity);
             if (reject is not null) reasons.Add(reject);
         }

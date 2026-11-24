@@ -9,7 +9,6 @@ public sealed record ActualExecutionSettings(
     string ExecutionMode,
     string ActualExecutionPaths,
     bool ActualAllowResearchPaths,
-    decimal ActualOrderQuantity,
     decimal ActualTargetR,
     int ActualMaxTradesPerDay,
     decimal ActualDailyLossLimitDollars,
@@ -55,7 +54,6 @@ public sealed record ActualExecutionSettings(
             ExecutionMode: "ManualAlert",
             ActualExecutionPaths: "BreakawayFvg_Qualified|FailureReverse_RetestFailed|ESResponseAlignedBreakout|ESWallRejectionReversal|ESExpectedMoveExpansion|ESGammaConcentrationResponse|CrossMarketIcebergOrderFlowReaction",
             ActualAllowResearchPaths: false,
-            ActualOrderQuantity: 1m,
             ActualTargetR: 1.5m,
             ActualMaxTradesPerDay: 0,
             ActualDailyLossLimitDollars: 200m,
@@ -141,7 +139,6 @@ public sealed record ActualExecutionSettings(
         return settings with
         {
             ActualExecutionPaths = MergeExecutionPaths(settings.ActualExecutionPaths, fallback.ActualExecutionPaths),
-            ActualOrderQuantity = settings.ActualOrderQuantity <= 0m ? fallback.ActualOrderQuantity : settings.ActualOrderQuantity,
             ActualTargetR = settings.ActualTargetR <= 0m ? fallback.ActualTargetR : settings.ActualTargetR,
             ActualMaxTradesPerDay = settings.ActualMaxTradesPerDay < 0 ? fallback.ActualMaxTradesPerDay : settings.ActualMaxTradesPerDay,
             ActualDailyLossLimitDollars = settings.ActualDailyLossLimitDollars <= 0m ? fallback.ActualDailyLossLimitDollars : settings.ActualDailyLossLimitDollars,
