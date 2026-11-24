@@ -38,6 +38,8 @@ public sealed partial class OpeningPullbackFailureStrategy
     private sealed class ScalpFunnel
     {
         public int ConfirmedIds, Segments, InferredSegments, Signals, Submitted, Filled;
+        public readonly HashSet<int> EvaluatedBars = new();
+        public readonly HashSet<int> OpportunityBars = new();
         public readonly Dictionary<string, int> EvaluationBlocks = new();
     }
     private readonly Dictionary<string, NativeIcebergEvent> _scalpRefreshes = new();
@@ -76,9 +78,11 @@ public sealed partial class OpeningPullbackFailureStrategy
         Interlocked.Increment(ref funnel.Segments);
     }
 
-    private bool ReportScalpFunnel(OpfCandle live, bool signal, string status)
+    private bool ReportScalpFunnel(OpfCandle live, bool signal, string status, bool opportunity = false)
     {
         var totals = ScalpFunnelFor(live.Time);
+        totals.EvaluatedBars.Add(live.Bar);
+        if (signal || opportunity) totals.OpportunityBars.Add(live.Bar);
         if (!signal && status is not ("Disabled" or "NoFreshSegment"))
             totals.EvaluationBlocks[status] = totals.EvaluationBlocks.GetValueOrDefault(status) + 1;
         if (live.Time >= _nextScalpFunnelLog)
@@ -86,6 +90,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             _nextScalpFunnelLog = live.Time.AddMinutes(1);
             var blocks = string.Join(",", totals.EvaluationBlocks.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value}"));
             LogLiveReadinessInfo($"ICEBERG_SCALP_FUNNEL day={GlobexTradingDayKey(live.Time):yyyy-MM-dd} at={live.Time:O} product={Security?.Code} status={status} " +
+                $"barsEvaluated={totals.EvaluatedBars.Count} barsWithIcebergOpportunity={totals.OpportunityBars.Count} " +
                 $"confirmedIds={Volatile.Read(ref totals.ConfirmedIds)} segments={Volatile.Read(ref totals.Segments)} inferredSegments={Volatile.Read(ref totals.InferredSegments)} signals={Volatile.Read(ref totals.Signals)} " +
                 $"iocSubmitted={Volatile.Read(ref totals.Submitted)} entryFilled={Volatile.Read(ref totals.Filled)} evaluationBlocks={blocks}");
         }
@@ -139,12 +144,12 @@ public sealed partial class OpeningPullbackFailureStrategy
         lock (_intradaySync) inferred = _scalpReplenishment.FreshSignals(live.Time);
         if (!fresh.Any() && inferred.Length == 0) return ReportScalpFunnel(live, false, "NoFreshSegment");
         if (_pendingIcebergSwitch is not null || ActiveReplayExecutions().Count != 0 || GetCurrentAccountPosition() != 0m)
-            return ReportScalpFunnel(live, false, "PositionBusy");
+            return ReportScalpFunnel(live, false, "PositionBusy", opportunity: true);
         var tick = _snapshot.InstrumentProfile.TickSize;
         if (ScalpQuoteBlock(live.Time, tick, out var bid, out var ask) is { } quoteBlock)
-            return ReportScalpFunnel(live, false, quoteBlock);
+            return ReportScalpFunnel(live, false, quoteBlock, opportunity: true);
         if (IntradayEntryPolicy.ScalpTargetTicks * tick <= _actualCommissionPerContractRoundTrip / _snapshot.InstrumentProfile.PointValue + 2m * tick)
-            return ReportScalpFunnel(live, false, "FeeGuard");
+            return ReportScalpFunnel(live, false, "FeeGuard", opportunity: true);
         (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] tape;
         lock (_intradaySync) tape = _entryTape.Where(x => x.Time > live.Time.AddSeconds(-10) && x.Time <= live.Time).ToArray();
         var status = "WaitingForTape";
@@ -191,9 +196,9 @@ public sealed partial class OpeningPullbackFailureStrategy
             _researchLogger?.AppendSignal(signal);
             TrySubmitReplayExecution(signal, live with { Open = entry, High = entry, Low = entry, Close = entry }, path, stopPrice,
                 Math.Abs(entry - stopPrice), allowDelayedExpansion: false);
-            return ReportScalpFunnel(live, true, "Signal");
+            return ReportScalpFunnel(live, true, "Signal", opportunity: true);
         }
-        return ReportScalpFunnel(live, false, status);
+        return ReportScalpFunnel(live, false, status, opportunity: true);
     }
 #endif
     private string NativeIcebergArchiveDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),

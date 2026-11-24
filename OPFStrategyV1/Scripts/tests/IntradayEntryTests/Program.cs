@@ -4,41 +4,54 @@ using OPFStrategyV1.Core.MarketData;
 var now = new DateTime(2026, 10, 14, 10, 0, 0, DateTimeKind.Utc);
 void Check(bool value, string name) { if (!value) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); }
 
-IcebergReplenishment.Signal? SimulateRefills(IcebergReplenishment detector, bool isLong, bool withTrades, int secondRoundMs = 500)
+IcebergReplenishment.Signal? SimulateRefill(IcebergReplenishment detector, bool isLong, bool withTrades)
 {
     void Depth(int ms, decimal size) => detector.Depth(3619.8m, isLong, size, now.AddMilliseconds(ms), now.AddMilliseconds(ms));
     void Attack(int ms) { if (withTrades) detector.Trade(3619.8m, !isLong, now.AddMilliseconds(ms), now.AddMilliseconds(ms)); }
     Depth(0, 2m);
     Attack(100);
+    Attack(105);
     Depth(110, 1m);
-    Depth(120, 2m);
-    Depth(121, 2m);
-    Check(detector.FreshSignals(now.AddMilliseconds(121)).Length == 0, "one refill and a duplicate update do not qualify");
-    Depth(secondRoundMs - 10, 1m);
-    Attack(secondRoundMs);
-    return detector.Depth(3619.8m, isLong, 2m, now.AddMilliseconds(secondRoundMs + 10), now.AddMilliseconds(secondRoundMs + 10));
+    return detector.Depth(3619.8m, isLong, 2m, now.AddMilliseconds(120), now.AddMilliseconds(120)) ??
+        detector.FreshSignals(now.AddMilliseconds(120)).SingleOrDefault();
 }
 
 foreach (bool isLong in new[] { true, false })
 {
     var detector = new IcebergReplenishment();
-    var refill = SimulateRefills(detector, isLong, true);
-    Check(refill is { Price: 3619.8m } && refill.IsLong == isLong, "two matched rebalances qualify on the correct passive side");
+    var refill = SimulateRefill(detector, isLong, true);
+    Check(refill is { Price: 3619.8m } && refill.IsLong == isLong, "one same-price refill after two attacks qualifies on the correct passive side");
     Check(detector.FreshSignals(now.AddSeconds(6)).Length == 0, "inferred refill expires after the reaction window");
     Check(refill is not null && detector.Consume(refill) && !detector.Consume(refill), "inferred candidate is consumed once");
 }
+var oneAttack = new IcebergReplenishment();
+oneAttack.Depth(3619.8m, true, 2m, now, now);
+oneAttack.Trade(3619.8m, false, now.AddMilliseconds(100), now.AddMilliseconds(100));
+oneAttack.Depth(3619.8m, true, 1m, now.AddMilliseconds(110), now.AddMilliseconds(110));
+Check(oneAttack.Depth(3619.8m, true, 2m, now.AddMilliseconds(120), now.AddMilliseconds(120)) is null, "one attack and refill do not qualify");
+var attackWithoutRefill = new IcebergReplenishment();
+attackWithoutRefill.Depth(3619.8m, true, 2m, now, now);
+attackWithoutRefill.Trade(3619.8m, false, now.AddMilliseconds(100), now.AddMilliseconds(100));
+attackWithoutRefill.Trade(3619.8m, false, now.AddMilliseconds(110), now.AddMilliseconds(110));
+Check(attackWithoutRefill.FreshSignals(now.AddMilliseconds(110)).Length == 0, "two attacks without replenishment do not qualify");
+var outsideWindow = new IcebergReplenishment();
+outsideWindow.Depth(3619.8m, true, 2m, now, now);
+outsideWindow.Trade(3619.8m, false, now.AddMilliseconds(100), now.AddMilliseconds(100));
+outsideWindow.Depth(3619.8m, true, 2m, now.AddMilliseconds(2100), now.AddMilliseconds(2100));
+outsideWindow.Trade(3619.8m, false, now.AddMilliseconds(2201), now.AddMilliseconds(2201));
+outsideWindow.Depth(3619.8m, true, 1m, now.AddMilliseconds(2210), now.AddMilliseconds(2210));
+Check(outsideWindow.Depth(3619.8m, true, 2m, now.AddMilliseconds(2220), now.AddMilliseconds(2220)) is null, "attacks outside the two-second window do not qualify");
 var cancelledRefill = new IcebergReplenishment();
-var beforeCancel = SimulateRefills(cancelledRefill, true, true);
+var beforeCancel = SimulateRefill(cancelledRefill, true, true);
 cancelledRefill.Depth(3619.8m, true, 0m, now.AddMilliseconds(600), now.AddMilliseconds(600));
 Check(beforeCancel is not null && !cancelledRefill.Consume(beforeCancel), "empty depth invalidates the inference before submission");
 var brokenRefill = new IcebergReplenishment();
-var beforeBreak = SimulateRefills(brokenRefill, false, true);
+var beforeBreak = SimulateRefill(brokenRefill, false, true);
 brokenRefill.Trade(3619.9m, true, now.AddMilliseconds(600), now.AddMilliseconds(600));
-Check(beforeBreak is not null && !brokenRefill.Consume(beforeBreak), "a trade through the absorption price invalidates the inference");
-Check(SimulateRefills(new IcebergReplenishment(), true, false) is null, "depth-only churn cannot qualify");
-Check(SimulateRefills(new IcebergReplenishment(), true, true, 2300) is null, "two refills outside the two-second window cannot qualify");
-var inferredLong = SimulateRefills(new IcebergReplenishment(), true, true)!;
-var absorbed = new[] { (now.AddMilliseconds(100), 3619.8m, 1m, -1m), (inferredLong.AttackTime, 3619.8m, 1m, -1m) };
+Check(beforeBreak is not null && brokenRefill.FreshSignals(now.AddMilliseconds(600)).Length == 0, "a trade through the absorption price invalidates the inference");
+Check(SimulateRefill(new IcebergReplenishment(), true, false) is null, "depth-only churn cannot qualify");
+var inferredLong = SimulateRefill(new IcebergReplenishment(), true, true)!;
+var absorbed = new[] { (now.AddMilliseconds(100), 3619.8m, 1m, -1m), (now.AddMilliseconds(105), 3619.8m, 1m, -1m) };
 var afterRefill = absorbed.Concat(new[] { (now.AddMilliseconds(600), 3619.9m, 1m, 1m), (now.AddMilliseconds(700), 3619.9m, 1m, 1m) }).ToArray();
 Check(IntradayEntryPolicy.IcebergScalpStop(true, inferredLong.Price, .1m, inferredLong.AttackTime, inferredLong.ConfirmedAt,
     now.AddMilliseconds(750), absorbed) is null &&

@@ -6,8 +6,8 @@ internal sealed class IcebergReplenishment
     private sealed class Level
     {
         public decimal Size;
-        public DateTime DepthTime, DropTime, FirstTrade, LastTrade;
-        public int Rounds;
+        public DateTime DepthTime, DropTime, FirstTrade, LastTrade, RefilledAt;
+        public int AttackCount;
         public Signal? Candidate;
     }
 
@@ -28,21 +28,32 @@ internal sealed class IcebergReplenishment
         if (!_levels.TryGetValue((price, isLong), out var level))
             _levels.Add((price, isLong), level = new Level { Size = size, DepthTime = time });
         if (time < level.DepthTime || time < level.LastTrade) return null;
+        if (level.Candidate is { } expired && received - expired.ConfirmedAt > TimeSpan.FromSeconds(5))
+        {
+            level.Candidate = null;
+            level.FirstTrade = level.LastTrade = level.DropTime = level.RefilledAt = default;
+            level.AttackCount = 0;
+        }
 
         Signal? created = null;
         if (size < level.Size)
         {
             level.DropTime = time;
-            if (size == 0m) level.Candidate = null;
+            if (size == 0m)
+            {
+                level.Candidate = null;
+                level.FirstTrade = level.LastTrade = level.DropTime = level.RefilledAt = default;
+                level.AttackCount = 0;
+            }
         }
         else if (size > level.Size)
         {
-            if (level.DropTime != default && level.LastTrade != default && time - level.FirstTrade <= Window &&
-                (level.DropTime - level.LastTrade).Duration() <= TimeSpan.FromMilliseconds(250))
+            if (level.DropTime != default && level.LastTrade != default && level.AttackCount >= 2 &&
+                time - level.FirstTrade <= Window && (level.DropTime - level.LastTrade).Duration() <= TimeSpan.FromMilliseconds(250) &&
+                level.Candidate is null)
             {
-                if (++level.Rounds == 2)
-                    created = level.Candidate = new Signal(++_id, price, isLong, level.LastTrade, received, time);
-                level.LastTrade = default;
+                level.RefilledAt = time;
+                created = level.Candidate = new Signal(++_id, price, isLong, level.LastTrade, received, time);
             }
             level.DropTime = default;
         }
@@ -58,17 +69,25 @@ internal sealed class IcebergReplenishment
         {
             if (level.FirstTrade == default || time < level.DepthTime || (key.IsLong ? price >= key.Price : price <= key.Price)) continue;
             level.Candidate = null;
-            level.FirstTrade = level.LastTrade = level.DropTime = default;
-            level.Rounds = 0;
+            level.FirstTrade = level.LastTrade = level.DropTime = level.RefilledAt = default;
+            level.AttackCount = 0;
         }
         if (!_levels.TryGetValue((price, !aggressiveBuy), out var hit) || time < hit.LastTrade ||
             (time - hit.DepthTime).Duration() > Window) return;
+        if (hit.Candidate is { } expired && received - expired.ConfirmedAt > TimeSpan.FromSeconds(5))
+        {
+            hit.Candidate = null;
+            hit.FirstTrade = hit.LastTrade = hit.DropTime = hit.RefilledAt = default;
+            hit.AttackCount = 0;
+        }
         if (hit.FirstTrade == default || time - hit.FirstTrade > Window)
         {
             hit.FirstTrade = time;
-            hit.Rounds = 0;
+            hit.RefilledAt = default;
+            hit.AttackCount = 0;
         }
         hit.LastTrade = time;
+        hit.AttackCount++;
     }
 
     internal Signal[] FreshSignals(DateTime now) => _levels.Values.Select(x => x.Candidate)
@@ -78,6 +97,8 @@ internal sealed class IcebergReplenishment
     {
         if (!_levels.TryGetValue((signal.Price, signal.IsLong), out var level) || level.Candidate != signal) return false;
         level.Candidate = null;
+        level.FirstTrade = level.LastTrade = level.DropTime = level.RefilledAt = default;
+        level.AttackCount = 0;
         return true;
     }
 
