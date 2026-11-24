@@ -10,4 +10,5 @@
   <ItemGroup><Compile Include="../../../Strategy/FeishuNotificationSender.cs" Link="FeishuNotificationSender.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../Strategy/StartupTestOrderLatch.cs" Link="StartupTestOrderLatch.cs" /></ItemGroup>
   <ItemGroup><Compile Include="../../../Strategy/ExecutionFillDeduplicator.cs" Link="ExecutionFillDeduplicator.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../../../Strategy/StoppedExitFills.cs" Link="StoppedExitFills.cs" /></ItemGroup>
 </Project>

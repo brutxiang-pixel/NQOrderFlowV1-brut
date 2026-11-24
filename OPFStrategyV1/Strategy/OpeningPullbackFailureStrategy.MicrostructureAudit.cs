@@ -51,6 +51,9 @@ public sealed partial class OpeningPullbackFailureStrategy
     protected override void MarketDepthChanged(MarketDataArg depth)
     {
         base.MarketDepthChanged(depth);
+#if OPF_ATAS_X
+        ObserveScalpDepth(depth);
+#endif
         RecordMicrostructureEvent("MarketDepthChanged", depth);
     }
 
@@ -59,12 +62,20 @@ public sealed partial class OpeningPullbackFailureStrategy
         var batch = depths as ICollection<MarketDataArg> ?? depths.ToArray();
         base.MarketDepthsChanged(batch);
         foreach (var depth in batch)
+        {
+#if OPF_ATAS_X
+            ObserveScalpDepth(depth);
+#endif
             RecordMicrostructureEvent("MarketDepthsChanged", depth);
+        }
     }
 
     protected override void OnBestBidAskChanged(MarketDataArg depth)
     {
         base.OnBestBidAskChanged(depth);
+#if OPF_ATAS_X
+        ObserveScalpQuote(depth);
+#endif
         UpdateMicrostructureBestQuote(depth);
         RecordMicrostructureEvent("OnBestBidAskChanged", depth);
     }

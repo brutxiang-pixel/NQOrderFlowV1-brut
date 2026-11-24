@@ -7,6 +7,7 @@
     <Compile Include="../../../Strategy/PathOpportunity.cs" Link="PathOpportunity.cs" />
     <Compile Include="../../../Strategy/CrossMarketAlignment.cs" Link="CrossMarketAlignment.cs" />
     <Compile Include="../../../Strategy/IntradayEntryPolicy.cs" Link="IntradayEntryPolicy.cs" />
+    <Compile Include="../../../Strategy/IcebergReplenishment.cs" Link="IcebergReplenishment.cs" />
     <Compile Include="../../../Strategy/EsBreakoutEvent.cs" Link="EsBreakoutEvent.cs" />
     <Compile Include="../../../Strategy/BreakEvenPolicy.cs" Link="BreakEvenPolicy.cs" />
     <Compile Include="../../../Strategy/ProfitLockPolicy.cs" Link="ProfitLockPolicy.cs" />
@@ -20,5 +21,10 @@
     <Compile Include="../../../Strategy/AccountPnlScope.cs" Link="AccountPnlScope.cs" />
     <Compile Include="../../../Strategy/PhysicalEventExecutionDedup.cs" Link="PhysicalEventExecutionDedup.cs" />
     <Compile Include="../../../Core/MarketData/OpfCandle.cs" Link="OpfCandle.cs" />
+    <Compile Include="../../../Core/Profiles/ProfileCatalog.cs" Link="ProfileCatalog.cs" />
+    <Compile Include="../../../Core/Profiles/ProfileSelection.cs" Link="ProfileSelection.cs" />
+    <Compile Include="../../../Core/Profiles/InstrumentProfile.cs" Link="InstrumentProfile.cs" />
+    <Compile Include="../../../Core/Profiles/ExecutionProfile.cs" Link="ExecutionProfile.cs" />
+    <Compile Include="../../../Core/Versions/StrategyVersions.cs" Link="StrategyVersions.cs" />
   </ItemGroup>
 </Project>

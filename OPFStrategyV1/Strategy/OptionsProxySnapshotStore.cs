@@ -70,20 +70,25 @@ internal static class OptionsProxySnapshotStore
         }
     }
 
-    public static EsOptionsProxySnapshot ReadAsOf(string archivePath, DateTime decisionUtc)
+    public static EsOptionsProxySnapshot ReadAsOf(string archivePath, DateTime decisionUtc, string? requiredSource = null)
     {
         var context = EsOptionsProxySnapshot.Unavailable("asOfSnapshotMissing");
         if (!File.Exists(archivePath)) return context;
         using var stream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
         using var reader = new StreamReader(stream);
+        var latestTime = DateTime.MinValue;
         while (reader.ReadLine() is { } line)
         {
             EsOptionsProxySnapshot? row;
             // An append interrupted by shutdown must not discard earlier valid history.
             try { row = JsonSerializer.Deserialize<EsOptionsProxySnapshot>(line); }
             catch (JsonException) { continue; }
-            if (row is { Status: "ModelReady" or "PriceReady" } && row.CapturedAtUtc <= decisionUtc &&
-                (context.Status is not ("ModelReady" or "PriceReady") || row.CapturedAtUtc > context.CapturedAtUtc)) context = row;
+            if (row is null || row.CapturedAtUtc > decisionUtc || row.CapturedAtUtc <= latestTime) continue;
+            if (requiredSource is not null && row.Source != requiredSource) continue;
+            if (row.Status is not ("ModelReady" or "PriceReady") &&
+                !(requiredSource is not null && row.Status == "Unavailable")) continue;
+            context = row;
+            latestTime = row.CapturedAtUtc;
         }
         return context;
     }

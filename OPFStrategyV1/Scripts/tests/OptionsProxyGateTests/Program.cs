@@ -179,6 +179,15 @@ try
     Check(OptionsProxySnapshotStore.ReadLatest(latest) == next, "consumer observes updated ES snapshot");
     Check(OptionsProxySnapshotStore.ReadLatest(latest).HasAnchorFor(now.Date, now.AddSeconds(10)), "anchor survives file round trip and restart");
     Check(OptionsProxySnapshotStore.ReadAsOf(archive, now) == first, "Replay excludes future ES context");
+    const string rithmic = "RITHMIC_ES_OPTION_CHAIN_RESPONSE";
+    Check(OptionsProxySnapshotStore.ReadAsOf(archive, now, rithmic).Status == "Unavailable", "Replay cannot use a legacy source for Rithmic options");
+    var rithmicModel = first with { Source = rithmic, CapturedAtUtc = now.AddSeconds(-20) };
+    OptionsProxySnapshotStore.Publish(latest, archive, rithmicModel, true);
+    Check(OptionsProxySnapshotStore.ReadAsOf(archive, now, rithmic) == rithmicModel, "Replay ignores newer legacy evidence");
+    var disconnected = EsOptionsProxySnapshot.Unavailable("optionFeedReloading") with { Source = rithmic, CapturedAtUtc = now.AddSeconds(-5) };
+    OptionsProxySnapshotStore.Publish(latest, archive, disconnected, true);
+    OptionsProxySnapshotStore.Publish(latest, archive, rithmicModel with { CapturedAtUtc = now.AddSeconds(1) }, true);
+    Check(OptionsProxySnapshotStore.ReadAsOf(archive, now, rithmic) == disconnected, "Replay honors route loss and ignores future recovery");
     Check(OptionsProxySnapshotStore.ReadAsOf(archive, now.AddMinutes(-1)).Status == "Unavailable", "Replay without prior history remains blocked");
     File.AppendAllText(archive, "{interrupted");
     Check(OptionsProxySnapshotStore.ReadAsOf(archive, now) == first, "interrupted archive tail preserves valid evidence");

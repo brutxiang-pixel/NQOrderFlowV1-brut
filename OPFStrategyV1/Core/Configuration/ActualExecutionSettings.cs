@@ -174,6 +174,10 @@ public sealed record ActualExecutionSettings(
 
     private static string NormalizeExecutionMode(string? executionMode, bool enableActualOrders, bool manualAlertEnabled)
     {
+#if OPF_ATAS_X
+        if (string.Equals(executionMode, "Disabled", StringComparison.OrdinalIgnoreCase))
+            return "Disabled";
+#endif
         if (string.Equals(executionMode, "Auto", StringComparison.OrdinalIgnoreCase))
             return "Auto";
         if (string.Equals(executionMode, "ManualAlert", StringComparison.OrdinalIgnoreCase))

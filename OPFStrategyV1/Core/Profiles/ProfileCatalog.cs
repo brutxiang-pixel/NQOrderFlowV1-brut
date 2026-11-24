@@ -133,5 +133,17 @@ public static class ProfileCatalog
 
     public static string SupportedInstrumentProfileNames => string.Join(", ", InstrumentProfiles.Keys);
 
+    public static string ContractRoot(string? code) => System.Text.RegularExpressions.Regex.Match(
+        code?.Trim() ?? string.Empty, @"^(MNQ|MES|MGC|NQ|ES|GC)(?=$|[^A-Z]|[FGHJKMNQUVXZ][0-9])",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase).Value.ToUpperInvariant();
+
+    public static ExecutionProfile ChartExecutionDefault(InstrumentProfile instrument) =>
+        ExecutionProfile.MnqOneContractTarget150() with
+        {
+            Name = instrument.Instrument + "_Auto",
+            MaxContracts = instrument.Instrument == "MNQ" ? 2 : 1,
+            MaxRiskPerTradeDollars = instrument.MaxRiskPointsHard * instrument.PointValue
+        };
+
     public static string SupportedExecutionProfileNames => string.Join(", ", ExecutionProfiles.Keys);
 }

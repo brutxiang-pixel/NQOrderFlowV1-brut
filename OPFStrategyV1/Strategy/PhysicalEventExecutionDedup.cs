@@ -6,6 +6,9 @@ internal static class PhysicalEventExecutionDedup
 {
     private static readonly ConcurrentDictionary<string, DateTime> Claims = new(StringComparer.Ordinal);
 
+    internal static string ContractScope(string account, string? contract, bool replay) =>
+        $"{account}|{contract?.ToUpperInvariant()}|{replay}";
+
     public static bool IsClaimed(string key, DateTime now) =>
         Claims.TryGetValue(key, out var claimedAt) && (now < claimedAt || now - claimedAt <= TimeSpan.FromHours(6));
 

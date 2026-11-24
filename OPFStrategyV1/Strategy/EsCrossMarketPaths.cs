@@ -52,14 +52,14 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private void EvaluateEsCrossMarketPaths(OpfCandle candle, bool intraday = false)
     {
-        if (!IsEsOptionsConsumer || _snapshot is null)
+        if (!IsEsOptionsTradingChart || _snapshot is null)
             return;
         if (!EnableEsOptionsEntryGate) return;
 
         EsOptionsProxySnapshot context;
         if (IsHistoricalReplayTime(candle.Time))
         {
-            try { context = OptionsProxySnapshotStore.ReadAsOf(OptionsProxyArchivePath, DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc)); }
+            try { context = ReadEsOptionsProxyArchiveAsOf(DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc)); }
             catch (Exception ex) when (ex is System.IO.IOException or System.Text.Json.JsonException or UnauthorizedAccessException) { return; }
         }
         else
@@ -165,11 +165,10 @@ public sealed partial class OpeningPullbackFailureStrategy
     private void SubmitEsCrossMarketCandidate(OpfCandle candle, string path, TradeSide side, string reason, bool intraday, decimal trigger)
     {
         if (!IsReplayExecutionPathEnabled(path)) return;
-        if (Security?.Code?.StartsWith("ES", StringComparison.OrdinalIgnoreCase) == true) return;
         var decisionUtc = IsHistoricalReplayTime(candle.Time) ? DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc) : DateTime.UtcNow;
         EsOptionsProxySnapshot context;
         if (IsHistoricalReplayTime(candle.Time))
-            context = OptionsProxySnapshotStore.ReadAsOf(OptionsProxyArchivePath, decisionUtc);
+            context = ReadEsOptionsProxyArchiveAsOf(decisionUtc);
         else lock (_esOptionsProxySync) context = _esOptionsProxy;
         context = WithLevelEvent(context, path, side, decisionUtc);
         var gateRisk = Math.Abs(candle.Close - (side == TradeSide.Long ? candle.Low - .5m : candle.High + .5m));
@@ -204,7 +203,6 @@ public sealed partial class OpeningPullbackFailureStrategy
         if (intraday && path == "ESResponseAlignedBreakout")
         {
             var replay = IsHistoricalReplayTime(candle.Time);
-            // NQ and MNQ share index prices; isolate accounts and live/Replay streams.
             var anchorKey = BreakoutAnchorKey(side, replay);
             var proposed = new EsBreakoutEvent(candle.Time, side == TradeSide.Long, candle.Close, stop, trigger);
             var anchor = BreakoutAnchors.AddOrUpdate(anchorKey, proposed, (_, old) =>
@@ -297,7 +295,6 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private string BreakoutAnchorKey(TradeSide side, bool replay)
     {
-        var contract = (Security?.Code ?? string.Empty).Replace("MNQ", "NQ", StringComparison.OrdinalIgnoreCase);
-        return $"{LiveAccountScope.FromPortfolio(Portfolio)}|{contract}|{side}|{replay}";
+        return $"{PhysicalEventExecutionDedup.ContractScope(LiveAccountScope.FromPortfolio(Portfolio), Security?.Code, replay)}|{side}";
     }
 }

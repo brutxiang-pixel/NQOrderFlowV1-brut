@@ -27,6 +27,18 @@ if (!fills.TryAccept("fill-1", "ENTRY") || fills.TryAccept("fill-1", "ENTRY") ||
 Console.WriteLine("PASS fill ID deduplication, partial fills and missing ID fallback");
 
 var utc = new DateTimeOffset(2026, 10, 13, 1, 20, 30, TimeSpan.Zero);
+var stoppedExit = new StoppedExitFills();
+var stopFillTime = new DateTime(2026, 11, 23, 14, 15, 10, DateTimeKind.Utc);
+stoppedExit.Add("sl-1", 26788m, 1m, stopFillTime, "SL");
+stoppedExit.Add("sl-1", 26788m, 1m, stopFillTime, "SL");
+if (stoppedExit.Summarize(1m, 1m) is not null || stoppedExit.Summarize(1m, null) is not null ||
+    stoppedExit.Summarize(2m, 0m) is not null || stoppedExit.Summarize(1m, 0m) != (26788m, stopFillTime, "SL"))
+    throw new Exception("A delayed exit requires a verified flat position and exact fill quantity without duplicates.");
+stoppedExit.Add("sl-2", 26787.5m, 1m, stopFillTime.AddSeconds(1), "SL");
+if (stoppedExit.Summarize(1m, 0m) is not null ||
+    stoppedExit.Summarize(2m, 0m) != (26787.75m, stopFillTime.AddSeconds(1), "SL"))
+    throw new Exception("A stopped strategy must reject overfills and summarize partial exits at actual prices.");
+Console.WriteLine("PASS stopped strategy late exit, exact quantity, duplicate fills and position reconciliation");
 var switchExit = FeishuTradeNotification.FormatCompletedExit("switch", "MNQ", "Long", 100m, 99m, "TIME_STOP", -1m, -2m,
     "ESResponseAlignedBreakout", utc, 1.18m, filledQuantity: 1m, exitDetail: "NativeIcebergDirectionSwitch");
 if (!switchExit.Contains("策略性换向退出（冰山新方向）") || switchExit.Contains("FLATTEN"))

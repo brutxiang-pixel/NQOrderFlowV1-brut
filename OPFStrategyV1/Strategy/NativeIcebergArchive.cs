@@ -3,7 +3,13 @@ using System.Text.Json;
 namespace OPFStrategyV1.Strategy;
 
 public sealed record NativeIcebergEvent(string Instrument, long Id, DateTime Time, decimal Price, bool IsLong,
-    decimal Hidden, decimal Filled, bool Deleted, DateTime CapturedAtUtc);
+    decimal Hidden, decimal Filled, bool Deleted, DateTime CapturedAtUtc)
+{
+    internal bool IsFreshScalpRefreshAfter(NativeIcebergEvent? previous) =>
+        !Deleted && Hidden > 0m && Time <= CapturedAtUtc && CapturedAtUtc - Time <= TimeSpan.FromSeconds(3) &&
+        (previous is null || !previous.Deleted && Time > previous.Time && Price == previous.Price &&
+            IsLong == previous.IsLong && Hidden > previous.Hidden && Filled > previous.Filled);
+}
 
 public static class NativeIcebergArchive
 {

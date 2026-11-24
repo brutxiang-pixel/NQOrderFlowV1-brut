@@ -10,6 +10,11 @@ namespace OPFStrategyV1.Strategy;
 public sealed partial class OpeningPullbackFailureStrategy
 {
     private sealed record IcebergEvent(string Instrument, long Id, DateTime Time, decimal Price, TradeSide Side, decimal Hidden, decimal Filled, bool Deleted);
+#if OPF_ATAS_X
+    private sealed record MboSweepEvidence(DateTime Time, decimal Price, decimal Volume, decimal PriceRange, int PriceLevels, int TradeCount, ATAS.DataFeedsCore.TradeDirection Direction);
+    private readonly ConcurrentQueue<MboSweepEvidence> _mboSweepUpdates = new();
+    private readonly List<MboSweepEvidence> _recentMboSweeps = [];
+#endif
     private sealed record IcebergSwitch(CandidateSignal Signal, decimal Stop, decimal Price, DateTime Expires, string EventKey);
     private static readonly ConcurrentDictionary<string, IcebergEvent> NativeIcebergBus = new();
     private IMboAnalyticsDataProvider? _nativeMboProvider;
@@ -25,11 +30,182 @@ public sealed partial class OpeningPullbackFailureStrategy
     private readonly ConcurrentQueue<NativeIcebergEvent> _nativeIcebergArchiveWrites = new();
     private NativeIcebergEvent[] _nativeIcebergReplay = Array.Empty<NativeIcebergEvent>();
     private DateTime _nativeIcebergReplayDay;
+#if OPF_ATAS_X
+    [System.ComponentModel.Category("OPF Iceberg")]
+    [System.ComponentModel.DisplayName("Enable Iceberg Absorption Scalp")]
+    public bool EnableMnqIcebergAbsorptionScalp { get; set; }
+    private sealed record ScalpSegment(NativeIcebergEvent Event, DateTime AttackAfter, DateTime AttemptedAt = default);
+    private sealed class ScalpFunnel
+    {
+        public int ConfirmedIds, Segments, InferredSegments, Signals, Submitted, Filled;
+        public readonly Dictionary<string, int> EvaluationBlocks = new();
+    }
+    private readonly Dictionary<string, NativeIcebergEvent> _scalpRefreshes = new();
+    private readonly Dictionary<string, ScalpSegment> _scalpIcebergs = new();
+    private readonly IcebergReplenishment _scalpReplenishment = new();
+    private readonly Dictionary<(decimal Price, bool IsLong), DateTime> _scalpAttempts = new();
+    private readonly ConcurrentDictionary<DateTime, ScalpFunnel> _scalpFunnels = new();
+    private DateTime _nextScalpFunnelLog;
+    private (decimal Price, DateTime At) _scalpBid, _scalpAsk;
+
+    private ScalpFunnel ScalpFunnelFor(DateTime time) => _scalpFunnels.GetOrAdd(GlobexTradingDayKey(time), _ => new());
+
+    private void ObserveScalpRefresh(NativeIcebergEvent update)
+    {
+        var key = update.Instrument + "|" + update.Id;
+        _scalpRefreshes.TryGetValue(key, out var previous);
+        if (previous is not null && (update.Time < previous.Time || previous.Deleted)) return;
+        if (update.Deleted)
+        {
+            _scalpRefreshes[key] = update;
+            _scalpIcebergs.Remove(key);
+            return;
+        }
+        var funnel = ScalpFunnelFor(update.CapturedAtUtc);
+        if (previous is null) Interlocked.Increment(ref funnel.ConfirmedIds);
+        if (previous is null || update.Time > previous.Time && (update.Hidden > previous.Hidden || update.Filled > previous.Filled))
+            _scalpRefreshes[key] = update;
+        if (!update.IsFreshScalpRefreshAfter(previous)) return;
+        var attackAfter = previous?.Time ?? default;
+        if (_scalpIcebergs.TryGetValue(key, out var current))
+        {
+            if (current.AttackAfter > attackAfter) attackAfter = current.AttackAfter;
+            if (current.AttemptedAt > attackAfter) attackAfter = current.AttemptedAt;
+        }
+        _scalpIcebergs[key] = new ScalpSegment(update, attackAfter);
+        Interlocked.Increment(ref funnel.Segments);
+    }
+
+    private bool ReportScalpFunnel(OpfCandle live, bool signal, string status)
+    {
+        var totals = ScalpFunnelFor(live.Time);
+        if (!signal && status is not ("Disabled" or "NoFreshSegment"))
+            totals.EvaluationBlocks[status] = totals.EvaluationBlocks.GetValueOrDefault(status) + 1;
+        if (live.Time >= _nextScalpFunnelLog)
+        {
+            _nextScalpFunnelLog = live.Time.AddMinutes(1);
+            var blocks = string.Join(",", totals.EvaluationBlocks.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value}"));
+            LogLiveReadinessInfo($"ICEBERG_SCALP_FUNNEL day={GlobexTradingDayKey(live.Time):yyyy-MM-dd} at={live.Time:O} product={Security?.Code} status={status} " +
+                $"confirmedIds={Volatile.Read(ref totals.ConfirmedIds)} segments={Volatile.Read(ref totals.Segments)} inferredSegments={Volatile.Read(ref totals.InferredSegments)} signals={Volatile.Read(ref totals.Signals)} " +
+                $"iocSubmitted={Volatile.Read(ref totals.Submitted)} entryFilled={Volatile.Read(ref totals.Filled)} evaluationBlocks={blocks}");
+        }
+        return signal;
+    }
+
+    private void ObserveScalpQuote(MarketDataArg quote)
+    {
+        if (!EnableMnqIcebergAbsorptionScalp || !IntradayEntryPolicy.IsIcebergScalpProduct(Security?.Code)) return;
+        lock (_intradaySync)
+        {
+            if (quote.IsBid && quote.Time >= _scalpBid.At) _scalpBid = (quote.Price, quote.Time);
+            if (quote.IsAsk && quote.Time >= _scalpAsk.At) _scalpAsk = (quote.Price, quote.Time);
+        }
+    }
+
+    private void ObserveScalpDepth(MarketDataArg depth)
+    {
+        if (_isStoppingActualExecution || !EnableMnqIcebergAbsorptionScalp || depth.Time < _intradayStartedUtc ||
+            !IntradayEntryPolicy.IsIcebergScalpProduct(Security?.Code) || !(depth.IsBid || depth.IsAsk)) return;
+        IcebergReplenishment.Signal? signal;
+        lock (_intradaySync)
+            signal = _scalpReplenishment.Depth(depth.Price, depth.IsBid, depth.Volume, depth.Time, DateTime.UtcNow);
+        if (signal is null) return;
+        Interlocked.Increment(ref ScalpFunnelFor(signal.ConfirmedAt).InferredSegments);
+        LogLiveReadinessInfo($"ICEBERG_SCALP_REPLENISHMENT product={Security?.Code} id={signal.Id} price={signal.Price} side={(signal.IsLong ? "Bid" : "Ask")} attack={signal.AttackTime:O} at={signal.ConfirmedAt:O}");
+    }
+
+    private string? ScalpQuoteBlock(DateTime now, decimal tick, out decimal bid, out decimal ask)
+    {
+        lock (_intradaySync)
+        {
+            var bestBid = BestBid;
+            var bestAsk = BestAsk;
+            bid = bestBid?.Price ?? 0m;
+            ask = bestAsk?.Price ?? 0m;
+            var bidAt = IntradayEntryPolicy.ScalpQuoteTime(bid, bestBid?.Time ?? default, _scalpBid, now);
+            var askAt = IntradayEntryPolicy.ScalpQuoteTime(ask, bestAsk?.Time ?? default, _scalpAsk, now);
+            return IntradayEntryPolicy.ScalpQuoteBlock(bid, ask, bidAt, askAt, now, tick);
+        }
+    }
+
+    private bool EvaluateIcebergAbsorptionScalp(OpfCandle live)
+    {
+        var path = IntradayEntryPolicy.IcebergAbsorptionScalpPath;
+        if (_snapshot is null || !IntradayEntryPolicy.IsIcebergScalpProduct(_snapshot.InstrumentProfile.Instrument) || IsHistoricalReplayTime(live.Time)) return false;
+        if (!EnableMnqIcebergAbsorptionScalp) return ReportScalpFunnel(live, false, "Disabled");
+        var fresh = _scalpIcebergs.Where(x => x.Value.AttemptedAt == default &&
+            x.Value.Event.CapturedAtUtc <= live.Time && live.Time - x.Value.Event.CapturedAtUtc <= TimeSpan.FromSeconds(5));
+        IcebergReplenishment.Signal[] inferred;
+        lock (_intradaySync) inferred = _scalpReplenishment.FreshSignals(live.Time);
+        if (!fresh.Any() && inferred.Length == 0) return ReportScalpFunnel(live, false, "NoFreshSegment");
+        if (_pendingIcebergSwitch is not null || ActiveReplayExecutions().Count != 0 || GetCurrentAccountPosition() != 0m)
+            return ReportScalpFunnel(live, false, "PositionBusy");
+        var tick = _snapshot.InstrumentProfile.TickSize;
+        if (ScalpQuoteBlock(live.Time, tick, out var bid, out var ask) is { } quoteBlock)
+            return ReportScalpFunnel(live, false, quoteBlock);
+        if (IntradayEntryPolicy.ScalpTargetTicks * tick <= _actualCommissionPerContractRoundTrip / _snapshot.InstrumentProfile.PointValue + 2m * tick)
+            return ReportScalpFunnel(live, false, "FeeGuard");
+        (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] tape;
+        lock (_intradaySync) tape = _entryTape.Where(x => x.Time > live.Time.AddSeconds(-10) && x.Time <= live.Time).ToArray();
+        var status = "WaitingForTape";
+        var nativeCandidates = fresh.Select(x => (Key: x.Key, Price: x.Value.Event.Price, IsLong: x.Value.Event.IsLong,
+            Time: x.Value.Event.Time, Received: x.Value.Event.CapturedAtUtc, Id: x.Value.Event.Id, AttackAfter: x.Value.AttackAfter,
+            Inferred: (IcebergReplenishment.Signal?)null));
+        var inferredCandidates = inferred.Select(x => (Key: $"{Security?.Code}|REFILL|{x.Id}", x.Price, x.IsLong,
+            Time: x.AttackTime, Received: x.ConfirmedAt, x.Id, AttackAfter: default(DateTime), Inferred: (IcebergReplenishment.Signal?)x));
+        foreach (var candidate in nativeCandidates.OrderByDescending(x => x.Received).Concat(inferredCandidates.OrderByDescending(x => x.Received)))
+        {
+            var (key, price, isLong, time, received, id, attackAfter, replenishment) = candidate;
+            var side = isLong ? TradeSide.Long : TradeSide.Short;
+            if (replenishment is null && (!_nativeIcebergs.TryGetValue(key, out var latest) || latest.Deleted || latest.Price != price || latest.Side != side)) continue;
+            if (_scalpAttempts.TryGetValue((price, isLong), out var attempted) && IntradayEntryPolicy.IsSameScalpAbsorption(received, attempted))
+            {
+                status = "DuplicateAbsorption";
+                continue;
+            }
+            var stop = IntradayEntryPolicy.IcebergScalpStop(isLong, price, tick, time, received, live.Time, tape, attackAfter, replenishment?.RefilledAt);
+            var entry = isLong ? ask : bid;
+            if (stop is not { } stopPrice) continue;
+            if ((isLong ? bid <= price : ask >= price) || !IntradayEntryPolicy.ScalpRiskReady(isLong, entry, stopPrice, tick))
+            {
+                status = "EntryPriceOrRisk";
+                continue;
+            }
+            if (replenishment is null)
+                _scalpIcebergs[key] = _scalpIcebergs[key] with { AttemptedAt = live.Time };
+            else
+            {
+                lock (_intradaySync) if (!_scalpReplenishment.Consume(replenishment)) continue;
+            }
+            foreach (var expired in _scalpAttempts.Where(x => live.Time - x.Value > TimeSpan.FromSeconds(10)).Select(x => x.Key).ToArray())
+                _scalpAttempts.Remove(expired);
+            _scalpAttempts[(price, isLong)] = live.Time;
+            Interlocked.Increment(ref ScalpFunnelFor(live.Time).Signals);
+            var source = replenishment is null ? "NativeRefresh" : "InferredReplenishment";
+            var detail = $"source={source}|level={price}|received={received:O}|bid={bid}|ask={ask}";
+            var score = new ScoreBreakdown(path, 100m, 45m, true,
+                new[] { new ScoreComponent("IcebergAndTape", detail, true, 100m, 100m, "LocalAbsorptionReclaim") });
+            var signal = new CandidateSignal($"SC-{(replenishment is null ? "" : "R-")}{id}-{time:HHmmssfff}", _snapshot.SnapshotId, live.Time, live.Bar, side,
+                SetupType.TrendPullback, SignalStage.Triggered, null, score, score, new[] { "IntradayReaction", $"ICE_EVENT_KEY:{key}|{time.Ticks}" });
+            LogLiveReadinessInfo($"ICEBERG_ABSORPTION_SCALP signal={signal.SignalId} product={Security?.Code} side={side} {detail} stop={stopPrice}");
+            _researchLogger?.AppendSignal(signal);
+            TrySubmitReplayExecution(signal, live with { Open = entry, High = entry, Low = entry, Close = entry }, path, stopPrice,
+                Math.Abs(entry - stopPrice), allowDelayedExpansion: false);
+            return ReportScalpFunnel(live, true, "Signal");
+        }
+        return ReportScalpFunnel(live, false, status);
+    }
+#endif
     private string NativeIcebergArchiveDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         OPFStrategyV1.Core.Versions.StrategyVersions.PlatformDataDirectory, "StrategyLogs", "OPFStrategyV1", "NativeIcebergArchive");
 
     private void InitializeNativeIceberg()
     {
+#if OPF_ATAS_X
+        _scalpIcebergs.Clear();
+        _scalpRefreshes.Clear();
+        lock (_intradaySync) _scalpBid = _scalpAsk = default;
+#endif
         _nativeIcebergs.Clear();
         _nativeIcebergConsumed.Clear();
         _nativeIcebergHistory.Clear();
@@ -39,6 +215,10 @@ public sealed partial class OpeningPullbackFailureStrategy
         _nativeIcebergStructureDay = default;
         _nativeIcebergReplayDay = default;
         while (_nativeIcebergUpdates.TryDequeue(out _)) { }
+#if OPF_ATAS_X
+        while (_mboSweepUpdates.TryDequeue(out _)) { }
+        _recentMboSweeps.Clear();
+#endif
         try
         {
             if (DataProvider is null || !DataProvider.TryGetMboAnalyticsDataProvider(out _nativeMboProvider))
@@ -50,6 +230,9 @@ public sealed partial class OpeningPullbackFailureStrategy
             foreach (var record in _nativeMboProvider!.GetMboIcebergs(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow))
                 if (record.NativeRefreshConfirmed && record.Hidden > 0m) _nativeIcebergHistory.Add(record.OrderId);
             _nativeMboProvider!.MboIcebergsChanged += OnNativeIcebergsChanged;
+#if OPF_ATAS_X
+            _nativeMboProvider.MboAnnotatedTradesEmitted += OnNativeMboAnnotatedTrades;
+#endif
             _ = SubscribeNativeIcebergAsync();
         }
         catch (Exception ex)
@@ -88,6 +271,9 @@ public sealed partial class OpeningPullbackFailureStrategy
         if (_nativeMboProvider is not null)
         {
             _nativeMboProvider.MboIcebergsChanged -= OnNativeIcebergsChanged;
+#if OPF_ATAS_X
+            _nativeMboProvider.MboAnnotatedTradesEmitted -= OnNativeMboAnnotatedTrades;
+#endif
             _nativeMboProvider.UnsubscribeMboAnalyticsData();
             _nativeMboProvider = null;
         }
@@ -123,6 +309,22 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
     }
 
+#if OPF_ATAS_X
+    private void OnNativeMboAnnotatedTrades(IReadOnlyList<MboAnnotatedTrade> trades)
+    {
+        foreach (var trade in trades)
+        {
+            if (trade.Time < _intradayStartedUtc || trade.Time > DateTime.UtcNow.AddSeconds(1) ||
+                trade.Price <= 0m || trade.AggressorEventVolume <= 0m || trade.AggressorPriceLevels < 2 ||
+                trade.AggressorPriceRange <= 0m || trade.Direction == ATAS.DataFeedsCore.TradeDirection.Between)
+                continue;
+            _mboSweepUpdates.Enqueue(new MboSweepEvidence(trade.Time, trade.AggressorLastPrice,
+                trade.AggressorEventVolume, trade.AggressorPriceRange, trade.AggressorPriceLevels,
+                trade.AggressorTradeCount, trade.Direction));
+        }
+    }
+#endif
+
     private static string IcebergContract(string instrument) => instrument.StartsWith("MNQ", StringComparison.OrdinalIgnoreCase)
         ? instrument[1..] : instrument.StartsWith("MES", StringComparison.OrdinalIgnoreCase) ? instrument[1..] : instrument;
 
@@ -135,6 +337,10 @@ public sealed partial class OpeningPullbackFailureStrategy
         var day = GlobexTradingDayKey(live.Time);
         if (day != _nativeIcebergStructureDay)
         {
+#if OPF_ATAS_X
+            _scalpIcebergs.Clear();
+            _scalpRefreshes.Clear();
+#endif
             _nativeIcebergStructureDay = day;
             _nativeIcebergStructures.Clear();
             _nativeIcebergFailures.Clear();
@@ -144,11 +350,21 @@ public sealed partial class OpeningPullbackFailureStrategy
             _nativeIcebergStructures.Remove(key);
         while (_nativeIcebergArchiveWrites.TryDequeue(out var archive))
         {
+#if OPF_ATAS_X
+            if (GlobexTradingDayKey(archive.CapturedAtUtc) == day &&
+                IntradayEntryPolicy.IsLocalIcebergScalp(Security?.Code ?? "", archive.Instrument))
+                ObserveScalpRefresh(archive);
+#endif
             try { NativeIcebergArchive.Append(NativeIcebergArchiveDirectory, archive); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             { LogLiveReadinessInfo($"NATIVE_ICEBERG_ARCHIVE_FAILED {ex.GetType().Name}"); }
         }
         while (_nativeIcebergUpdates.TryDequeue(out var update)) _nativeIcebergs[update.Instrument + "|" + update.Id] = update;
+#if OPF_ATAS_X
+        if (EvaluateIcebergAbsorptionScalp(live)) return;
+        while (_mboSweepUpdates.TryDequeue(out var sweep)) _recentMboSweeps.Add(sweep);
+        _recentMboSweeps.RemoveAll(x => live.Time < x.Time || live.Time - x.Time > TimeSpan.FromSeconds(10));
+#endif
         if (IsHistoricalReplayTime(live.Time))
         {
             if (_nativeIcebergReplayDay != live.Time.Date)
@@ -202,6 +418,10 @@ public sealed partial class OpeningPullbackFailureStrategy
             var item = pair.Value;
             if (!IsHistoricalReplayTime(live.Time) && item.Time < _intradayStartedUtc) continue;
             if (live.Time < item.Time || live.Time - item.Time > TimeSpan.FromSeconds(90) || item.Deleted || _nativeIcebergConsumed.Contains(pair.Key)) continue;
+#if OPF_ATAS_X
+            if (EnableMnqIcebergAbsorptionScalp && _scalpIcebergs.TryGetValue(pair.Key, out var scalpSegment) &&
+                scalpSegment.Event.CapturedAtUtc <= live.Time && live.Time - scalpSegment.Event.CapturedAtUtc <= TimeSpan.FromSeconds(5)) continue;
+#endif
             if (!NativeIcebergStructureReady(pair.Key, item, live)) continue;
             var tick = _snapshot!.InstrumentProfile.TickSize;
             var trigger = item.Price;
@@ -218,6 +438,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             lock (_intradaySync) tape = _entryTape.Where(x => x.Time <= live.Time && x.Time >= live.Time.AddSeconds(-10)).ToArray();
             var signedVolume = tape.Sum(x => x.Signed);
             var volume = tape.Sum(x => x.Volume);
+            var tapeRatio = volume > 0m ? (item.Side == TradeSide.Long ? signedVolume : -signedVolume) / volume : 0m;
             if (volume <= 0m || (item.Side == TradeSide.Long ? signedVolume : -signedVolume) / volume < .15m)
             {
                 _reactionHolds.Remove(key);
@@ -226,6 +447,17 @@ public sealed partial class OpeningPullbackFailureStrategy
                 continue;
             }
             var structure = _nativeIcebergStructures[pair.Key];
+#if OPF_ATAS_X
+            var nearestSweep = _recentMboSweeps
+                .Where(x => x.Time <= live.Time && live.Time - x.Time <= TimeSpan.FromSeconds(10) &&
+                    Math.Abs(x.Price - item.Price) <= Math.Max(tick * 8m, CalculateAtr14(live) * .2m))
+                .OrderByDescending(x => x.Time)
+                .FirstOrDefault();
+            var sweepAligned = nearestSweep is not null &&
+                (item.Side == TradeSide.Long
+                    ? nearestSweep.Direction == ATAS.DataFeedsCore.TradeDirection.Buy
+                    : nearestSweep.Direction == ATAS.DataFeedsCore.TradeDirection.Sell);
+#endif
             var stop = IntradayEntryPolicy.IcebergStructuralStop(item.Side == TradeSide.Long, live.Close, item.Price,
                 structure.FrozenLow, structure.FrozenHigh, structure.FrozenAtr, tick);
             var risk = Math.Abs(live.Close - stop);
@@ -252,7 +484,10 @@ public sealed partial class OpeningPullbackFailureStrategy
                 new[]
                 {
                     new ScoreComponent("NqNativeIceberg", $"hidden={item.Hidden}|filled={item.Filled}|source={item.Instrument}", true, 100m, 100m, "NativeMboOnly"),
-                    new ScoreComponent("NqLocalOrderFlow", $"signed={signedVolume:0.##}|volume={volume:0.##}|ratio={(volume == 0 ? 0 : (item.Side == TradeSide.Long ? signedVolume : -signedVolume) / volume):0.000}", true, 100m, 100m, "10sTape"),
+                    new ScoreComponent("NqLocalOrderFlow", $"signed={signedVolume:0.##}|volume={volume:0.##}|ratio={tapeRatio:0.000}", true, 100m, 100m, "10sTape"),
+#if OPF_ATAS_X
+                    new ScoreComponent("NativeMboSweep", nearestSweep is null ? "none" : $"side={nearestSweep.Direction}|qty={nearestSweep.Volume:0.##}|levels={nearestSweep.PriceLevels}|range={nearestSweep.PriceRange:0.##}|trades={nearestSweep.TradeCount}|aligned={sweepAligned}", nearestSweep is not null, sweepAligned ? 100m : 0m, sweepAligned ? 100m : 0m, "MboAnnotatedTradesEmitted"),
+#endif
                     new ScoreComponent("EsOptionsContext", $"status={es.Status}|coverage={es.Coverage:0.000}|captured={es.CapturedAtUtc:O}", optionContext, optionContext ? 100m : 0m, optionContext ? 100m : 0m, "OptionalSizingEvidence"),
                     new ScoreComponent("EsPriceReaction", $"current={es.UnderlyingPrice}|m1={es.UnderlyingPrice60sAgo}", esReaction, esReaction ? 100m : 0m, esReaction ? 100m : 0m, "OptionalSizingEvidence")
                 });
@@ -262,7 +497,12 @@ public sealed partial class OpeningPullbackFailureStrategy
             var exitStructure = item.Side == TradeSide.Long ? Math.Min(item.Price, structure.FrozenLow) : Math.Max(item.Price, structure.FrozenHigh);
             signal = signal with { SkipReasons = signal.SkipReasons.Concat(new[] { $"ICE_EXIT_STRUCTURE:{exitStructure.ToString(System.Globalization.CultureInfo.InvariantCulture)}" }).ToArray() };
             _researchLogger?.AppendSignal(signal);
-            LogLiveReadinessInfo($"NATIVE_ICEBERG_REACTION event={pair.Key} side={item.Side} price={item.Price} sourceTime={item.Time:O} reactionTime={live.Time:O} hidden={item.Hidden} filled={item.Filled} tapeRatio={(volume == 0 ? 0 : (item.Side == TradeSide.Long ? signedVolume : -signedVolume) / volume):0.000} score={size.Score}/3 qty={size.Quantity} esStatus={es.Status}");
+            var sweepDetail = string.Empty;
+#if OPF_ATAS_X
+            if (nearestSweep is not null)
+                sweepDetail = $" mboSweepAligned={sweepAligned} mboSweepTime={nearestSweep.Time:O} mboSweepLevels={nearestSweep.PriceLevels}";
+#endif
+            LogLiveReadinessInfo($"NATIVE_ICEBERG_REACTION event={pair.Key} side={item.Side} price={item.Price} sourceTime={item.Time:O} reactionTime={live.Time:O} hidden={item.Hidden} filled={item.Filled} tapeRatio={tapeRatio:0.000}{sweepDetail} score={size.Score}/3 qty={size.Quantity} esStatus={es.Status}");
             var active = ActiveReplayExecutions();
             if (_manualAlertEnabled) { SubmitNativeIceberg(signal, live, stop, pair.Key); break; }
             var arbitration = IntradayEntryPolicy.IcebergArbitration(active.Count, active.Any(x => IsIcebergExecutionPath(x.ResearchPath)),
@@ -405,6 +645,7 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private void MarkNativeIcebergFailed(ReplayExecutionState execution)
     {
+        if (execution.ResearchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath) return;
         var time = execution.ExitTime ?? execution.CreatedTime;
         if (_nativeIcebergFailures.TryGetValue(execution.Side, out var previous) && previous.Time >= time) return;
         (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] before;
@@ -436,7 +677,8 @@ public sealed partial class OpeningPullbackFailureStrategy
     private void ScheduleIcebergProtectionV219(decimal marketPrice)
     {
         if (_snapshot is null || marketPrice <= 0m) return;
-        foreach (var execution in ActiveReplayExecutions().Where(x => IsIcebergExecutionPath(x.ResearchPath) && x.BracketSubmitted && !x.IcebergProtectionPending))
+        foreach (var execution in ActiveReplayExecutions().Where(x => IsIcebergExecutionPath(x.ResearchPath) &&
+            x.ResearchPath != IntradayEntryPolicy.IcebergAbsorptionScalpPath && x.BracketSubmitted && !x.IcebergProtectionPending))
         {
             if (!execution.ProtectionObservationStarted) continue;
             var isLong = execution.Side == TradeSide.Long;
@@ -503,26 +745,40 @@ public sealed partial class OpeningPullbackFailureStrategy
             execution.IcebergObservedSince ??= live.Time;
             var favorable = execution.Side == TradeSide.Long ? live.Close - execution.EntryAvgPrice : execution.EntryAvgPrice - live.Close;
             execution.IcebergMaxFavorable = Math.Max(execution.IcebergMaxFavorable, favorable);
-            (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] tape;
-            lock (_intradaySync) tape = _entryTape.Where(x => x.Time <= live.Time && x.Time >= live.Time.AddSeconds(-10)).ToArray();
-            if (!IntradayEntryPolicy.IcebergNoProgressExit(execution.Side == TradeSide.Long, live.Time - execution.IcebergObservedSince.Value,
-                execution.IcebergMaxFavorable, execution.InitialRiskPoints, live.Close, execution.IcebergExitStructure,
-                tape.Sum(x => x.Signed), tape.Sum(x => x.Volume)))
-            { execution.IcebergFailureSince = null; continue; }
+            var scalp = execution.ResearchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath;
+            if (scalp && (execution.EntryFillTime == default || !execution.BracketSubmitted ||
+                !IntradayEntryPolicy.ScalpNoProgress(live.Time - execution.EntryFillTime,
+                    Math.Max(execution.IcebergMaxFavorable, execution.ActualMfePoints),
+                    _snapshot!.InstrumentProfile.TickSize))) continue;
+            if (!scalp)
+            {
+                (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] tape;
+                lock (_intradaySync) tape = _entryTape.Where(x => x.Time <= live.Time && x.Time >= live.Time.AddSeconds(-10)).ToArray();
+                if (!IntradayEntryPolicy.IcebergNoProgressExit(execution.Side == TradeSide.Long, live.Time - execution.IcebergObservedSince.Value,
+                    execution.IcebergMaxFavorable, execution.InitialRiskPoints, live.Close, execution.IcebergExitStructure,
+                    tape.Sum(x => x.Signed), tape.Sum(x => x.Volume)))
+                { execution.IcebergFailureSince = null; continue; }
+            }
             if (execution.IcebergFailureLastObserved is not { } lastObserved || live.Time - lastObserved > TimeSpan.FromSeconds(1))
                 execution.IcebergFailureSince = live.Time;
             execution.IcebergFailureLastObserved = live.Time;
             execution.IcebergFailureSince ??= live.Time;
-            if (live.Time - execution.IcebergFailureSince.Value < TimeSpan.FromSeconds(5) ||
+            if ((!scalp && live.Time - execution.IcebergFailureSince.Value < TimeSpan.FromSeconds(5)) ||
                 execution.TimeStopExitPendingV208 || execution.EmergencyFlattenSubmitted) continue;
             execution.TimeStopExitPendingV208 = true;
-            execution.TimeStopReason = "IcebergNoProgressStructureFailed";
+            execution.TimeStopReason = scalp ? "IcebergAbsorptionScalpNoProgress20s" : "IcebergNoProgressStructureFailed";
             execution.TimeStopReferencePriceV209 = live.Close;
             AppendExecutionEvent(execution, "ICEBERG_STRUCTURE_EXIT_TRIGGERED_V214", "TIME_STOP", live.Close, RemainingExecutionQuantity(execution),
                 $"elapsed={(live.Time - execution.CreatedTime).TotalSeconds:0.0}|structure={execution.IcebergExitStructure}|mfe={execution.IcebergMaxFavorable}");
             EnqueueExecutionAction("IcebergStructureExit", async () =>
             {
                 if (execution.ExitCompleted) return;
+                if (scalp && (execution.ProtectiveExitCallbackPendingV187 || !IsWorkingExecutionOrder(execution.StopOrder) ||
+                    !IsWorkingExecutionOrder(execution.TargetOrder)))
+                {
+                    execution.TimeStopExitPendingV208 = false;
+                    return;
+                }
                 var position = GetCurrentAccountPosition();
                 var qty = Math.Min(Math.Abs(position), RemainingExecutionQuantity(execution));
                 if (Portfolio is null || Security is null || qty <= 0m || Math.Sign(position) != (execution.Side == TradeSide.Long ? 1 : -1))
@@ -539,13 +795,13 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
     }
 
-    private static bool IsIcebergExecutionPath(string path) => path is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction";
+    private static bool IsIcebergExecutionPath(string path) => path is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction" or IntradayEntryPolicy.IcebergAbsorptionScalpPath;
 
     private EsOptionsProxySnapshot ReadEsOptionsProxyAsOf(DateTime time)
     {
         if (IsHistoricalReplayTime(time))
         {
-            try { return OptionsProxySnapshotStore.ReadAsOf(OptionsProxyArchivePath, DateTime.SpecifyKind(time, DateTimeKind.Utc)); }
+            try { return ReadEsOptionsProxyArchiveAsOf(DateTime.SpecifyKind(time, DateTimeKind.Utc)); }
             catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)
             { return EsOptionsProxySnapshot.Unavailable($"replay:{ex.GetType().Name}"); }
         }

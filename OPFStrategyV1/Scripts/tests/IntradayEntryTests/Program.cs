@@ -3,6 +3,125 @@ using OPFStrategyV1.Core.MarketData;
 
 var now = new DateTime(2026, 10, 14, 10, 0, 0, DateTimeKind.Utc);
 void Check(bool value, string name) { if (!value) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); }
+
+IcebergReplenishment.Signal? SimulateRefills(IcebergReplenishment detector, bool isLong, bool withTrades, int secondRoundMs = 500)
+{
+    void Depth(int ms, decimal size) => detector.Depth(3619.8m, isLong, size, now.AddMilliseconds(ms), now.AddMilliseconds(ms));
+    void Attack(int ms) { if (withTrades) detector.Trade(3619.8m, !isLong, now.AddMilliseconds(ms), now.AddMilliseconds(ms)); }
+    Depth(0, 2m);
+    Attack(100);
+    Depth(110, 1m);
+    Depth(120, 2m);
+    Depth(121, 2m);
+    Check(detector.FreshSignals(now.AddMilliseconds(121)).Length == 0, "one refill and a duplicate update do not qualify");
+    Depth(secondRoundMs - 10, 1m);
+    Attack(secondRoundMs);
+    return detector.Depth(3619.8m, isLong, 2m, now.AddMilliseconds(secondRoundMs + 10), now.AddMilliseconds(secondRoundMs + 10));
+}
+
+foreach (bool isLong in new[] { true, false })
+{
+    var detector = new IcebergReplenishment();
+    var refill = SimulateRefills(detector, isLong, true);
+    Check(refill is { Price: 3619.8m } && refill.IsLong == isLong, "two matched rebalances qualify on the correct passive side");
+    Check(detector.FreshSignals(now.AddSeconds(6)).Length == 0, "inferred refill expires after the reaction window");
+    Check(refill is not null && detector.Consume(refill) && !detector.Consume(refill), "inferred candidate is consumed once");
+}
+var cancelledRefill = new IcebergReplenishment();
+var beforeCancel = SimulateRefills(cancelledRefill, true, true);
+cancelledRefill.Depth(3619.8m, true, 0m, now.AddMilliseconds(600), now.AddMilliseconds(600));
+Check(beforeCancel is not null && !cancelledRefill.Consume(beforeCancel), "empty depth invalidates the inference before submission");
+var brokenRefill = new IcebergReplenishment();
+var beforeBreak = SimulateRefills(brokenRefill, false, true);
+brokenRefill.Trade(3619.9m, true, now.AddMilliseconds(600), now.AddMilliseconds(600));
+Check(beforeBreak is not null && !brokenRefill.Consume(beforeBreak), "a trade through the absorption price invalidates the inference");
+Check(SimulateRefills(new IcebergReplenishment(), true, false) is null, "depth-only churn cannot qualify");
+Check(SimulateRefills(new IcebergReplenishment(), true, true, 2300) is null, "two refills outside the two-second window cannot qualify");
+var inferredLong = SimulateRefills(new IcebergReplenishment(), true, true)!;
+var absorbed = new[] { (now.AddMilliseconds(100), 3619.8m, 1m, -1m), (inferredLong.AttackTime, 3619.8m, 1m, -1m) };
+var afterRefill = absorbed.Concat(new[] { (now.AddMilliseconds(600), 3619.9m, 1m, 1m), (now.AddMilliseconds(700), 3619.9m, 1m, 1m) }).ToArray();
+Check(IntradayEntryPolicy.IcebergScalpStop(true, inferredLong.Price, .1m, inferredLong.AttackTime, inferredLong.ConfirmedAt,
+    now.AddMilliseconds(750), absorbed) is null &&
+    IntradayEntryPolicy.IcebergScalpStop(true, inferredLong.Price, .1m, inferredLong.AttackTime, inferredLong.ConfirmedAt,
+        now.AddMilliseconds(750), afterRefill) == 3619.7m, "inferred GC refill uses the same tape reclaim and structural stop rules");
+Check(IntradayEntryPolicy.IsSameScalpAbsorption(now.AddSeconds(4), now) &&
+    !IntradayEntryPolicy.IsSameScalpAbsorption(now.AddSeconds(6), now), "scalp suppresses duplicate evidence within the shared reaction window");
+
+foreach (var root in new[] { "MNQ", "NQ", "ES", "MES", "GC", "MGC" })
+{
+    Check(IntradayEntryPolicy.IsLocalIcebergScalp(root + "Z6", root.ToLowerInvariant() + "Z6") &&
+        !IntradayEntryPolicy.IsLocalIcebergScalp(root + "Z6", root + "H7"),
+        "scalp uses only the matching " + root + " contract");
+}
+Check(!IntradayEntryPolicy.IsLocalIcebergScalp("MNQZ6", "NQZ6") &&
+    !IntradayEntryPolicy.IsIcebergScalpProduct("RTYZ6"), "scalp rejects cross-product and unsupported instruments");
+var firstIceberg = new NativeIcebergEvent("MNQZ6", 42, now, 100m, true, 5m, 10m, false, now.AddMilliseconds(300));
+var refreshedIceberg = firstIceberg with { Time = now.AddSeconds(6), CapturedAtUtc = now.AddSeconds(7), Hidden = 8m, Filled = 14m };
+Check(firstIceberg.IsFreshScalpRefreshAfter(null) &&
+    refreshedIceberg.IsFreshScalpRefreshAfter(firstIceberg), "same native order can open a later replenishment segment");
+Check(!firstIceberg.IsFreshScalpRefreshAfter(refreshedIceberg) &&
+    !refreshedIceberg.IsFreshScalpRefreshAfter(refreshedIceberg) &&
+    !(refreshedIceberg with { Hidden = firstIceberg.Hidden }).IsFreshScalpRefreshAfter(firstIceberg) &&
+    !(refreshedIceberg with { Filled = firstIceberg.Filled }).IsFreshScalpRefreshAfter(firstIceberg) &&
+    !(refreshedIceberg with { Deleted = true }).IsFreshScalpRefreshAfter(firstIceberg) &&
+    !refreshedIceberg.IsFreshScalpRefreshAfter(firstIceberg with { Deleted = true }) &&
+    !(refreshedIceberg with { CapturedAtUtc = now.AddSeconds(10) }).IsFreshScalpRefreshAfter(firstIceberg),
+    "scalp rejects repeats, stale and out-of-order updates, deletions and non-replenishment");
+foreach (var side in new[] { 1m, -1m })
+{
+    var isLong = side > 0m;
+    var received = now.AddMilliseconds(400);
+    var decision = now.AddSeconds(1);
+    var scalpTape = new (DateTime Time, decimal Price, decimal Volume, decimal Signed)[]
+    {
+        (now.AddMilliseconds(-400), 100m, 2m, -2m * side),
+        (now.AddMilliseconds(-100), 100m - .25m * side, 2m, -2m * side),
+        (now.AddMilliseconds(500), 100m + .25m * side, 2m, 2m * side),
+        (now.AddMilliseconds(800), 100m + .5m * side, 2m, 2m * side)
+    };
+    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, decision, scalpTape) == 100m - .5m * side,
+        "scalp separates absorption and post-receipt reclaim " + isLong);
+    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, decision, scalpTape, now.AddMilliseconds(-200)) is null,
+        "a later segment cannot reuse attack prints from a preceding attempt " + isLong);
+    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, now.AddMilliseconds(600), scalpTape) is null &&
+        IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, now.AddSeconds(6), scalpTape) is null,
+        "scalp rejects future tape and expired iceberg " + isLong);
+    scalpTape[2] = (scalpTape[2].Time, 100m - .5m * side, 2m, 2m * side);
+    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, decision, scalpTape) is null,
+        "scalp rejects a breached level " + isLong);
+    Check(IntradayEntryPolicy.ScalpRiskReady(isLong, 100m + 2m * side, 100m, .25m) &&
+        !IntradayEntryPolicy.ScalpRiskReady(isLong, 100m + 2.25m * side, 100m, .25m) &&
+        !IntradayEntryPolicy.ScalpRiskReady(isLong, 100m - .25m * side, 100m, .25m), "scalp stop cap and side " + isLong);
+}
+Check(IntradayEntryPolicy.ScalpQuoteReady(100m, 100.5m, now, now, now, .25m) &&
+    !IntradayEntryPolicy.ScalpQuoteReady(100m, 100.75m, now, now, now, .25m) &&
+    !IntradayEntryPolicy.ScalpQuoteReady(100m, 100.5m, now.AddSeconds(-3), now, now, .25m), "scalp checks both quote ages and spread");
+Check(IntradayEntryPolicy.ScalpNoProgress(TimeSpan.FromSeconds(20), .5m, .25m) &&
+    !IntradayEntryPolicy.ScalpNoProgress(TimeSpan.FromSeconds(19), .5m, .25m) &&
+    !IntradayEntryPolicy.ScalpNoProgress(TimeSpan.FromSeconds(20), .75m, .25m), "scalp exits only without sufficient post-fill progress");
+
+foreach (var (root, tick, point, maxRisk, contracts) in new[]
+{
+    ("MNQ", .25m, 2m, 25m, 2), ("NQ", .25m, 20m, 25m, 1),
+    ("ES", .25m, 50m, 12m, 1), ("MES", .25m, 5m, 12m, 1),
+    ("GC", .10m, 100m, 20m, 1), ("MGC", .10m, 10m, 20m, 1)
+})
+{
+    var catalog = OPFStrategyV1.Core.Profiles.ProfileCatalog.Select(root + "_0.1", "MNQ_1Contract_Target150_200");
+    var instrument = catalog.InstrumentProfile;
+    var execution = OPFStrategyV1.Core.Profiles.ProfileCatalog.ChartExecutionDefault(instrument);
+    Check(OPFStrategyV1.Core.Profiles.ProfileCatalog.ContractRoot(root + "Z26") == root &&
+        !catalog.UsedInstrumentFallback && instrument.TickSize == tick && instrument.PointValue == point &&
+        instrument.MaxRiskPointsHard == maxRisk && execution.MaxContracts == contracts,
+        root + " chart profile matches the contract");
+    Check(IntradayEntryPolicy.ScalpRiskReady(true, 100m, 100m - 8m * instrument.TickSize, instrument.TickSize) &&
+        !IntradayEntryPolicy.ScalpRiskReady(false, 100m, 100m + 9m * instrument.TickSize, instrument.TickSize),
+        root + " scalp stop uses the contract tick size");
+#if OPF_ATAS_X
+    Check(IntradayEntryPolicy.AvailableEntryQuantity(root + "Z26", 3m, 0m) == contracts, root + " X quantity cap");
+#endif
+}
+Check(OPFStrategyV1.Core.Profiles.ProfileCatalog.ContractRoot("MCLZ26") == string.Empty, "unsupported contract does not select a profile");
 var longIcebergId = "20261109-1336-Short-727-CrossMarketIcebergOrderFlowReaction-ICE-ICE-NQZ6-6884993374025-20261109133617-MNQZ6-61053c86";
 Check(($"OPF|{longIcebergId}|RUNNER_SL|signal")[..128].Split('|')[2] == "RUNNER_", "reproduce actual truncated runner role at 128 characters");
 foreach (var runner in new[] { false, true })
@@ -171,6 +290,19 @@ Check(IntradayEntryPolicy.AvailableEntryQuantity("NQZ6", 1m, 1m) == 0m, "NQ seco
 Check(IntradayEntryPolicy.AvailableEntryQuantity("MNQZ6", 2m, 1m) == 1m, "MNQ second slot uses remaining single contract");
 Check(IntradayEntryPolicy.AvailableEntryQuantity("MNQZ6", 2m, 3m) == 0m, "legacy over-cap position cannot add");
 Check(PhysicalEventExecutionDedup.TryClaim(eventKey, now), "first strategy claims physical event");
+var nqScope = PhysicalEventExecutionDedup.ContractScope("sim", "NQZ6", false);
+var mnqScope = PhysicalEventExecutionDedup.ContractScope("sim", "MNQZ6", false);
+Check(PhysicalEventExecutionDedup.TryClaim(mnqScope + "|ES_EVENT_KEY:shared", now) &&
+    PhysicalEventExecutionDedup.TryClaim(nqScope + "|ES_EVENT_KEY:shared", now) &&
+    !PhysicalEventExecutionDedup.TryClaim(nqScope + "|ES_EVENT_KEY:shared", now), "shared ES event executes independently in MNQ and NQ, once per contract");
+Check(IntradayEntryPolicy.ScalpQuoteTime(100m, now, (99.75m, now), now) == now &&
+    IntradayEntryPolicy.ScalpQuoteTime(100m, default, (99.75m, now), now) == default,
+    "current quote uses its own timestamp and never borrows a mismatched callback timestamp");
+Check(IntradayEntryPolicy.IcebergScalpStop(true, inferredLong.Price, .1m, inferredLong.AttackTime, now.AddMilliseconds(720),
+    now.AddMilliseconds(750), afterRefill, refilledAt: inferredLong.RefilledAt) == 3619.7m &&
+    IntradayEntryPolicy.IcebergScalpStop(true, inferredLong.Price, .1m, inferredLong.AttackTime, now.AddMilliseconds(720),
+        now.AddMilliseconds(710), afterRefill, refilledAt: inferredLong.RefilledAt) is null,
+    "refill reaction uses exchange event time but cannot trigger before confirmation receipt");
 Check(!PhysicalEventExecutionDedup.TryClaim(eventKey, now.AddSeconds(1)), "same account and event cannot submit twice");
 PhysicalEventExecutionDedup.Release(eventKey);
 Check(PhysicalEventExecutionDedup.TryClaim(eventKey, now.AddSeconds(2)), "aborted preflight releases event claim for later attempt");

@@ -10,5 +10,7 @@
     <Compile Include="../../../Strategy/LiveAccountScope.cs" Link="LiveAccountScope.cs" />
     <Compile Include="../../../Strategy/LegacyPnlIdentity.cs" Link="LegacyPnlIdentity.cs" />
     <Compile Include="../../../Core/MarketData/OpfCandle.cs" Link="OpfCandle.cs" />
+    <Compile Include="../../../Core/Profiles/*.cs" Link="Profiles/%(Filename).cs" />
+    <Compile Include="../../../Core/Versions/StrategyVersions.cs" Link="StrategyVersions.cs" />
   </ItemGroup>
 </Project>

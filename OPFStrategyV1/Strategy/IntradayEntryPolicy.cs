@@ -1,4 +1,5 @@
 using OPFStrategyV1.Core.MarketData;
+using OPFStrategyV1.Core.Profiles;
 
 namespace OPFStrategyV1.Strategy;
 
@@ -6,6 +7,67 @@ public sealed record CompletedFrame(string Name, DateTime Time, decimal High, de
 
 public static class IntradayEntryPolicy
 {
+    internal const string IcebergAbsorptionScalpPath = "IcebergAbsorptionScalp";
+    internal const int ScalpMaxRiskTicks = 8;
+    internal const int ScalpTargetTicks = 12;
+
+    internal static bool IsIcebergScalpProduct(string? productCode) =>
+        ProfileCatalog.ContractRoot(productCode) is "MNQ" or "NQ" or "ES" or "MES" or "GC" or "MGC";
+
+    internal static bool IsLocalIcebergScalp(string chart, string source) =>
+        IsIcebergScalpProduct(chart) && string.Equals(chart, source, StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsSameScalpAbsorption(DateTime received, DateTime attempted) =>
+        received <= attempted.AddSeconds(5);
+
+    internal static decimal? IcebergScalpStop(bool isLong, decimal level, decimal tick, DateTime eventTime,
+        DateTime received, DateTime now, IReadOnlyList<(DateTime Time, decimal Price, decimal Volume, decimal Signed)> tape,
+        DateTime attackAfter = default, DateTime? refilledAt = null)
+    {
+        var age = now - received;
+        if (tick <= 0m || eventTime > received || received - eventTime > TimeSpan.FromSeconds(3) ||
+            age < TimeSpan.Zero || age > TimeSpan.FromSeconds(5)) return null;
+        var side = isLong ? 1m : -1m;
+        var attack = tape.Where(x => x.Time > attackAfter && x.Time >= eventTime.AddSeconds(-2) && x.Time <= eventTime &&
+            Math.Abs(x.Price - level) <= tick && side * x.Signed < 0m).ToArray();
+        if (attack.Length < 2) return null;
+        var after = tape.Where(x => x.Time > (refilledAt ?? received) && x.Time <= now).ToArray();
+        var invalidation = level - side * 2m * tick;
+        if (after.Length < 2 || after.Any(x => side * (x.Price - invalidation) <= 0m)) return null;
+        var last = after[^1];
+        if (now - last.Time > TimeSpan.FromMilliseconds(750) || side * (last.Price - level) < tick || side * last.Signed <= 0m)
+            return null;
+        var latest = after.Where(x => x.Time >= last.Time.AddSeconds(-1)).ToArray();
+        if (latest.Count(x => side * x.Signed > 0m && side * (x.Price - level) >= tick) < 2 ||
+            side * latest.Sum(x => x.Signed) < latest.Sum(x => x.Volume) * .2m) return null;
+        var extreme = isLong ? attack.Concat(after).Min(x => x.Price) : attack.Concat(after).Max(x => x.Price);
+        return (isLong ? Math.Min(level, extreme) : Math.Max(level, extreme)) - side * tick;
+    }
+
+    internal static bool ScalpQuoteReady(decimal bid, decimal ask, DateTime bidAt, DateTime askAt, DateTime now, decimal tick) =>
+        ScalpQuoteBlock(bid, ask, bidAt, askAt, now, tick) is null;
+
+    internal static DateTime ScalpQuoteTime(decimal price, DateTime snapshotAt, (decimal Price, DateTime At) callback, DateTime now)
+    {
+        if (snapshotAt > now) snapshotAt = default;
+        return callback.Price == price && callback.At <= now && callback.At > snapshotAt ? callback.At : snapshotAt;
+    }
+
+    internal static string? ScalpQuoteBlock(decimal bid, decimal ask, DateTime bidAt, DateTime askAt, DateTime now, decimal tick)
+    {
+        if (tick <= 0m || bid <= 0m || ask <= bid) return "QuoteMissingOrCrossed";
+        if (ask - bid > 2m * tick) return "QuoteSpreadWide";
+        if (bidAt > now || askAt > now || now - bidAt > TimeSpan.FromSeconds(2) || now - askAt > TimeSpan.FromSeconds(2))
+            return "QuoteTimestampInvalid";
+        return null;
+    }
+
+    internal static bool ScalpRiskReady(bool isLong, decimal entry, decimal stop, decimal tick) =>
+        (isLong ? entry - stop : stop - entry) >= tick && Math.Abs(entry - stop) <= ScalpMaxRiskTicks * tick;
+
+    internal static bool ScalpNoProgress(TimeSpan elapsed, decimal mfe, decimal tick) =>
+        elapsed >= TimeSpan.FromSeconds(20) && mfe < 3m * tick;
+
     public const decimal IcebergTargetR = EntryExitPolicyParameters.IcebergTargetR;
     public const decimal IcebergBreakEvenR = EntryExitPolicyParameters.IcebergBreakEvenR;
 
@@ -28,7 +90,11 @@ public static class IntradayEntryPolicy
 
     public static decimal ProductQuantityLimit(string productCode) =>
         productCode.StartsWith("MNQ", StringComparison.OrdinalIgnoreCase) ? 2m :
+#if OPF_ATAS_X
+        1m;
+#else
         productCode.StartsWith("NQ", StringComparison.OrdinalIgnoreCase) ? 1m : 3m;
+#endif
 
     public static decimal AvailableEntryQuantity(string productCode, decimal requested, decimal managedQuantity) =>
         Math.Max(0m, Math.Min(requested, ProductQuantityLimit(productCode) - managedQuantity));

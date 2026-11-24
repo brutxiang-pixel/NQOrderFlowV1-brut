@@ -8,6 +8,10 @@ using System.ComponentModel;
 using OPFStrategyV1.Core.MarketData;
 using OPFStrategyV1.Core.Signals;
 using OPFStrategyV1.Core.Versions;
+#if OPF_ATAS_X
+using OFT.Platform.Core.Providers.Interfaces;
+using Utils.Common.Collections.Synchronized;
+#endif
 
 namespace OPFStrategyV1.Strategy;
 
@@ -35,6 +39,12 @@ public sealed partial class OpeningPullbackFailureStrategy
     private readonly Dictionary<string, DateTime> _esQuoteReceived = new(StringComparer.OrdinalIgnoreCase);
     private decimal? _esObservedPrice;
     private DateTime? _esPriceReceived;
+#if OPF_ATAS_X
+    private const string EsOptionChainSource = "RITHMIC_ES_OPTION_CHAIN_RESPONSE";
+    private IDataFeedConnector? _rithmicOptionsConnector;
+#else
+    private const string EsOptionChainSource = "ES_OPTION_CHAIN_RESPONSE";
+#endif
 
     [Category("OPF Options")]
     [DisplayName("Enable ES Options Entry Gate")]
@@ -42,11 +52,29 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private static string OptionsProxyArchivePath => Path.Combine(GexConfigDirectory(), "OPF_es_options_proxy.jsonl");
     private static string OptionsProxyLatestPath => Path.Combine(GexConfigDirectory(), "OPF_es_options_proxy_latest.json");
+
+    private EsOptionsProxySnapshot ReadEsOptionsProxyArchiveAsOf(DateTime decisionUtc)
+    {
+#if OPF_ATAS_X
+        return OptionsProxySnapshotStore.ReadAsOf(OptionsProxyArchivePath, decisionUtc, EsOptionChainSource);
+#else
+        return OptionsProxySnapshotStore.ReadAsOf(OptionsProxyArchivePath, decisionUtc);
+#endif
+    }
     private bool IsEsOptionsSource => _esOptionsChartRoot == "ES";
+#if OPF_ATAS_X
+    private bool IsEsOptionsConsumer => _esOptionsChartRoot is "NQ" or "MNQ" or "MES";
+    private bool IsEsOptionsTradingChart => IsEsOptionsSource || IsEsOptionsConsumer;
+#else
     private bool IsEsOptionsConsumer => _esOptionsChartRoot is "NQ" or "MNQ";
+    private bool IsEsOptionsTradingChart => IsEsOptionsConsumer;
+#endif
 
     private void InitializeEsOptionsProxy()
     {
+#if OPF_ATAS_X
+        if (!IsEsOptionsTradingChart) return;
+#endif
         _esObservedPrice = null;
         _esPriceReceived = null;
         _esQuoteReceived.Clear();
@@ -55,6 +83,10 @@ public sealed partial class OpeningPullbackFailureStrategy
         try
         {
             saved = OptionsProxySnapshotStore.ReadLatest(OptionsProxyLatestPath);
+#if OPF_ATAS_X
+            if (saved.Source != EsOptionChainSource)
+                saved = EsOptionsProxySnapshot.Unavailable("waitingForRithmicOptionChain");
+#endif
             if (saved.HasAnchorFor(OptionsProxyExpiry.ExchangeDate(DateTime.UtcNow), DateTime.UtcNow))
             {
                 _esAnchorTradingDay = saved.AnchorTradingDay;
@@ -67,7 +99,11 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { }
         lock (_esOptionsProxySync)
-            _esOptionsProxy = saved.Status == "ModelReady" ? saved : EsOptionsProxySnapshot.Unavailable(IsEsOptionsConsumer ? "waitingForEsSource" : "initializing");
+            _esOptionsProxy = saved.Status == "ModelReady"
+#if OPF_ATAS_X
+                && !IsEsOptionsSource
+#endif
+                ? saved : EsOptionsProxySnapshot.Unavailable(IsEsOptionsConsumer ? "waitingForEsSource" : "initializing");
         _ = RunEsOptionsProxyAsync(_esOptionsProxyCancellation.Token);
     }
 
@@ -84,14 +120,22 @@ public sealed partial class OpeningPullbackFailureStrategy
                     lock (_esOptionsProxySync)
                     {
                         token.ThrowIfCancellationRequested();
-                        if (_esOptionsProxyInitStarted && _esOptionsProxyOptions.All(x => OptionsProxyExpiry.ToUtc(x.Expiration, x.Code ?? "") <= DateTime.UtcNow))
+                        var reload = _esOptionsProxyOptions.All(x => OptionsProxyExpiry.ToUtc(x.Expiration, x.Code ?? "") <= DateTime.UtcNow);
+#if OPF_ATAS_X
+                        reload |= _rithmicOptionsConnector?.IsConnected != true;
+#endif
+                        if (_esOptionsProxyInitStarted && reload)
                         {
                             ClearEsOptionsSubscriptions();
                             _esOptionsProxyInitStarted = false;
                             expired = true;
                         }
                     }
-                    if (expired) SetEsOptionsProxyTransient("seriesExpiredReloading");
+                    if (expired)
+                    {
+                        lock (_esOptionsProxySync)
+                            SetEsOptionsProxy(EsOptionsProxySnapshot.Unavailable("optionFeedReloading"));
+                    }
                 }
                 if (IsEsOptionsSource && !_esOptionsProxyInitStarted)
                 {
@@ -121,12 +165,19 @@ public sealed partial class OpeningPullbackFailureStrategy
         {
             var replayTime = _lastResearchCandle?.Time;
             var context = replayTime.HasValue && IsHistoricalReplayTime(replayTime.Value)
-                ? OptionsProxySnapshotStore.ReadAsOf(OptionsProxyArchivePath, DateTime.SpecifyKind(replayTime.Value, DateTimeKind.Utc))
+                ? ReadEsOptionsProxyArchiveAsOf(DateTime.SpecifyKind(replayTime.Value, DateTimeKind.Utc))
                 : OptionsProxySnapshotStore.ReadLatest(OptionsProxyLatestPath);
+#if OPF_ATAS_X
+            if (!(replayTime.HasValue && IsHistoricalReplayTime(replayTime.Value)) &&
+                context.Status == "ModelReady" && context.Source != EsOptionChainSource)
+                context = EsOptionsProxySnapshot.Unavailable("waitingForRithmicOptionChain");
+#endif
             lock (_esOptionsProxySync)
             {
                 token.ThrowIfCancellationRequested();
+#if !OPF_ATAS_X
                 if (context.Status is "ModelReady" or "PriceReady" || _esOptionsProxy.Status != "ModelReady")
+#endif
                     SetEsOptionsProxy(context);
             }
         }
@@ -142,6 +193,9 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private async Task InitializeEsOptionsProxyAsync(CancellationToken token, CancellationToken lifetime)
     {
+#if OPF_ATAS_X
+        var phase = "chartOptionsProvider";
+#endif
         void State(EsOptionsProxySnapshot state)
         {
             if (lifetime.IsCancellationRequested) return;
@@ -154,17 +208,61 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
         try
         {
-            State(EsOptionsProxySnapshot.Unavailable("loadingSeries"));
             var provider = DataProvider?.OptionsDataProvider;
+#if OPF_ATAS_X
+            if (provider?.IsAvailable != true)
+            {
+                State(EsOptionsProxySnapshot.Unavailable("chartOptionsProviderUnavailable"));
+                return;
+            }
+
+            phase = "verifyRithmicRoute";
+            var instrument = Security is { } security && FindAccountTradingCore() is IInstrumentProvider instruments
+                ? instruments.TryGetInstrument(security)
+                : null;
+            var routes = instrument?.SecuritiesByConnector.Sync(securities => securities
+                .Where(x => x.Value is not null && x.Key.IsConnected &&
+                    x.Key is IOptionsDataFeed { IsOptionsDataUnavailable: false })
+                .ToArray());
+            if (routes is not { Length: > 0 })
+            {
+                State(EsOptionsProxySnapshot.Unavailable("waitingForRithmicEsContract"));
+                return;
+            }
+            if (routes.Any(x => x.Key.GetType().Assembly.GetName().Name != "OFT.Rithmic"))
+            {
+                State(EsOptionsProxySnapshot.Unavailable("chartOptionsRouteNotRithmicOnly"));
+                return;
+            }
+
+            phase = "getRithmicSeries";
+            State(EsOptionsProxySnapshot.Unavailable("loadingRithmicSeries"));
+#else
+            State(EsOptionsProxySnapshot.Unavailable("loadingSeries"));
             if (provider is null || !provider.IsAvailable) { State(EsOptionsProxySnapshot.Unavailable("providerUnavailable")); return; }
+#endif
             var series = await provider.GetOptionSeriesAsync(token).WaitAsync(token).ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
             var selected = series.Where(x => x.Expiration.Date >= OptionsProxyExpiry.ExchangeDate(DateTime.UtcNow)).OrderBy(x => x.Expiration).FirstOrDefault();
             if (selected.Equals(default(OptionSeries))) { State(EsOptionsProxySnapshot.Unavailable("noFutureSeries")); return; }
             State(EsOptionsProxySnapshot.Unavailable("loadingChain"));
+#if OPF_ATAS_X
+            phase = "getRithmicChain";
+#endif
             var chain = (await provider.GetOptionsAsync(selected, token).WaitAsync(token).ConfigureAwait(false))
                 .Where(IsEsOrSpxOption).Where(x => x.StrikePrice is > 0 && x.OptionType is not null).ToArray();
             token.ThrowIfCancellationRequested();
+#if OPF_ATAS_X
+            var route = routes.FirstOrDefault(x => x.Key.IsConnected && chain.Length > 0 &&
+                chain.All(option => ReferenceEquals(option.UnderlyingSecurity, x.Value)));
+            if (chain.Length > 0 && route.Key is null)
+            {
+                State(EsOptionsProxySnapshot.Unavailable("rithmicChainOriginUnverified"));
+                return;
+            }
+            phase = "subscribeRithmicQuotes";
+            string? subscriptionError = null;
+#endif
             var reference = OptionUnderlyingPrice(chain);
             var options = reference.HasValue
                 ? chain.OrderBy(x => Math.Abs(x.StrikePrice!.Value - reference.Value)).Take(240).ToArray()
@@ -176,21 +274,47 @@ public sealed partial class OpeningPullbackFailureStrategy
                 lock (_esOptionsProxySync)
                 {
                 token.ThrowIfCancellationRequested();
-                _esOptionsProxyOptions.Add(option);
                 try
                 {
                     var subscription = provider.SubscribeToOption(option);
                     if (subscription is null) continue;
+#if OPF_ATAS_X
+                    if (!ReferenceEquals(subscription.Option, option))
+                    {
+                        subscription.Dispose();
+                        subscriptionError ??= "subscriptionOptionMismatch";
+                        continue;
+                    }
+                    _rithmicOptionsConnector = route.Key;
+#endif
+                    _esOptionsProxyOptions.Add(option);
                     subscription.Changed += OnEsOptionsProxyQuoteChanged;
                     _esOptionsProxySubscriptions[ProxyOptionKey(option)] = subscription;
                 }
-                catch { }
+                catch (Exception
+#if OPF_ATAS_X
+                    ex
+#endif
+                )
+                {
+#if OPF_ATAS_X
+                    subscriptionError ??= ex.GetType().Name;
+#endif
+                }
                 }
             }
             lock (_esOptionsProxySync)
             {
                 token.ThrowIfCancellationRequested();
                 _esOptionsProxyInitStarted = _esOptionsProxySubscriptions.Count > 0;
+#if OPF_ATAS_X
+                if (!_esOptionsProxyInitStarted)
+                {
+                    State(EsOptionsProxySnapshot.Unavailable($"initFailed:{phase}:{subscriptionError ?? "noSubscriptions"}"));
+                    return;
+                }
+                phase = "recalculateRithmicModel";
+#endif
                 RecalculateEsOptionsProxy(selected.Expiration);
             }
         }
@@ -200,7 +324,11 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
         catch (Exception ex)
         {
+#if OPF_ATAS_X
+            SetEsOptionsProxyTransient($"initFailed:{phase}:{ex.GetType().Name}");
+#else
             SetEsOptionsProxyTransient($"initFailed:{ex.GetType().Name}");
+#endif
         }
         finally
         {
@@ -217,6 +345,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         return System.Text.RegularExpressions.Regex.IsMatch(text ?? string.Empty, @"^ES(?=$|[^A-Z]|[FGHJKMNQUVXZ][0-9])", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
     }
 
+
     private void OnEsOptionsProxyQuoteChanged(IOptionQuoteSubscription subscription)
     {
         lock (_esOptionsProxySync)
@@ -231,6 +360,13 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private void RecalculateEsOptionsProxy(DateTime expiration)
     {
+#if OPF_ATAS_X
+        if (_rithmicOptionsConnector?.IsConnected != true)
+        {
+            SetEsOptionsProxy(EsOptionsProxySnapshot.Unavailable("rithmicOptionsDisconnected"));
+            return;
+        }
+#endif
         foreach (var option in _esOptionsProxyOptions)
         {
             var summaryOi = _esOptionsProxySubscriptions.GetValueOrDefault(ProxyOptionKey(option))?.Summary?.OpenInterest;
@@ -318,7 +454,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
         var atmReady = exposures.Any(x => x.Option.StrikePrice == atm && x.Option.OptionType == OptionTypes.Call) &&
             exposures.Any(x => x.Option.StrikePrice == atm && x.Option.OptionType == OptionTypes.Put);
-        SetEsOptionsProxy(new EsOptionsProxySnapshot("ModelReady", "ES_OPTION_CHAIN_RESPONSE", "ES", now, expiration, atm, callWall, putWall, zeroGamma, expectedMove, normalizedGamma, regime, coverage, "UnsignedGammaOi", "Gamma*OI concentrations; dealer sign unknown; observed ES response")
+        SetEsOptionsProxy(new EsOptionsProxySnapshot("ModelReady", EsOptionChainSource, "ES", now, expiration, atm, callWall, putWall, zeroGamma, expectedMove, normalizedGamma, regime, coverage, "UnsignedGammaOi", "Gamma*OI concentrations; dealer sign unknown; observed ES response")
         {
             EvidenceSchema = 2,
             UnderlyingObservedAtUtc = _esPriceReceived,
@@ -383,20 +519,37 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private void SetEsOptionsProxy(EsOptionsProxySnapshot snapshot)
     {
-        if (IsEsOptionsSource && snapshot.Status == "Unavailable" && _esObservedPrice is > 0m && _esPriceReceived is { } received)
+#if !OPF_ATAS_X
+        if (IsEsOptionsSource && snapshot.Status == "Unavailable" &&
+            _esObservedPrice is > 0m && _esPriceReceived is { } received)
             snapshot = _esOptionsProxy with { Status = "PriceReady", EvidenceSchema = 2, CapturedAtUtc = received,
                 UnderlyingObservedAtUtc = received, UnderlyingPrice = _esObservedPrice, Detail = snapshot.Detail };
+#endif
         var previous = _esOptionsProxy;
-        _esOptionsProxy = snapshot;
         var now = DateTime.UtcNow;
+#if OPF_ATAS_X
+        if (IsEsOptionsSource && snapshot.Status == "Unavailable")
+            snapshot = snapshot with { Source = EsOptionChainSource };
+        var statusChanged = previous.Status != snapshot.Status || previous.Source != snapshot.Source;
+        var publish = statusChanged || now - _esOptionsProxyLastPublishUtc >= TimeSpan.FromSeconds(1);
+#endif
+        _esOptionsProxy = snapshot;
         var changed = previous.Status != snapshot.Status || previous.Regime != snapshot.Regime || previous.CallWallProxy != snapshot.CallWallProxy || previous.PutWallProxy != snapshot.PutWallProxy || previous.ZeroGammaProxy != snapshot.ZeroGammaProxy;
-        if (IsEsOptionsSource && snapshot.Status is ("ModelReady" or "PriceReady") &&
-            !(_lastResearchCandle is { } replayCandle && IsHistoricalReplayTime(replayCandle.Time)) &&
-            now - _esOptionsProxyLastPublishUtc >= TimeSpan.FromSeconds(1))
+        if (IsEsOptionsSource &&
+#if OPF_ATAS_X
+            publish &&
+#else
+            snapshot.Status is ("ModelReady" or "PriceReady") &&
+            now - _esOptionsProxyLastPublishUtc >= TimeSpan.FromSeconds(1) &&
+#endif
+            !(_lastResearchCandle is { } replayCandle && IsHistoricalReplayTime(replayCandle.Time)))
         {
             try
             {
                 var archive = now - _esOptionsProxyLastArchiveUtc >= TimeSpan.FromSeconds(5);
+#if OPF_ATAS_X
+                archive = statusChanged || (archive && snapshot.Status != "Unavailable");
+#endif
                 OptionsProxySnapshotStore.Publish(OptionsProxyLatestPath, OptionsProxyArchivePath, snapshot, archive);
                 _esOptionsProxyLastPublishUtc = now;
                 if (archive) _esOptionsProxyLastArchiveUtc = now;
@@ -439,19 +592,27 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private void AppendEsOptionsProxyHud(StringBuilder hud)
     {
+#if OPF_ATAS_X
+        if (_esOptionsChartRoot is "GC" or "MGC")
+        {
+            hud.AppendLine("ES OptProxy: N/A | Local signals");
+            return;
+        }
+#endif
         EsOptionsProxySnapshot s;
         lock (_esOptionsProxySync) s = _esOptionsProxy;
         var replay = _lastResearchCandle is { } candle && IsHistoricalReplayTime(candle.Time);
         var clock = replay ? DateTime.SpecifyKind(_lastResearchCandle!.Time, DateTimeKind.Utc) : DateTime.UtcNow;
         if (replay)
         {
-            try { s = OptionsProxySnapshotStore.ReadAsOf(OptionsProxyArchivePath, clock); }
+            try { s = ReadEsOptionsProxyArchiveAsOf(clock); }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
             { s = EsOptionsProxySnapshot.Unavailable($"replayArchiveUnavailable:{ex.GetType().Name}"); }
         }
         var age = clock - s.CapturedAtUtc;
         var freshness = s.Status is not ("ModelReady" or "PriceReady") ? "UNAVAILABLE" : age.TotalSeconds < 0 ? "FUTURE" : age.TotalSeconds <= 15 ? "LIVE" : age.TotalSeconds <= 90 ? "DELAYED" : "STALE";
-        hud.AppendLine($"ES OptProxy [{StrategyVersions.StrategyVersion}]: {(IsEsOptionsSource ? "SourceOnly" : "Consumer")} {s.Status}");
+        var role = IsEsOptionsSource ? (IsEsOptionsTradingChart ? "Source + Trading" : "SourceOnly") : "Consumer";
+        hud.AppendLine($"ES OptProxy [{StrategyVersions.StrategyVersion}]: {role} {s.Status}");
         hud.AppendLine($"ES OptProxy mode={(replay ? "REPLAY-ASOF" : "LIVE")} clock(BJT)={clock.AddHours(8):MM-dd HH:mm:ss}");
         hud.AppendLine($"ES OptProxy {freshness} age={Math.Max(0, age.TotalSeconds):0}s coverage={s.Coverage:P0}");
         hud.AppendLine($"ES quality ATM={s.AtmQuotesReady} local={s.LocalQuoteCoverage:P0} call={s.CallQuoteCoverage:P0} put={s.PutQuoteCoverage:P0}");
@@ -485,12 +646,19 @@ public sealed partial class OpeningPullbackFailureStrategy
         {
         ClearEsOptionsSubscriptions();
         _esOptionsProxyInitStarted = false;
+#if OPF_ATAS_X
+        if (IsEsOptionsSource) SetEsOptionsProxy(EsOptionsProxySnapshot.Unavailable("esSourceStopped"));
+#endif
         }
     }
 
     private void ClearEsOptionsSubscriptions()
     {
         foreach (var subscription in _esOptionsProxySubscriptions.Values) subscription.Changed -= OnEsOptionsProxyQuoteChanged;
+#if OPF_ATAS_X
+        foreach (var subscription in _esOptionsProxySubscriptions.Values) subscription.Dispose();
+        _rithmicOptionsConnector = null;
+#endif
         _esOptionsProxySubscriptions.Clear();
         _esQuoteReceived.Clear();
         _esOptionsProxyOptions.Clear();
@@ -513,7 +681,13 @@ public sealed partial class OpeningPullbackFailureStrategy
             var m1 = _esOptionsPriceHistory.LastOrDefault(x => now - x.Time >= TimeSpan.FromSeconds(60));
             var m5 = _esOptionsPriceHistory.LastOrDefault(x => now - x.Time >= TimeSpan.FromSeconds(300));
             var ready = _esOptionsProxy.Status == "ModelReady" && _esOptionsProxy.OptionQuotesObservedAtUtc is { } quotes && now - quotes <= TimeSpan.FromSeconds(90);
-            SetEsOptionsProxy(_esOptionsProxy with { Status = ready ? "ModelReady" : "PriceReady", EvidenceSchema = 2,
+#if OPF_ATAS_X
+            ready &= _rithmicOptionsConnector?.IsConnected == true;
+            var baseSnapshot = ready ? _esOptionsProxy : EsOptionsProxySnapshot.Unavailable(_esOptionsProxy.Detail) with { Source = EsOptionChainSource };
+#else
+            var baseSnapshot = _esOptionsProxy;
+#endif
+            SetEsOptionsProxy(baseSnapshot with { Status = ready ? "ModelReady" : "PriceReady", EvidenceSchema = 2,
                 CapturedAtUtc = now, Underlying = "ES", UnderlyingPrice = price, UnderlyingObservedAtUtc = now,
                 UnderlyingPrice60sAgo = m1.Time == default ? null : m1.Price, PriceReferenceAtUtc = m1.Time == default ? null : m1.Time,
                 UnderlyingPrice5mAgo = m5.Time == default ? null : m5.Price, Price5mReferenceAtUtc = m5.Time == default ? null : m5.Time,
@@ -524,10 +698,15 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private string? OptionsEntryGateReason(CandidateSignal signal, OpfCandle candle, string path, decimal risk)
     {
-        if (path is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction") return null;
+        if (IsIcebergExecutionPath(path)) return null;
+#if OPF_ATAS_X
+        if (_esOptionsChartRoot is "GC" or "MGC")
+            return path is "BreakawayFvg_Qualified" or "FailureReverse_RetestFailed" ? null : "OptionsGate:NotApplicableToMetals";
+#else
         if (IsEsOptionsSource) return "OptionsGate:EsSourceOnly";
+#endif
         if (!EnableEsOptionsEntryGate) return null;
-        if (!IsEsOptionsConsumer) return "OptionsGate:UnsupportedPhaseOneInstrument";
+        if (!IsEsOptionsTradingChart) return "OptionsGate:UnsupportedInstrument";
         RefreshEsOptionsSharedContext();
         EsOptionsProxySnapshot context;
         lock (_esOptionsProxySync) context = _esOptionsProxy;
@@ -538,7 +717,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             context = EsOptionsProxySnapshot.Unavailable("asOfSnapshotMissing");
             try
             {
-                context = OptionsProxySnapshotStore.ReadAsOf(OptionsProxyArchivePath, decisionUtc);
+                context = ReadEsOptionsProxyArchiveAsOf(decisionUtc);
             }
             catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
             {
