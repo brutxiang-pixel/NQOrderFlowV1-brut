@@ -7712,7 +7712,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private void ScheduleProtectBreakEvenV186(ReplayExecutionState execution, decimal marketPrice)
     {
         var currentBar = Math.Max(_lastSeenBar, _lastResearchCandle?.Bar ?? -1);
-        if (_snapshot is null || execution.ExitCompleted || execution.ZoneBirthSplitRunnerV172 || IsIcebergExecutionPath(execution.ResearchPath) ||
+        if (_snapshot is null || execution.ExitCompleted || execution.ZoneBirthSplitRunnerV172 ||
+            (IsIcebergExecutionPath(execution.ResearchPath) && execution.ResearchPath != IntradayEntryPolicy.IcebergAbsorptionScalpPath) ||
             (!execution.IsDeferredContinuation &&
              (!UsesProtectBreakEvenV186(execution.Side, execution.ResearchPath) ||
               IsStaticDynamicExitV215(execution.Side, execution.ResearchPath, execution.PlannedRiskPoints))) || !execution.BracketSubmitted ||
@@ -7911,6 +7912,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private decimal ProtectBreakEvenTriggerRFor(ReplayExecutionState execution)
     {
+        if (execution.ResearchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath)
+            return IntradayEntryPolicy.ScalpBreakEvenTriggerR(execution.InitialRiskPoints, _snapshot!.InstrumentProfile.TickSize, _actualCommissionPerContractRoundTrip, _snapshot.InstrumentProfile.PointValue);
+
         var configuredTriggerR = TryGetActualExitPolicyV209(execution.Side, execution.ResearchPath, out _, out var triggerR, out _) && triggerR > 0m
             ? triggerR
             : ProtectBreakEvenTriggerRV186;

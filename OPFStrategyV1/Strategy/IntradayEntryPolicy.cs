@@ -9,6 +9,7 @@ public static class IntradayEntryPolicy
 {
     internal const string IcebergAbsorptionScalpPath = "IcebergAbsorptionScalp";
     internal const int ScalpMaxRiskTicks = 8;
+    internal const int ScalpBreakEvenTriggerTicks = 4;
     internal const int ScalpTargetTicks = 12;
 
     internal static bool IsIcebergScalpProduct(string? productCode) =>
@@ -64,6 +65,13 @@ public static class IntradayEntryPolicy
 
     internal static bool ScalpRiskReady(bool isLong, decimal entry, decimal stop, decimal tick) =>
         (isLong ? entry - stop : stop - entry) >= tick && Math.Abs(entry - stop) <= ScalpMaxRiskTicks * tick;
+
+    internal static decimal ScalpBreakEvenTriggerR(decimal risk, decimal tick, decimal commission, decimal pointValue)
+    {
+        if (risk <= 0m || tick <= 0m || pointValue <= 0m) return 0m;
+        var feeOffset = Math.Ceiling(Math.Max(0m, commission) / pointValue / tick) * tick;
+        return Math.Max(ScalpBreakEvenTriggerTicks * tick, feeOffset + tick) / risk;
+    }
 
     internal static bool ScalpNoProgress(TimeSpan elapsed, decimal mfe, decimal tick) =>
         elapsed >= TimeSpan.FromSeconds(20) && mfe < 3m * tick;

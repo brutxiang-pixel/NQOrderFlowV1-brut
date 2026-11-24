@@ -96,6 +96,9 @@ foreach (var side in new[] { 1m, -1m })
 Check(IntradayEntryPolicy.ScalpQuoteReady(100m, 100.5m, now, now, now, .25m) &&
     !IntradayEntryPolicy.ScalpQuoteReady(100m, 100.75m, now, now, now, .25m) &&
     !IntradayEntryPolicy.ScalpQuoteReady(100m, 100.5m, now.AddSeconds(-3), now, now, .25m), "scalp checks both quote ages and spread");
+Check(IntradayEntryPolicy.ScalpBreakEvenTriggerR(2m, .25m, 1.18m, 2m) == .5m &&
+    IntradayEntryPolicy.ScalpBreakEvenTriggerR(2m, .25m, 2.5m, 2m) == .75m &&
+    IntradayEntryPolicy.ScalpBreakEvenTriggerR(0m, .25m, 1.18m, 2m) == 0m, "scalp fee-protected stop leaves one tick beyond fees");
 Check(IntradayEntryPolicy.ScalpNoProgress(TimeSpan.FromSeconds(20), .5m, .25m) &&
     !IntradayEntryPolicy.ScalpNoProgress(TimeSpan.FromSeconds(19), .5m, .25m) &&
     !IntradayEntryPolicy.ScalpNoProgress(TimeSpan.FromSeconds(20), .75m, .25m), "scalp exits only without sufficient post-fill progress");
