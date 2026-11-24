@@ -11,7 +11,7 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     [Category("OPF Execution")]
     [DisplayName("Startup Test Order (Once)")]
-    [Description("Default off. Enable while stopped, then start: attempt one Long contract on NQ/MNQ with 4-point SL and 6-point TP. Resets automatically; blocked requests are not retried.")]
+    [Description("Default off. Enable while stopped, then start: attempt the panel-configured number of Long contracts on NQ/MNQ with 4-point SL and 6-point TP. Resets automatically; blocked requests are not retried.")]
     [DefaultValue(false)]
     public bool StartupTestOrderEnabled { get; set; }
 
@@ -27,6 +27,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         else if (_isStoppingActualExecution) reason = "StrategyStopping";
         else if (Portfolio is null || Security is null) reason = "ContextMissing";
         else if (_liveReadinessBlocked) reason = $"LiveReadinessBlocked:{_liveReadinessBlockReason}";
+        else if (ConfiguredExecutionQuantity <= 0m) reason = "InvalidConfiguredQuantity";
         else if (_dailyPnlScopeUnresolved) reason = "LegacyPnlScopeUnresolved";
         else if (_manualInterventionLatch) reason = "ManualInterventionDetected";
         else if (IsLiveLatencyBlocked(time, out var latency)) reason = latency;
@@ -65,16 +66,16 @@ public sealed partial class OpeningPullbackFailureStrategy
         var order = new Order
         {
             Portfolio = Portfolio, Security = Security, Type = OrderTypes.Market,
-            Direction = OrderDirections.Buy, QuantityToFill = 1m,
+            Direction = OrderDirections.Buy, QuantityToFill = ConfiguredExecutionQuantity,
             TimeInForce = ReplayTimeInForce, AutoCancel = false,
             Comment = $"OPF|{tradeId}|ENTRY|{path}|{tradeId}"
         };
         var execution = new ReplayExecutionState(tradeId, tradeId, Core.Signals.TradeSide.Long, path,
-            bar, time, entry, 1m, stop, target, 4m, 6m, 1.5m, order);
+            bar, time, entry, ConfiguredExecutionQuantity, stop, target, 4m, 6m, 1.5m, order);
         _replayExecution = execution;
         TrackRecentReplayExecution(execution);
         _replayTradesToday++;
-        AppendExecutionEvent(execution, "STARTUP_TEST_ORDER_CONSUMED", "ENTRY", entry, 1m,
+        AppendExecutionEvent(execution, "STARTUP_TEST_ORDER_CONSUMED", "ENTRY", entry, ConfiguredExecutionQuantity,
             "switch=false|side=Long|plannedSL=4pt|plannedTP=6pt");
         EnqueueExecutionAction("StartupTestOrder", async () => await OpenReplayEntryAfterQuotePreflightAsync(execution));
     }

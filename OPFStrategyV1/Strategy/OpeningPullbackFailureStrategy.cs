@@ -363,7 +363,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     [DisplayName("Zone Behavior Ledger Data Collection Only")]
     public bool ZoneBehaviorLedgerDataOnly { get; set; }
 
-    private decimal ConfiguredExecutionQuantity => Math.Min(Math.Max(0m, ReplayOrderQuantity), IntradayEntryPolicy.ProductQuantityLimit(Security?.Code ?? string.Empty));
+    private decimal ConfiguredExecutionQuantity => Math.Max(0m, ReplayOrderQuantity);
 
     private bool ActualOrdersEnabled => EnableReplayOrders && !RichBarDataCollectionOnly && !MicrostructureAuditCollectionOnly && !FootprintDataCollectionOnly && !SweepReclaimDataCollectionOnly && !ZoneBehaviorLedgerDataOnly && !MarketExecutionTapeDataOnly && !CandidateScenarioTapeDataOnly;
 
@@ -377,6 +377,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     [Category("OPF Execution")]
     [DisplayName("Actual Order Quantity (Contracts)")]
+    [Description("Maximum total open quantity for all strategy paths. Default 1; MNQ set to 1 cannot add a second contract.")]
     public decimal ReplayOrderQuantity { get; set; } = 1m;
 
     [Category("OPF Execution")]
@@ -3547,7 +3548,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (isSecondaryExecution)
         {
             var primary = activeExecutions[0];
-            var secondaryQty = IntradayEntryPolicy.AvailableEntryQuantity(Security?.Code ?? string.Empty, requestedQty,
+            var secondaryQty = IntradayEntryPolicy.AvailableConfiguredEntryQuantity(ConfiguredExecutionQuantity, requestedQty,
                 activeExecutions.Sum(x => RemainingExecutionQuantity(x)));
             var pointValue = _snapshot.InstrumentProfile.PointValue;
             var combinedRisk = primary.InitialRiskPoints * pointValue * RemainingExecutionQuantity(primary) +
@@ -3612,14 +3613,14 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return;
         }
 
-        var qty = IntradayEntryPolicy.AvailableEntryQuantity(Security.Code, requestedQty,
+        var qty = IntradayEntryPolicy.AvailableConfiguredEntryQuantity(ConfiguredExecutionQuantity, requestedQty,
             activeExecutions.Sum(ReservedExecutionQuantity));
         if (qty <= 0m)
         {
             _researchLogger?.AppendInfo(_snapshot.SnapshotId, entryCandle.Bar, entryCandle.Time, "EXEC_SKIP_QTY quantity<=0");
-            var quantityReason = $"ProductQuantityLimit:product={Security.Code}|limit={IntradayEntryPolicy.ProductQuantityLimit(Security.Code)}|requested={requestedQty}|managed={activeExecutions.Sum(x => RemainingExecutionQuantity(x))}";
+            var quantityReason = $"ConfiguredQuantityLimit:limit={ConfiguredExecutionQuantity}|requested={requestedQty}|managed={activeExecutions.Sum(x => RemainingExecutionQuantity(x))}";
             AppendExecutionDecision(signal, entryCandle, "Skip", quantityReason, researchPath, stop, risk);
-            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_PRODUCT_QUANTITY_LIMIT", "-", researchPath, entryCandle.Close, qty, quantityReason);
+            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_CONFIGURED_QUANTITY_LIMIT", "-", researchPath, entryCandle.Close, qty, quantityReason);
             return;
         }
 
@@ -4047,9 +4048,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             }
         }
 #endif
-        if (IntradayEntryPolicy.AvailableEntryQuantity(product, execution.Quantity, positionQuantity) < execution.Quantity)
+        if (IntradayEntryPolicy.AvailableConfiguredEntryQuantity(ConfiguredExecutionQuantity, execution.Quantity, positionQuantity) < execution.Quantity)
         {
-            var reason = $"ProductQuantityLimit:product={product}|limit={IntradayEntryPolicy.ProductQuantityLimit(product)}|requested={execution.Quantity}|position={positionQuantity}";
+            var reason = $"ConfiguredQuantityLimit:limit={ConfiguredExecutionQuantity}|requested={execution.Quantity}|position={positionQuantity}";
             AbortEntrySubmissionV178(execution, execution.CreatedPrice, reason);
             return;
         }

@@ -476,9 +476,9 @@ public sealed partial class OpeningPullbackFailureStrategy
                 es.PriceReferenceAtUtc is { } esReference && esReference <= live.Time && live.Time - esReference <= TimeSpan.FromSeconds(90) &&
                 es.UnderlyingPrice.HasValue && es.UnderlyingPrice60sAgo.HasValue &&
                 (item.Side == TradeSide.Long ? es.UnderlyingPrice > es.UnderlyingPrice60sAgo : es.UnderlyingPrice < es.UnderlyingPrice60sAgo);
-            var size = IntradayEntryPolicy.EvidenceSize(optionContext, esReaction, true, IntradayEntryPolicy.ProductQuantityLimit(Security?.Code ?? string.Empty));
+            var evidenceScore = IntradayEntryPolicy.EvidenceScore(optionContext, esReaction, true);
             var configuredQuantity = ConfiguredExecutionQuantity;
-            _nativeIcebergHud = $"Iceberg: {item.Side} S{size.Score}/3 x{configuredQuantity:0}";
+            _nativeIcebergHud = $"Iceberg: {item.Side} S{evidenceScore}/3 x{configuredQuantity:0}";
             var score = new ScoreBreakdown("CrossMarketIceberg", 100m, 45m, true,
                 new[]
                 {
@@ -501,7 +501,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             if (nearestSweep is not null)
                 sweepDetail = $" mboSweepAligned={sweepAligned} mboSweepTime={nearestSweep.Time:O} mboSweepLevels={nearestSweep.PriceLevels}";
 #endif
-            LogLiveReadinessInfo($"NATIVE_ICEBERG_REACTION event={pair.Key} side={item.Side} price={item.Price} sourceTime={item.Time:O} reactionTime={live.Time:O} hidden={item.Hidden} filled={item.Filled} tapeRatio={tapeRatio:0.000}{sweepDetail} score={size.Score}/3 qty={configuredQuantity} esStatus={es.Status}");
+            LogLiveReadinessInfo($"NATIVE_ICEBERG_REACTION event={pair.Key} side={item.Side} price={item.Price} sourceTime={item.Time:O} reactionTime={live.Time:O} hidden={item.Hidden} filled={item.Filled} tapeRatio={tapeRatio:0.000}{sweepDetail} score={evidenceScore}/3 qty={configuredQuantity} esStatus={es.Status}");
             var active = ActiveReplayExecutions();
             if (_manualAlertEnabled) { SubmitNativeIceberg(signal, live, stop, pair.Key); break; }
             var arbitration = IntradayEntryPolicy.IcebergArbitration(active.Count, active.Any(x => IsIcebergExecutionPath(x.ResearchPath)),

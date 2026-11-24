@@ -117,9 +117,6 @@ foreach (var (root, tick, point, maxRisk, contracts) in new[]
     Check(IntradayEntryPolicy.ScalpRiskReady(true, 100m, 100m - 8m * instrument.TickSize, instrument.TickSize) &&
         !IntradayEntryPolicy.ScalpRiskReady(false, 100m, 100m + 9m * instrument.TickSize, instrument.TickSize),
         root + " scalp stop uses the contract tick size");
-#if OPF_ATAS_X
-    Check(IntradayEntryPolicy.AvailableEntryQuantity(root + "Z26", 3m, 0m) == contracts, root + " X quantity cap");
-#endif
 }
 Check(OPFStrategyV1.Core.Profiles.ProfileCatalog.ContractRoot("MCLZ26") == string.Empty, "unsupported contract does not select a profile");
 var longIcebergId = "20261109-1336-Short-727-CrossMarketIcebergOrderFlowReaction-ICE-ICE-NQZ6-6884993374025-20261109133617-MNQZ6-61053c86";
@@ -283,20 +280,14 @@ Check(IntradayEntryPolicy.BreakoutChase(true, 110.5m, 83m, 100m, 17.25m) == "Cro
 Check(IntradayEntryPolicy.BreakoutChase(false, 100m, 125m, 100m, 17.25m) == "CrossMarketRiskExpanded", "risk expansion without price chase rejected");
 Check(IntradayEntryPolicy.BreakoutChase(false, 99m, 117m, 100m, 17.25m) is null, "near-anchor entry remains eligible");
 Check(IntradayEntryPolicy.BreakoutChase(false, 100m, 117m, 100m, 17.25m) is null, "retest near original anchor remains eligible");
-Check(IntradayEntryPolicy.EvidenceSize(false, false, true, 3m) == (1, 1m), "one independent evidence axis uses base size");
-Check(IntradayEntryPolicy.EvidenceSize(true, true, false, 3m) == (2, 2m), "two orthogonal evidence axes increase size");
-Check(IntradayEntryPolicy.EvidenceSize(true, true, true, 3m) == (3, 3m), "three orthogonal evidence axes reach three-contract tier");
-Check(IntradayEntryPolicy.EvidenceSize(true, true, true, 1m) == (3, 1m), "configured per-product cap bounds evidence tier");
+Check(IntradayEntryPolicy.EvidenceScore(false, false, true) == 1, "evidence score remains informational");
+Check(IntradayEntryPolicy.EvidenceScore(true, true, true) == 3, "evidence score does not select order quantity");
+Check(IntradayEntryPolicy.AvailableConfiguredEntryQuantity(1m, 1m, 0m) == 1m, "one-contract panel setting opens one");
+Check(IntradayEntryPolicy.AvailableConfiguredEntryQuantity(1m, 2m, 0m) == 1m, "evidence cannot raise one-contract panel setting");
+Check(IntradayEntryPolicy.AvailableConfiguredEntryQuantity(1m, 1m, 1m) == 0m, "one-contract panel blocks a second slot");
+Check(IntradayEntryPolicy.AvailableConfiguredEntryQuantity(2m, 2m, 1m) == 1m, "two-contract panel only allows remaining total exposure");
+Check(IntradayEntryPolicy.AvailableConfiguredEntryQuantity(2m, 2m, 2m) == 0m, "panel total exposure is a hard cap");
 var eventKey = "acct|NQZ6|False|ES_EVENT_KEY:Long|touch|Put";
-Check(IntradayEntryPolicy.ProductQuantityLimit("NQZ6") == 1m, "NQ contract suffix cap is one");
-Check(IntradayEntryPolicy.ProductQuantityLimit("mnqz6") == 2m, "MNQ cap is two with case insensitive suffix");
-Check(IntradayEntryPolicy.EvidenceSize(true, true, true, IntradayEntryPolicy.ProductQuantityLimit("NQZ6")) == (3, 1m), "NQ strongest evidence cannot exceed one");
-Check(IntradayEntryPolicy.EvidenceSize(true, true, true, IntradayEntryPolicy.ProductQuantityLimit("MNQZ6")) == (3, 2m), "MNQ strongest evidence cannot exceed two");
-Check(IntradayEntryPolicy.AvailableEntryQuantity("NQZ6", 3m, 0m) == 1m, "final NQ submission clamps to one");
-Check(IntradayEntryPolicy.AvailableEntryQuantity("MNQZ6", 3m, 0m) == 2m, "final MNQ submission clamps to two");
-Check(IntradayEntryPolicy.AvailableEntryQuantity("NQZ6", 1m, 1m) == 0m, "NQ second slot cannot exceed held cap");
-Check(IntradayEntryPolicy.AvailableEntryQuantity("MNQZ6", 2m, 1m) == 1m, "MNQ second slot uses remaining single contract");
-Check(IntradayEntryPolicy.AvailableEntryQuantity("MNQZ6", 2m, 3m) == 0m, "legacy over-cap position cannot add");
 Check(PhysicalEventExecutionDedup.TryClaim(eventKey, now), "first strategy claims physical event");
 var nqScope = PhysicalEventExecutionDedup.ContractScope("sim", "NQZ6", false);
 var mnqScope = PhysicalEventExecutionDedup.ContractScope("sim", "MNQZ6", false);
@@ -376,12 +367,6 @@ Check(shortFill.Low == 99m && shortFill.High == 100m, "short entry-bar pre-fill 
 Check(counterShort.RetestConfirmed && counterLong.RetestConfirmed, "both directions record confirmed retest");
 counterShort.Observe(101m, .25m, now.AddSeconds(5));
 Check(!counterShort.RetestConfirmed, "failed structure clears retest sizing permission");
-Check(IntradayEntryPolicy.IcebergQuantity(2m, true, true, 14.5m, 43.5m, 2m) == 2m, "retested aligned low-risk MNQ may use two contracts");
-Check(IntradayEntryPolicy.IcebergQuantity(2m, false, true, 14.5m, 43.5m, 2m) == 1m, "0713 unretested pursuit cannot receive two contracts");
-Check(IntradayEntryPolicy.IcebergQuantity(2m, true, false, 26.5m, 34.5m, 2m) == 1m, "0525 mixed higher frames reduce quantity");
-Check(IntradayEntryPolicy.IcebergQuantity(2m, true, true, 26m, 60m, 2m) == 1m, "two-contract dollar risk above 100 reduces quantity");
-Check(IntradayEntryPolicy.IcebergQuantity(2m, true, true, 20m, 30m, 2m) == 1m, "wide ATR risk reduces quantity");
-Check(IntradayEntryPolicy.IcebergQuantity(1m, true, true, 5m, 30m, 20m) == 1m, "NQ one-contract cap remains");
 var frames219 = new Dictionary<string, CompletedFrame>();
 foreach (var name in new[] { "15M", "1H", "4H" }) frames219[name] = new(name, now, 110m, 90m, 100m, -5m, 4);
 Check(IntradayEntryPolicy.IcebergTrendAligned(false, frames219), "short higher frames align");

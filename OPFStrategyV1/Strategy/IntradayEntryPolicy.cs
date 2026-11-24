@@ -88,26 +88,16 @@ public static class IntradayEntryPolicy
         return (isLong ? Math.Floor(stop / tick) : Math.Ceiling(stop / tick)) * tick;
     }
 
-    public static decimal ProductQuantityLimit(string productCode) =>
-        productCode.StartsWith("MNQ", StringComparison.OrdinalIgnoreCase) ? 2m :
-#if OPF_ATAS_X
-        1m;
-#else
-        productCode.StartsWith("NQ", StringComparison.OrdinalIgnoreCase) ? 1m : 3m;
-#endif
-
-    public static decimal AvailableEntryQuantity(string productCode, decimal requested, decimal managedQuantity) =>
-        Math.Max(0m, Math.Min(requested, ProductQuantityLimit(productCode) - managedQuantity));
+    public static decimal AvailableConfiguredEntryQuantity(decimal configuredTotal, decimal requested, decimal managedQuantity)
+    {
+        var totalLimit = Math.Max(0m, configuredTotal);
+        var available = totalLimit - Math.Max(0m, managedQuantity);
+        return Math.Max(0m, Math.Min(Math.Max(0m, requested), available));
+    }
 
     public static bool IcebergTrendAligned(bool isLong, IReadOnlyDictionary<string, CompletedFrame> frames) =>
         new[] { "15M", "1H", "4H" }.All(name => frames.TryGetValue(name, out var frame) &&
             frame.Count >= 4 && (isLong ? frame.Slope > 0m : frame.Slope < 0m));
-
-    public static decimal IcebergQuantity(decimal evidenceQuantity, bool retested, bool trendAligned,
-        decimal risk, decimal atr, decimal pointValue) =>
-        evidenceQuantity >= 2m && retested && trendAligned && risk > 0m && atr > 0m && pointValue > 0m &&
-        risk <= atr * EntryExitPolicyParameters.IcebergSecondContractMaxAtrRisk &&
-        risk * pointValue * 2m <= EntryExitPolicyParameters.IcebergTwoContractMaxRiskDollars ? 2m : 1m;
 
     public static decimal IcebergRunnerStop(bool isLong, decimal entry, decimal risk, decimal mfe,
         decimal feeStop, decimal low, decimal high, decimal atr, decimal tick)
@@ -123,13 +113,8 @@ public static class IntradayEntryPolicy
         return (isLong ? Math.Floor(stop / tick) : Math.Ceiling(stop / tick)) * tick;
     }
 
-    public static (int Score, decimal Quantity) EvidenceSize(bool optionContext, bool esPriceReaction, bool localFlow,
-        decimal configuredMaximum)
-    {
-        var score = (optionContext ? 1 : 0) + (esPriceReaction ? 1 : 0) + (localFlow ? 1 : 0);
-        var quantity = score >= 3 ? 3m : score >= 2 ? 2m : 1m;
-        return (score, Math.Min(quantity, Math.Max(1m, configuredMaximum)));
-    }
+    public static int EvidenceScore(bool optionContext, bool esPriceReaction, bool localFlow) =>
+        (optionContext ? 1 : 0) + (esPriceReaction ? 1 : 0) + (localFlow ? 1 : 0);
 
     public static string? BreakoutChase(bool isLong, decimal price, decimal stop, decimal anchorPrice, decimal anchorRisk)
     {
