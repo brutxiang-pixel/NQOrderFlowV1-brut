@@ -142,6 +142,14 @@ foreach (var isLong in new[] { true, false })
     Check(be == expectedBe && exitBars == (path == "BreakawayFvg_Qualified" ? 12 : path == "FailureReverse_RetestFailed" ? 36 : 0),
         "versioned protection and time stop preserved " + path + "/" + isLong);
 }
+Check(EsResponseAlignedBreakoutPolicy.IsDisabledNqShort("NQ", EsResponseAlignedBreakoutPolicy.Path, false), "NQ breakout short is disabled");
+Check(!EsResponseAlignedBreakoutPolicy.IsDisabledNqShort("MNQ", EsResponseAlignedBreakoutPolicy.Path, false) &&
+    !EsResponseAlignedBreakoutPolicy.IsDisabledNqShort("NQ", EsResponseAlignedBreakoutPolicy.Path, true), "NQ breakout disable leaves MNQ and NQ long enabled");
+Check(EsResponseAlignedBreakoutPolicy.MaximumInitialRiskPoints("MNQ", EsResponseAlignedBreakoutPolicy.Path, 50m) == 15m &&
+    EsResponseAlignedBreakoutPolicy.MaximumInitialRiskPoints("NQ", EsResponseAlignedBreakoutPolicy.Path, 50m) == 50m &&
+    EsResponseAlignedBreakoutPolicy.MaximumInitialRiskPoints("MNQ", "ESExpectedMoveExpansion", 50m) == 50m, "MNQ breakout initial risk cap is path and product scoped");
+Check(EsResponseAlignedBreakoutPolicy.BreakEvenTriggerR("MNQ", EsResponseAlignedBreakoutPolicy.Path, .75m) == .5m &&
+    EsResponseAlignedBreakoutPolicy.BreakEvenTriggerR("NQ", EsResponseAlignedBreakoutPolicy.Path, .75m) == .75m, "MNQ breakout break-even trigger is earlier without changing NQ");
 foreach (var path in new[] { "ESResponseAlignedBreakout", "ESWallRejectionReversal", "ESExpectedMoveExpansion", "ESGammaConcentrationResponse", "CrossMarketIcebergOrderFlowReaction" })
 {
     Check(ProfitLockPolicy.TryGet(path, 0, out var stage1) && stage1.TriggerR == 1m && stage1.LockR == .25m, path + " stage1");

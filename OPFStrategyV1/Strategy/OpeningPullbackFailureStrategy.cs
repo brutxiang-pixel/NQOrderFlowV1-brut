@@ -3707,7 +3707,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         else if (UsesProtectBreakEvenV186(signal.Side, researchPath))
             executeReasons.Add($"ProtectBE1RThen3RV186:triggerR={ProtectBreakEvenTriggerRV186:0.##},targetR={ProtectBreakEvenTargetRV186:0.##}");
         if (!isDeferredContinuation && TryGetActualExitPolicyV209(signal.Side, researchPath, out var policyTargetR, out var policyBreakEvenTriggerR, out var policyTimeStopBars, risk))
-            executeReasons.Add($"ActualExitPolicyV209:targetR={policyTargetR:0.##}|beTriggerR={policyBreakEvenTriggerR:0.##}|timeStopBars={policyTimeStopBars}");
+            executeReasons.Add($"ActualExitPolicyV209:targetR={policyTargetR:0.##}|beTriggerR={EsResponseAlignedBreakoutPolicy.BreakEvenTriggerR(XBreakoutProduct, researchPath, policyBreakEvenTriggerR):0.##}|timeStopBars={policyTimeStopBars}");
         var isObservationFiller = IsObservationConfirmFiller(signal, researchPath);
         if (isObservationFiller)
         {
@@ -4783,7 +4783,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (researchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath)
             return IntradayEntryPolicy.ScalpMaxRiskTicks * _snapshot!.InstrumentProfile.TickSize;
-        if (StructureRiskPolicy.Applies(researchPath)) return StructureRiskPolicy.MaxPoints;
+        if (StructureRiskPolicy.Applies(researchPath))
+            return EsResponseAlignedBreakoutPolicy.MaximumInitialRiskPoints(XBreakoutProduct, researchPath, StructureRiskPolicy.MaxPoints);
         if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse")
             return _snapshot?.InstrumentProfile.MaxRiskPointsHard ?? 25m;
         if (researchPath == "CrossMarketIcebergOrderFlowReaction") return StructureRiskPolicy.MaxPoints;
@@ -5343,6 +5344,13 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     {
         if (_snapshot is null)
             return Array.Empty<string>();
+        var instrument = _snapshot.InstrumentProfile;
+        var product = XBreakoutProduct;
+        if (EsResponseAlignedBreakoutPolicy.IsDisabledNqShort(product, researchPath, signal.Side == TradeSide.Long))
+            return new[] { "NQESResponseAlignedBreakoutShortDisabledV300Preview12" };
+        if (EsResponseAlignedBreakoutPolicy.HasMnqProtection(product, researchPath) &&
+            risk > EsResponseAlignedBreakoutPolicy.MnqMaxInitialRiskPoints)
+            return new[] { $"MnqESResponseAlignedBreakoutInitialRiskCap:risk={risk:0.##}|max={EsResponseAlignedBreakoutPolicy.MnqMaxInitialRiskPoints}" };
         if (researchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath)
             return IntradayEntryPolicy.IsIcebergScalpProduct(_snapshot.InstrumentProfile.Instrument) && risk >= _snapshot.InstrumentProfile.TickSize &&
                 risk <= IntradayEntryPolicy.ScalpMaxRiskTicks * _snapshot.InstrumentProfile.TickSize
@@ -5366,7 +5374,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
         var reasons = new List<string>();
         var isSignificantZoneFirstTouch = IsSignificantZoneFirstTouchPath(researchPath);
-        var instrument = _snapshot.InstrumentProfile;
         var isDailyVolumeFloor = IsDailyVolumeFloorAllowed(signal, researchPath);
         var isMainlineVolumeFiller = IsMainlineVolumeFiller(signal, researchPath);
         var isObservationVolumeRiskBand = IsObservationConfirmVolumeRiskExpansion(signal, researchPath, risk);
@@ -7522,14 +7529,14 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             execution.RunnerTargetOrder = order;
     }
 
-    private static bool IsEntryFillRiskDriftAccepted(ReplayExecutionState execution)
+    private bool IsEntryFillRiskDriftAccepted(ReplayExecutionState execution)
     {
         return IsEntryRiskDriftAccepted(execution, execution.InitialRiskPoints);
     }
 
-    private static bool IsEntryRiskDriftAccepted(ReplayExecutionState execution, decimal risk)
+    private bool IsEntryRiskDriftAccepted(ReplayExecutionState execution, decimal risk)
     {
-        if (IsBreakawayPath(execution.ResearchPath))
+        if (IsBreakawayPath(execution.ResearchPath) || EsResponseAlignedBreakoutPolicy.HasMnqProtection(XBreakoutProduct, execution.ResearchPath))
             return false;
         if (IsObservationConfirmPath(execution.ResearchPath) && execution.Side == TradeSide.Long)
             return false;
@@ -7894,13 +7901,21 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         });
     }
 
-    private static decimal ProtectBreakEvenTriggerRFor(ReplayExecutionState execution)
+    private string XBreakoutProduct =>
+#if OPF_ATAS_X
+        ProfileCatalog.ContractRoot(Security?.Code);
+#else
+        string.Empty;
+#endif
+
+    private decimal ProtectBreakEvenTriggerRFor(ReplayExecutionState execution)
     {
-        if (execution.ResearchPath == "ESResponseAlignedBreakout")
-            return .75m;
-        if (TryGetActualExitPolicyV209(execution.Side, execution.ResearchPath, out _, out var triggerR, out _) && triggerR > 0m)
-            return triggerR;
-        return ProtectBreakEvenTriggerRV186;
+        var configuredTriggerR = TryGetActualExitPolicyV209(execution.Side, execution.ResearchPath, out _, out var triggerR, out _) && triggerR > 0m
+            ? triggerR
+            : ProtectBreakEvenTriggerRV186;
+        return EsResponseAlignedBreakoutPolicy.BreakEvenTriggerR(
+            XBreakoutProduct, execution.ResearchPath,
+            configuredTriggerR);
     }
 
     private static bool RequiresNextBarBreakEvenV209(ReplayExecutionState execution)
