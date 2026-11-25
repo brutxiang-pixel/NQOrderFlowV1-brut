@@ -177,7 +177,7 @@ public sealed partial class OpeningPullbackFailureStrategy
                 status = "DuplicateAbsorption";
                 continue;
             }
-            var stop = IntradayEntryPolicy.IcebergScalpStop(isLong, price, tick, time, received, live.Time, tape, attackAfter, replenishment?.RefilledAt, _snapshot.InstrumentProfile.Instrument);
+            var stop = IntradayEntryPolicy.IcebergScalpStop(isLong, price, tick, time, received, live.Time, tape, attackAfter, replenishment?.RefilledAt);
             var entry = isLong ? ask : bid;
             if (stop is not { } stopPrice) continue;
             if ((isLong ? bid <= price : ask >= price) || !IntradayEntryPolicy.ScalpRiskReady(isLong, entry, stopPrice, tick, _snapshot.InstrumentProfile.Instrument))

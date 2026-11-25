@@ -60,20 +60,20 @@ var inferredLong = SimulateRefill(new IcebergReplenishment(), true, true)!;
 var absorbed = new[] { (now.AddMilliseconds(100), 3619.8m, 1m, -1m), (now.AddMilliseconds(105), 3619.8m, 1m, -1m) };
 var afterRefill = absorbed.Concat(new[] { (now.AddMilliseconds(600), 3619.9m, 1m, 1m), (now.AddMilliseconds(700), 3619.9m, 1m, 1m), (now.AddMilliseconds(720), 3619.9m, 1m, 1m) }).ToArray();
 Check(IntradayEntryPolicy.IcebergScalpStop(true, inferredLong.Price, .1m, inferredLong.AttackTime, inferredLong.ConfirmedAt,
-    now.AddMilliseconds(750), absorbed, instrument: "MNQZ6") is null &&
+    now.AddMilliseconds(750), absorbed) is null &&
     IntradayEntryPolicy.IcebergScalpStop(true, inferredLong.Price, .1m, inferredLong.AttackTime, inferredLong.ConfirmedAt,
-        now.AddMilliseconds(750), afterRefill, instrument: "MNQZ6") == 3619.7m, "inferred GC refill uses the same tape reclaim and structural stop rules");
+        now.AddMilliseconds(750), afterRefill) == 3619.7m, "inferred GC refill uses the same tape reclaim and structural stop rules");
 var reclaimTape = new (DateTime Time, decimal Price, decimal Volume, decimal Signed)[]
 {
-    (now, 100.25m, 1m, 1m),
-    (now.AddMilliseconds(50), 100.25m, 1m, 1m),
-    (now.AddMilliseconds(100), 100.5m, 1m, 1m)
+    (now, 100.25m, 2m, 2m),
+    (now.AddMilliseconds(50), 100m, 2.5m, -2.5m),
+    (now.AddMilliseconds(100), 100.5m, 2m, 2m)
 };
-Check(IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, reclaimTape, "MNQZ6") &&
-    !IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, reclaimTape.Take(2).ToArray(), "MNQZ6") &&
-    !IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, reclaimTape.Select((x, i) => i == 2 ? (x.Time, x.Price, x.Volume, -x.Signed) : x).ToArray(), "NQZ6") &&
-    IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, reclaimTape.Take(2).ToArray(), "ESZ6"),
-    "NQ/MNQ require stronger reclaim while other products retain the two-print rule");
+Check(IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, reclaimTape) &&
+    !IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, reclaimTape.Take(2).ToArray()) &&
+    !IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m,
+        reclaimTape.Select((x, i) => i == 1 ? (x.Time, x.Price, 3m, -3m) : x).ToArray()),
+    "scalp accepts two reclaim prints with intervening flow and at least 20 percent net active volume");
 Check(IntradayEntryPolicy.IsSameScalpAbsorption(now.AddSeconds(4), now) &&
     !IntradayEntryPolicy.IsSameScalpAbsorption(now.AddSeconds(6), now), "scalp suppresses duplicate evidence within the shared reaction window");
 
@@ -110,15 +110,15 @@ foreach (var side in new[] { 1m, -1m })
         (now.AddMilliseconds(700), 100m + .5m * side, 2m, 2m * side),
         (now.AddMilliseconds(800), 100m + .75m * side, 2m, 2m * side)
     };
-    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, decision, scalpTape, instrument: "MNQZ6") == 100m - .5m * side,
+    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, decision, scalpTape) == 100m - .5m * side,
         "scalp separates absorption and post-receipt reclaim " + isLong);
-    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, decision, scalpTape, now.AddMilliseconds(-200), instrument: "MNQZ6") is null,
+    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, decision, scalpTape, now.AddMilliseconds(-200)) is null,
         "a later segment cannot reuse attack prints from a preceding attempt " + isLong);
-    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, now.AddMilliseconds(600), scalpTape, instrument: "MNQZ6") is null &&
-        IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, now.AddSeconds(6), scalpTape, instrument: "MNQZ6") is null,
+    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, now.AddMilliseconds(600), scalpTape) is null &&
+        IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, now.AddSeconds(6), scalpTape) is null,
         "scalp rejects future tape and expired iceberg " + isLong);
     scalpTape[2] = (scalpTape[2].Time, 100m - .5m * side, 2m, 2m * side);
-    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, decision, scalpTape, instrument: "MNQZ6") is null,
+    Check(IntradayEntryPolicy.IcebergScalpStop(isLong, 100m, .25m, now, received, decision, scalpTape) is null,
         "scalp rejects a breached level " + isLong);
     Check(IntradayEntryPolicy.ScalpRiskReady(isLong, 100m + 6m * .25m * side, 100m, .25m, "MNQZ6") &&
         !IntradayEntryPolicy.ScalpRiskReady(isLong, 100m + 7m * .25m * side, 100m, .25m, "MNQZ6") &&
@@ -356,9 +356,9 @@ Check(IntradayEntryPolicy.ScalpQuoteTime(100m, now, (99.75m, now), now) == now &
     IntradayEntryPolicy.ScalpQuoteTime(100m, default, (99.75m, now), now) == default,
     "current quote uses its own timestamp and never borrows a mismatched callback timestamp");
 Check(IntradayEntryPolicy.IcebergScalpStop(true, inferredLong.Price, .1m, inferredLong.AttackTime, now.AddMilliseconds(720),
-    now.AddMilliseconds(750), afterRefill, refilledAt: inferredLong.RefilledAt, instrument: "MNQZ6") == 3619.7m &&
+    now.AddMilliseconds(750), afterRefill, refilledAt: inferredLong.RefilledAt) == 3619.7m &&
     IntradayEntryPolicy.IcebergScalpStop(true, inferredLong.Price, .1m, inferredLong.AttackTime, now.AddMilliseconds(720),
-        now.AddMilliseconds(710), afterRefill, refilledAt: inferredLong.RefilledAt, instrument: "MNQZ6") is null,
+        now.AddMilliseconds(710), afterRefill, refilledAt: inferredLong.RefilledAt) is null,
     "refill reaction uses exchange event time but cannot trigger before confirmation receipt");
 Check(!PhysicalEventExecutionDedup.TryClaim(eventKey, now.AddSeconds(1)), "same account and event cannot submit twice");
 PhysicalEventExecutionDedup.Release(eventKey);

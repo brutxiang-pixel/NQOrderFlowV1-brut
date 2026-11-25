@@ -1,5 +1,13 @@
 # ATAS X 3.0 预览版迁移
 
+## 3.0.0-preview.24
+
+preview.23 重启后的策略漏斗记录显示，MNQ 冰山剥头皮有 1 次信号、1 次提交和 1 笔模拟成交，NQ 三项均为 0。NQ 的主要拦截为 WaitingForTape（1,743 次）与 QuoteSpreadWide（408 次）。MNQ 分别记录 3,111 次与 5,451 次。漏斗按评估计数，同一候选可能被重复评估，WaitingForTape 也涵盖冰山事件过期、攻击不足和价位失守等条件。
+
+NQ 和 MNQ 的逐笔成交确认恢复为至少 2 笔同向成交离开冰山价位、净主动量至少 20%，最新一笔仍须同向并离开冰山价位。价差上限为 NQ 5 tick / MNQ 2 tick，结构止损上限为 NQ 8 tick / MNQ 6 tick，目标为 12 tick，保本触发为 4 tick。订单数量由策略控制面板决定。
+
+回归用例在 preview.23 上复现误拦截，在 preview.24 上通过。IntradayEntryTests 共 279 项通过，LiveProtectionFailClosedTests 通过，ATAS X Release 构建 0 警告、0 错误。2026-11-25 23:52（北京时间）部署并校验 DLL 版本 3.0.0.24，SHA-256 为 `41B43C3AC2C11EDEF43F2F1572741C69BD0A056D198B263F9868B969470C521F`。preview.23 DLL 备份位于 `OPFStrategyV1/bin/deployment-backups/before-preview.24-20261125-235220/`。重启后确认两个实例的版本，并用信号、提交和成交验证单量。
+
 ## 3.0.0-preview.23
 修复 NQ 冰山剥头皮被 2-tick 价差门槛长期挡住的问题。preview.22 的同一轮 21 根五分钟K线样本中，NQ 的价差观察有 698 次，其中 1–2 tick 仅 41 次、3–5 tick 有 403 次；MNQ 的 9,424 次观察中，1–2 tick 有 1,783 次。preview.23 将 NQ 上限设为 5 tick，MNQ 与其他品种仍为 2 tick；手续费过滤改用实际价差与至少 2 tick 的成本垫。启动日志会写出 quoteSpreadLimitTicks 和价差分布。
 
