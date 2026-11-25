@@ -125,11 +125,11 @@ public sealed partial class OpeningPullbackFailureStrategy
         {
             var bestBid = BestBid;
             var bestAsk = BestAsk;
-            bid = bestBid?.Price ?? 0m;
-            ask = bestAsk?.Price ?? 0m;
-            var bidAt = IntradayEntryPolicy.ScalpQuoteTime(bid, bestBid?.Time ?? default, _scalpBid, now);
-            var askAt = IntradayEntryPolicy.ScalpQuoteTime(ask, bestAsk?.Time ?? default, _scalpAsk, now);
-            return IntradayEntryPolicy.ScalpQuoteBlock(bid, ask, bidAt, askAt, now, tick);
+            var selectedBid = IntradayEntryPolicy.ScalpQuote(bestBid?.Price ?? 0m, bestBid?.Time ?? default, _scalpBid, now);
+            var selectedAsk = IntradayEntryPolicy.ScalpQuote(bestAsk?.Price ?? 0m, bestAsk?.Time ?? default, _scalpAsk, now);
+            bid = selectedBid.Price;
+            ask = selectedAsk.Price;
+            return IntradayEntryPolicy.ScalpQuoteBlock(bid, ask, selectedBid.At, selectedAsk.At, now, tick);
         }
     }
 
@@ -803,7 +803,7 @@ public sealed partial class OpeningPullbackFailureStrategy
 
     private EsOptionsProxySnapshot ReadEsOptionsProxyAsOf(DateTime time)
     {
-        if (IsHistoricalReplayTime(time))
+        if (IsHistoricalOptionsContext(time))
         {
             try { return ReadEsOptionsProxyArchiveAsOf(DateTime.SpecifyKind(time, DateTimeKind.Utc)); }
             catch (Exception ex) when (ex is IOException or System.Text.Json.JsonException or UnauthorizedAccessException)

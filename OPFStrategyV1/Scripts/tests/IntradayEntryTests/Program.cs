@@ -2,6 +2,12 @@ using OPFStrategyV1.Strategy;
 using OPFStrategyV1.Core.MarketData;
 
 var now = new DateTime(2026, 10, 14, 10, 0, 0, DateTimeKind.Utc);
+
+Check(EntryOrderLifecyclePolicy.ShouldCancelIocRemainder("IcebergAbsorptionScalp", "Active", 0m, 1m, false), "active unfilled iceberg IOC entry is canceled after its fill grace period");
+Check(!EntryOrderLifecyclePolicy.ShouldCancelIocRemainder("IcebergAbsorptionScalp", "Done", 0m, 1m, false), "terminal iceberg entry needs no IOC cancel");
+Check(!EntryOrderLifecyclePolicy.ShouldCancelIocRemainder("IcebergAbsorptionScalp", "Active", 0.5m, 0.5m, false), "partial iceberg entry is handled by partial-fill protection");
+Check(!EntryOrderLifecyclePolicy.ShouldCancelIocRemainder("BreakawayFvg", "Active", 0m, 1m, false), "non-scalp entry keeps its configured lifetime");
+Check(!EntryOrderLifecyclePolicy.ShouldCancelIocRemainder("IcebergAbsorptionScalp", "Active", 0m, 1m, true), "completed execution cannot schedule an IOC cancel");
 void Check(bool value, string name) { if (!value) throw new InvalidOperationException(name); Console.WriteLine("PASS " + name); }
 
 IcebergReplenishment.Signal? SimulateRefill(IcebergReplenishment detector, bool isLong, bool withTrades)
@@ -109,6 +115,13 @@ foreach (var side in new[] { 1m, -1m })
 Check(IntradayEntryPolicy.ScalpQuoteReady(100m, 100.5m, now, now, now, .25m) &&
     !IntradayEntryPolicy.ScalpQuoteReady(100m, 100.75m, now, now, now, .25m) &&
     !IntradayEntryPolicy.ScalpQuoteReady(100m, 100.5m, now.AddSeconds(-3), now, now, .25m), "scalp checks both quote ages and spread");
+var updatedBid = IntradayEntryPolicy.ScalpQuote(99m, now.AddSeconds(-1), (100m, now), now);
+var updatedAsk = IntradayEntryPolicy.ScalpQuote(101m, now.AddSeconds(-1), (100.25m, now), now);
+var futureCallback = IntradayEntryPolicy.ScalpQuote(100m, now, (101m, now.AddSeconds(1)), now);
+var futureSnapshot = IntradayEntryPolicy.ScalpQuote(100m, now.AddSeconds(1), (99m, now), now);
+Check(updatedBid == (100m, now) && updatedAsk == (100.25m, now) &&
+    IntradayEntryPolicy.ScalpQuoteReady(updatedBid.Price, updatedAsk.Price, updatedBid.At, updatedAsk.At, now, .25m) &&
+    futureCallback == (100m, now) && futureSnapshot == (99m, now), "scalp selects current bid and ask data and rejects future timestamps");
 Check(IntradayEntryPolicy.ScalpBreakEvenTriggerR(2m, .25m, 1.18m, 2m) == .5m &&
     IntradayEntryPolicy.ScalpBreakEvenTriggerR(2m, .25m, 2.5m, 2m) == .75m &&
     IntradayEntryPolicy.ScalpBreakEvenTriggerR(0m, .25m, 1.18m, 2m) == 0m, "scalp fee-protected stop leaves one tick beyond fees");

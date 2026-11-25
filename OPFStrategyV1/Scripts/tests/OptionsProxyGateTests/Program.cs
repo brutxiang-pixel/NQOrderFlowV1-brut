@@ -19,6 +19,8 @@ void AssertClock(bool value, string name) { if (!value) throw new Exception(name
 AssertClock(!ExecutionClock.IsHistorical(DateTime.SpecifyKind(now.AddMinutes(-5), DateTimeKind.Unspecified), now), "UTC candle without Kind stays live on Beijing host");
 AssertClock(!ExecutionClock.IsHistorical(now, now), "UTC live candle");
 AssertClock(ExecutionClock.IsHistorical(now.AddDays(-1), now), "old Replay candle stays historical");
+AssertClock(!ExecutionClock.IsHistorical(now.AddDays(-1), now, now), "recent live market event keeps stale continuous-chart candle in live options mode");
+AssertClock(ExecutionClock.IsHistorical(now.AddDays(-1), now, now.AddDays(-1)), "historical Replay remains as-of when market events are historical");
 AssertClock(ExecutionClock.MarketSilence(now, null, true, now.AddSeconds(-1)) == TimeSpan.FromSeconds(1), "missing SDK metrics use observed chart reception");
 AssertClock(ExecutionClock.MarketSilence(now, now.AddSeconds(-20), true, now) == TimeSpan.FromSeconds(20), "stale SDK reception cannot be hidden by chart fallback");
 AssertClock(ExecutionClock.MarketSilence(now, null, false, now) is null, "disconnected feed cannot use chart fallback");

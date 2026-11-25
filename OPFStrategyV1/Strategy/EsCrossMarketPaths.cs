@@ -57,7 +57,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         if (!EnableEsOptionsEntryGate) return;
 
         EsOptionsProxySnapshot context;
-        if (IsHistoricalReplayTime(candle.Time))
+        if (IsHistoricalOptionsContext(candle.Time))
         {
             try { context = ReadEsOptionsProxyArchiveAsOf(DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc)); }
             catch (Exception ex) when (ex is System.IO.IOException or System.Text.Json.JsonException or UnauthorizedAccessException) { return; }
@@ -165,9 +165,9 @@ public sealed partial class OpeningPullbackFailureStrategy
     private void SubmitEsCrossMarketCandidate(OpfCandle candle, string path, TradeSide side, string reason, bool intraday, decimal trigger)
     {
         if (!IsReplayExecutionPathEnabled(path)) return;
-        var decisionUtc = IsHistoricalReplayTime(candle.Time) ? DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc) : DateTime.UtcNow;
+        var decisionUtc = IsHistoricalOptionsContext(candle.Time) ? DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc) : DateTime.UtcNow;
         EsOptionsProxySnapshot context;
-        if (IsHistoricalReplayTime(candle.Time))
+        if (IsHistoricalOptionsContext(candle.Time))
             context = ReadEsOptionsProxyArchiveAsOf(decisionUtc);
         else lock (_esOptionsProxySync) context = _esOptionsProxy;
         context = WithLevelEvent(context, path, side, decisionUtc);
@@ -202,7 +202,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             return;
         if (intraday && path == "ESResponseAlignedBreakout")
         {
-            var replay = IsHistoricalReplayTime(candle.Time);
+            var replay = IsHistoricalOptionsContext(candle.Time);
             var anchorKey = BreakoutAnchorKey(side, replay);
             var proposed = new EsBreakoutEvent(candle.Time, side == TradeSide.Long, candle.Close, stop, trigger);
             var anchor = BreakoutAnchors.AddOrUpdate(anchorKey, proposed, (_, old) =>

@@ -54,6 +54,14 @@ public static class IntradayEntryPolicy
         return callback.Price == price && callback.At <= now && callback.At > snapshotAt ? callback.At : snapshotAt;
     }
 
+    internal static (decimal Price, DateTime At) ScalpQuote(decimal snapshotPrice, DateTime snapshotAt,
+        (decimal Price, DateTime At) callback, DateTime now)
+    {
+        if (snapshotAt > now) snapshotAt = default;
+        if (callback.Price > 0m && callback.At <= now && callback.At > snapshotAt) return callback;
+        return (snapshotPrice, snapshotAt);
+    }
+
     internal static string? ScalpQuoteBlock(decimal bid, decimal ask, DateTime bidAt, DateTime askAt, DateTime now, decimal tick)
     {
         if (tick <= 0m || bid <= 0m || ask <= bid) return "QuoteMissingOrCrossed";

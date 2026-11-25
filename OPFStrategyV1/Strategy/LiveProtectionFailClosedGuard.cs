@@ -26,6 +26,16 @@ public static class LiveProtectionFailClosedGuard
     public static bool AccountPositionMatchesExpected(decimal actual, decimal expected) =>
         Math.Abs(actual - expected) <= 0.0000001m;
 
+    public static bool RequiresEmergencyFlattenResidual(
+        bool flattenOrderFullyFilled,
+        decimal accountPositionQuantity,
+        decimal executionRemainingQuantity)
+    {
+        return !flattenOrderFullyFilled &&
+            Math.Abs(accountPositionQuantity) > 0.0000001m &&
+            executionRemainingQuantity > 0.0000001m;
+    }
+
     public static bool RequiresEmergencyFlatten(
         decimal entryFilledQty,
         decimal exitFilledQty,

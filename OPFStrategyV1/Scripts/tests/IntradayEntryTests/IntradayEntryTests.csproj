@@ -8,6 +8,7 @@
     <Compile Include="../../../Strategy/PathOpportunity.cs" Link="PathOpportunity.cs" />
     <Compile Include="../../../Strategy/CrossMarketAlignment.cs" Link="CrossMarketAlignment.cs" />
     <Compile Include="../../../Strategy/IntradayEntryPolicy.cs" Link="IntradayEntryPolicy.cs" />
+    <Compile Include="../../../Strategy/EntryOrderLifecyclePolicy.cs" Link="EntryOrderLifecyclePolicy.cs" />
     <Compile Include="../../../Strategy/IcebergReplenishment.cs" Link="IcebergReplenishment.cs" />
     <Compile Include="../../../Strategy/EsBreakoutEvent.cs" Link="EsBreakoutEvent.cs" />
     <Compile Include="../../../Strategy/BreakEvenPolicy.cs" Link="BreakEvenPolicy.cs" />

@@ -3,7 +3,7 @@ namespace OPFStrategyV1.Core.Versions;
 public static class StrategyVersions
 {
 #if OPF_ATAS_X
-    public const string StrategyVersion = "OPF_X_3.0.0-preview.16";
+    public const string StrategyVersion = "OPF_X_3.0.0-preview.21";
     internal const string PlatformDataDirectory = "ATAS X";
 #else
     public const string StrategyVersion = "OPF_INTRADAY_2.23";

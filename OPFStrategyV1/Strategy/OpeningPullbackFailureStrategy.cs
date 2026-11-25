@@ -55,6 +55,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private const decimal PrimaryBreakawayMinSetupQualityV223 = 88m;
     private const decimal PrimaryBreakawayMinRiskPointsV223 = 12m;
     private const int PartialEntryFinalizeDelayMs = 250;
+    private const int ScalpIocRemainderCancelDelayMs = 250;
     private const decimal AggressiveExpansionV164MaxRiskPoints = 25m;
     private const decimal AggressiveExpansionV164TargetR = 3m;
     private const decimal DynamicExpansionV168TargetR = 2.5m;
@@ -1444,6 +1445,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         }
 
         LogExecutionInfo($"EXEC_ORDER_ATTACH src={source} trade={tradeId} role={role} state={order.State} ext={order.ExtId} type={order.Type} dir={order.Direction} price={order.Price:0.########} trig={order.TriggerPrice:0.########} unfilled={order.Unfilled:0.########} qty={order.QuantityToFill:0.########}");
+        if (role == "ENTRY" && EntryOrderLifecyclePolicy.ShouldCancelIocRemainder(
+                execution.ResearchPath, order.State.ToString(), execution.EntryFilledQty, order.Unfilled, execution.ExitCompleted))
+            ScheduleScalpIocRemainderCancel(execution, order);
+        if (role == "ENTRY" && execution.ResearchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath &&
+            _lastResearchCandle is { } current && IsStaleUnfilledEntry(execution, current.Bar))
+            ScheduleStaleUnfilledEntryAbortIfNeeded(execution, current);
         if (IsFailedOrderState(order.State.ToString()))
         {
             var eventName = IsExpectedOcoSiblingInactive(order)
@@ -2350,18 +2357,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (sameBarReasons.Length > 0 && !IsDailyVolumeSameBarTargetOnlyAllowed(signal, researchPath, sameBarReasons))
             return Reject(sameBarReasons);
 
-        if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
-            return Reject($"LiveDailyLoss:net={_liveAccountDailyNetPnlDollars:0.##},limit={_actualDailyLossLimitDollars:0.##}");
-        if (signal.Side == TradeSide.Long && IsWeeklyLongLossGateActive(out var weeklyReason))
-            return Reject(weeklyReason);
         if (ReplayMaxTradesPerDay > 0 && _replayTradesToday >= ReplayMaxTradesPerDay)
             return Reject($"DailyTradeLimit:max={ReplayMaxTradesPerDay}");
 
         var profile = _snapshot.ExecutionProfile;
         if (profile.StopAfterDailyTarget && profile.DailyTargetDollars > 0m && _replayDailyPnlDollars >= profile.DailyTargetDollars)
             return Reject($"DailyTarget:pnl={_replayDailyPnlDollars:0.##},target={profile.DailyTargetDollars:0.##}");
-        if (profile.DailyLossLimitDollars > 0m && _replayDailyPnlDollars <= -profile.DailyLossLimitDollars)
-            return Reject($"DailyLoss:pnl={_replayDailyPnlDollars:0.##},lossLimit={profile.DailyLossLimitDollars:0.##}");
         if (ReplayUseFullLossGuard && profile.MaxFullLossTradesPerDay > 0 && _replayFullLossTradesToday >= profile.MaxFullLossTradesPerDay)
             return Reject($"FullLossLimit:fullLosses={_replayFullLossTradesToday},max={profile.MaxFullLossTradesPerDay}");
         if (ReplayUseConsecutiveLossGuard && profile.MaxConsecutiveLossesPerDay > 0 && _replayConsecutiveLossesToday >= profile.MaxConsecutiveLossesPerDay)
@@ -3457,19 +3458,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             StartShadowTradeTracking(signal, entryCandle, researchPath, stop, risk);
         var scalp = researchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath;
         var requestedQty = ConfiguredExecutionQuantity;
-        if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
-        {
-            var reason = $"LiveDailyLoss:net={_liveAccountDailyNetPnlDollars:0.##},limit={_actualDailyLossLimitDollars:0.##}";
-            AppendExecutionDecision(signal, entryCandle, "Skip", reason, researchPath, stop, risk);
-            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_LIVE_DAILY_LOSS", "-", researchPath, entryCandle.Close, 0m, reason);
-            return;
-        }
-        if (signal.Side == TradeSide.Long && IsWeeklyLongLossGateActive(out var weeklyLongLossReason))
-        {
-            AppendExecutionDecision(signal, entryCandle, "Skip", weeklyLongLossReason, researchPath, stop, risk);
-            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_WEEKLY_LONG_LOSS_V219", "-", researchPath, entryCandle.Close, 0m, weeklyLongLossReason);
-            return;
-        }
         if (ReplayMaxTradesPerDay > 0 && _replayTradesToday >= ReplayMaxTradesPerDay)
         {
             AppendExecutionDecision(signal, entryCandle, "Skip", $"DailyTradeLimit:max={ReplayMaxTradesPerDay}", researchPath, stop, risk);
@@ -3481,12 +3469,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         {
             AppendExecutionDecision(signal, entryCandle, "Skip", $"DailyTarget:pnl={_replayDailyPnlDollars:0.##},target={executionProfile.DailyTargetDollars:0.##}", researchPath, stop, risk);
             AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_DAILY_TARGET", "-", researchPath, entryCandle.Close, 0m, $"pnl={_replayDailyPnlDollars:0.##}|target={executionProfile.DailyTargetDollars:0.##}");
-            return;
-        }
-        if (executionProfile.DailyLossLimitDollars > 0m && _replayDailyPnlDollars <= -executionProfile.DailyLossLimitDollars)
-        {
-            AppendExecutionDecision(signal, entryCandle, "Skip", $"DailyLoss:pnl={_replayDailyPnlDollars:0.##},lossLimit={executionProfile.DailyLossLimitDollars:0.##}", researchPath, stop, risk);
-            AppendExecutionEvent(signal, string.Empty, entryCandle, "SKIP_DAILY_LOSS", "-", researchPath, entryCandle.Close, 0m, $"pnl={_replayDailyPnlDollars:0.##}|lossLimit={executionProfile.DailyLossLimitDollars:0.##}");
             return;
         }
         if (ReplayUseFullLossGuard && executionProfile.MaxFullLossTradesPerDay > 0 && _replayFullLossTradesToday >= executionProfile.MaxFullLossTradesPerDay)
@@ -6353,12 +6335,10 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         LogExecutionInfo($"DYNAMIC_EXIT_COMPARISON trade={execution.TradeId} actualNet={net} early075ObservedPoints={execution.EarlyExitComparison.ExitPoints?.ToString() ?? "UNRESOLVED"} lock125ObservedPoints={execution.LockExitComparison.ExitPoints?.ToString() ?? "UNRESOLVED"} source=ForwardObservedPrices notBrokerFills=true");
         var tradingDay = GlobexTradingDayKey(execution.CreatedTime);
         RollLiveWeeklyPnlIfNeeded(tradingDay);
-        var weeklyGateWasActive = IsWeeklyLongLossGateActive(out _);
         _liveAccountDailyNetPnlDollars += net;
         _liveAccountWeeklyNetPnlDollars += net;
         if (execution.Side == TradeSide.Long)
             _liveLongWeeklyNetPnlDollars += net;
-        TriggerWeeklyLongLossGateIfNeeded();
 
         _researchLogger?.AppendLiveAccountPnl(
             _snapshot.SnapshotId,
@@ -6379,25 +6359,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             execution.HistoricalReplayAtCreation);
         AppendExecutionEvent(execution, "LIVE_ACCOUNT_PNL", classification, exitPrice, quantity, $"gross={gross:0.##}|rawGross={rawGross:0.##}|source={pnlSource}|commission={commission:0.##}|net={net:0.##}|dailyNet={_liveAccountDailyNetPnlDollars:0.##}");
 
-        if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
-        {
-            NotifyLiveIssue($"DailyLoss:{tradingDay:yyyyMMdd}", $"Trading-day net loss limit reached: {_liveAccountDailyNetPnlDollars:0.##} USD (limit -{_actualDailyLossLimitDollars:0.##}). New Actual entries are blocked for {tradingDay:yyyy-MM-dd}.");
-        }
-        if (!weeklyGateWasActive && IsWeeklyLongLossGateActive(out var weeklyLongLossReason))
-        {
-            AppendExecutionEvent(execution, "WEEKLY_LONG_LOSS_GATE_TRIGGERED_V219", "-", exitPrice, quantity, weeklyLongLossReason);
-            NotifyLiveIssue(
-                $"WeeklyLongLoss:{_liveAccountPnlWeekStart:yyyyMMdd}",
-                $"Weekly Long gate triggered for {_liveAccountPnlWeekStart:yyyy-MM-dd}: account net {_liveAccountWeeklyNetPnlDollars:0.##} USD, Long net {_liveLongWeeklyNetPnlDollars:0.##} USD, limit -{_actualWeeklyLongLossLimitDollars:0.##}. Existing positions remain protected; new Long entries are blocked until next week while Short entries remain eligible.");
-        }
     }
 
     private bool IsWeeklyLongLossGateActive(out string reason)
     {
-        reason = _weeklyLongLossGateTriggered
-            ? $"WeeklyLongLossV219:week={_liveAccountPnlWeekStart:yyyy-MM-dd}|accountNet={_liveAccountWeeklyNetPnlDollars:0.##}|longNet={_liveLongWeeklyNetPnlDollars:0.##}|limit={_actualWeeklyLongLossLimitDollars:0.##}|trigger={_weeklyLongLossGateTrigger}"
-            : string.Empty;
-        return _actualWeeklyLongLossLimitDollars > 0m && _weeklyLongLossGateTriggered;
+        reason = string.Empty;
+        return false;
     }
 
     private void TriggerWeeklyLongLossGateIfNeeded()
@@ -6474,12 +6441,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             _liveAccountWeeklyNetPnlDollars = Math.Round(_liveAccountWeeklyNetPnlDollars, 2);
             _liveLongWeeklyNetPnlDollars = Math.Round(_liveLongWeeklyNetPnlDollars, 2);
             LogLiveReadinessInfo($"LIVE_TRADING_WEEK_NET_RESTORED week={_liveAccountPnlWeekStart:yyyy-MM-dd} accountNet={_liveAccountWeeklyNetPnlDollars:0.##} longNet={_liveLongWeeklyNetPnlDollars:0.##}");
-            if (IsWeeklyLongLossGateActive(out _))
-            {
-                NotifyLiveIssue(
-                    $"WeeklyLongLoss:{_liveAccountPnlWeekStart:yyyyMMdd}",
-                    $"Restored weekly state blocks new Long entries: account net {_liveAccountWeeklyNetPnlDollars:0.##} USD, Long net {_liveLongWeeklyNetPnlDollars:0.##} USD, limit -{_actualWeeklyLongLossLimitDollars:0.##}. Short entries remain eligible.");
-            }
         }
         catch (Exception ex)
         {
@@ -6583,8 +6544,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
             _liveAccountDailyNetPnlDollars = Math.Round(_liveAccountDailyNetPnlDollars, 2);
             LogLiveReadinessInfo($"LIVE_TRADING_DAY_NET_RESTORED tradingDay={date:yyyy-MM-dd} net={_liveAccountDailyNetPnlDollars:0.##} normalTrades={_replayTradesToday}");
-            if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars)
-                NotifyLiveIssue($"DailyLoss:{date:yyyyMMdd}", $"Restored daily net loss is {_liveAccountDailyNetPnlDollars:0.##} USD, at or below the -{_actualDailyLossLimitDollars:0.##} limit. New Actual entries remain blocked.");
         }
         catch (Exception ex)
         {
@@ -8061,6 +8020,34 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             : candle.High >= execution.Stop || candle.Low <= execution.Target;
     }
 
+    private void ScheduleScalpIocRemainderCancel(ReplayExecutionState execution, Order order)
+    {
+        if (execution.ScalpIocRemainderCancelScheduled || execution.ScalpIocRemainderCancelRequested)
+            return;
+
+        execution.ScalpIocRemainderCancelScheduled = true;
+        _ = CancelScalpIocRemainderAfterDelayAsync(execution, order);
+    }
+
+    private async Task CancelScalpIocRemainderAfterDelayAsync(ReplayExecutionState execution, Order order)
+    {
+        await Task.Delay(ScalpIocRemainderCancelDelayMs);
+        EnqueueExecutionAction("CancelScalpIocRemainder", async () =>
+        {
+            execution.ScalpIocRemainderCancelScheduled = false;
+            var currentOrder = execution.EntryOrder;
+            if (currentOrder is null || !Equals(currentOrder.ExtId, order.ExtId) ||
+                !EntryOrderLifecyclePolicy.ShouldCancelIocRemainder(
+                    execution.ResearchPath, currentOrder.State.ToString(), execution.EntryFilledQty, currentOrder.Unfilled, execution.ExitCompleted))
+                return;
+
+            execution.ScalpIocRemainderCancelRequested = true;
+            var reason = $"delayMs={ScalpIocRemainderCancelDelayMs}|state={currentOrder.State}|unfilled={currentOrder.Unfilled:0.########}";
+            AppendExecutionEvent(execution, "SCALP_IOC_REMAINDER_CANCEL_REQUESTED", "ENTRY", currentOrder.Price, currentOrder.Unfilled, reason);
+            await TryCancelExecutionOrderAsync(currentOrder, "ScalpIocRemainder");
+        });
+    }
+
     private void ScheduleStaleUnfilledEntryAbortIfNeeded(OpfCandle candle)
     {
         foreach (var execution in ActiveReplayExecutions())
@@ -8572,10 +8559,22 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
                 return;
             }
 
+            var flattenOrderFullyFilled = IsFilledExecutionOrder(execution.EmergencyFlattenOrder);
             var accountPosition = Math.Abs(GetCurrentAccountPosition());
-            var remainingQty = Math.Min(accountPosition, RemainingExecutionQuantity(execution));
-            if (remainingQty <= 0m)
+            var executionRemaining = RemainingExecutionQuantity(execution);
+            if (!LiveProtectionFailClosedGuard.RequiresEmergencyFlattenResidual(
+                    flattenOrderFullyFilled, accountPosition, executionRemaining))
+            {
+                if (flattenOrderFullyFilled && executionRemaining > 0m)
+                {
+                    var detail = $"reason={reason}|accountPosition={accountPosition:0.########}|executionRemaining={executionRemaining:0.########}|awaitingExitCallback";
+                    AppendExecutionEvent(execution, "EMERGENCY_FLATTEN_RESIDUAL_SUPPRESSED_FILLED_ORDER", "FLATTEN", 0m, 0m, detail);
+                    SetLiveReadinessBlocked("EmergencyFlattenFillCallbackPending", $"Completed emergency flatten for {execution.TradeId} is awaiting exit/account-position reconciliation. {detail}");
+                }
                 return;
+            }
+
+            var remainingQty = Math.Min(accountPosition, executionRemaining);
 
             execution.EmergencyFlattenOrderSubmitted = false;
             LogExecutionInfo($"EXEC_EMERGENCY_FLATTEN_RESIDUAL trade={execution.TradeId} reason={reason} qty={remainingQty:0.########}");
@@ -11081,8 +11080,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         var dailyTradeLimitText = ReplayMaxTradesPerDay > 0 ? ReplayMaxTradesPerDay.ToString() : "unlimited";
         hud.AppendLine($"ActualExec: {(ActualOrdersEnabled ? "ON" : "OFF")} dataOnly={RichBarDataCollectionOnly || MicrostructureAuditCollectionOnly || FootprintDataCollectionOnly || SweepReclaimDataCollectionOnly || ZoneBehaviorLedgerDataOnly || MarketExecutionTapeDataOnly || CandidateScenarioTapeDataOnly} sent={_replayTradesToday}/{dailyTradeLimitText} exits={_replayExitsToday} slots={activeExecutions.Count}/2 pos={GetCurrentAccountPosition():0.##} cleanup={cleanupCount}");
         var dailyTarget = _snapshot?.ExecutionProfile.DailyTargetDollars ?? 0m;
-        hud.AppendLine($"Today: TP={_replayTpToday} SL={_replaySlToday} Other={_replayOtherExitToday} NetR={_replayDailyR:0.00} Gross=${_replayDailyPnlDollars:0.##} AccountNet=${_liveAccountDailyNetPnlDollars:0.##} target=${dailyTarget:0.##} loss=${_actualDailyLossLimitDollars:0.##}");
-        hud.AppendLine($"Week: {_liveAccountPnlWeekStart:MM-dd} AccountNet=${_liveAccountWeeklyNetPnlDollars:0.##} LongNet=${_liveLongWeeklyNetPnlDollars:0.##} longGate={(IsWeeklyLongLossGateActive(out _) ? "BLOCKED" : "OPEN")} limit=-${_actualWeeklyLongLossLimitDollars:0.##}");
+        hud.AppendLine($"Today: TP={_replayTpToday} SL={_replaySlToday} Other={_replayOtherExitToday} NetR={_replayDailyR:0.00} Gross=${_replayDailyPnlDollars:0.##} AccountNet=${_liveAccountDailyNetPnlDollars:0.##} target=${dailyTarget:0.##} lossLimit=OFF");
+        hud.AppendLine($"Week: {_liveAccountPnlWeekStart:MM-dd} AccountNet=${_liveAccountWeeklyNetPnlDollars:0.##} LongNet=${_liveLongWeeklyNetPnlDollars:0.##} longGate=OFF");
         var latency = Connector?.LatencyManager;
         TimeSpan? lastMarketDataSilence = latency?.LastMarketDataReceptionTimeUtc is DateTime lastMarketDataUtc
             ? DateTime.UtcNow - lastMarketDataUtc
@@ -11115,7 +11114,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         compact.AppendLine($"Regime {regime.Regime} | zones {_activeZoneCount} | slots {activeExecutions.Count}/2");
         EsOptionsProxySnapshot esHud;
         lock (_esOptionsProxySync) esHud = _esOptionsProxy;
-        var esClock = IsHistoricalReplayTime(candle.Time) ? DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc) : DateTime.UtcNow;
+        var esClock = IsHistoricalOptionsContext(candle.Time) ? DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc) : DateTime.UtcNow;
         var esAge = Math.Max(0, (esClock - esHud.CapturedAtUtc).TotalSeconds);
         var esFresh = esHud.CapturedAtUtc <= esClock && esAge <= 90;
         var quotesFresh = esHud.EvidenceSchema < 2 || esHud.OptionQuotesObservedAtUtc is { } quoteAt && quoteAt <= esClock && esClock - quoteAt <= TimeSpan.FromSeconds(90);
@@ -11816,6 +11815,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         public bool ProtectionCleanupDone { get; set; }
         public bool ProtectionCleanupInProgress { get; set; }
         public bool EntryAbortPending { get; set; }
+        public bool ScalpIocRemainderCancelScheduled { get; set; }
+        public bool ScalpIocRemainderCancelRequested { get; set; }
         public bool PartialEntryFinalizeScheduled { get; set; }
         public bool ReplayStopExitPending { get; set; }
         public decimal GlobexCloseoutReferencePriceV184 { get; set; }

@@ -35,7 +35,6 @@ public sealed partial class OpeningPullbackFailureStrategy
         else if (IsUsCashOpenBlackout(time, out var blackout)) reason = blackout;
         else if (ActiveReplayExecutions().Count > 0 || GetCurrentAccountPosition() != 0m ||
                  Connector?.Orders.Any(o => IsWorkingExecutionOrder(o) && Equals(o.Portfolio, Portfolio) && Equals(o.Security, Security)) == true) reason = "AccountNotFlatOrWorkingOrdersPresent";
-        else if (_actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars) reason = "DailyLossLimit";
         else if (ReplayMaxTradesPerDay > 0 && _replayTradesToday >= ReplayMaxTradesPerDay) reason = "DailyTradeLimit";
 
         var entry = CurrentExecutionMarketReference(_latestCalculatedMarketPrice);

@@ -22,7 +22,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         var activeExecutions = ActiveReplayExecutions();
         var globexLocked = IsGlobexCloseoutLockWindow(entryCandle.Time, out var globexReason);
         var usOpenBlackout = IsUsCashOpenBlackout(entryCandle.Time, out var usOpenReason);
-        var weeklyLongGate = signal.Side == TradeSide.Long && IsWeeklyLongLossGateActive(out _);
+        const bool weeklyLongGate = false;
         var zone = signal.Zone;
         _zoneBehaviorStates.TryGetValue(zone?.ZoneId ?? string.Empty, out var zoneState);
         var zoneContext = CaptureMarketExecutionZoneContext(zone, zoneState);
@@ -34,7 +34,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             _liveLongWeeklyNetPnlDollars, activeExecutions.Count, activeExecutions.Count == 1, globexLocked, globexReason,
             usOpenBlackout, usOpenReason, _latencyGateActive,
             ReplayMaxTradesPerDay > 0 && _replayTradesToday >= ReplayMaxTradesPerDay,
-            _actualDailyLossLimitDollars > 0m && _liveAccountDailyNetPnlDollars <= -_actualDailyLossLimitDollars,
+            false,
             weeklyLongGate, zoneContext));
         return candidateId;
     }

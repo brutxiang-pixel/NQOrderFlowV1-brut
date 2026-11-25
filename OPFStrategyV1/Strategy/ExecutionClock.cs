@@ -42,4 +42,8 @@ public static class ExecutionClock
             : DateTime.SpecifyKind(candleTime, DateTimeKind.Utc);
         return Math.Abs((utcNow - candleUtc).TotalMinutes) > 10d;
     }
+
+    public static bool IsHistorical(DateTime candleTime, DateTime utcNow, DateTime? latestMarketEventTime) =>
+        !(latestMarketEventTime.HasValue && !IsHistorical(latestMarketEventTime.Value, utcNow)) &&
+        IsHistorical(candleTime, utcNow);
 }

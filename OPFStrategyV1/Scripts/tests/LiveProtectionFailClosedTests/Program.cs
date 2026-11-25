@@ -78,6 +78,24 @@ foreach (var testCase in positionCases)
 }
 Console.WriteLine($"PASS live exit account-position reconciliation cases={positionCases.Length}");
 
+var residualCases = new[]
+{
+    ("filled-flatten-order-stale-position", true, 1m, 1m, false),
+    ("flat-account", false, 0m, 1m, false),
+    ("execution-flat", false, 1m, 0m, false),
+    ("partial-flatten-with-residual", false, 1m, 1m, true)
+};
+foreach (var testCase in residualCases)
+{
+    var actual = LiveProtectionFailClosedGuard.RequiresEmergencyFlattenResidual(
+        testCase.Item2,
+        testCase.Item3,
+        testCase.Item4);
+    if (actual != testCase.Item5)
+        throw new InvalidOperationException($"Assertion failed [{testCase.Item1}]: expected={testCase.Item5} actual={actual}");
+}
+Console.WriteLine($"PASS emergency-flatten residual race cases={residualCases.Length}");
+
 System.Runtime.Loader.AssemblyLoadContext.Default.Resolving += (context, name) =>
 {
     var path = System.IO.Path.Combine(@"D:\Program Files (x86)\ATAS Platform", name.Name + ".dll");
@@ -409,9 +427,13 @@ if (preflightEnd < entryStart || preflightEnd >= orderCreation)
 var sharedGates = strategySource[entryStart..preflightEnd];
 foreach (var gate in new[] { "ContextEntryReason", "OptionsEntryGateReason", "NqCrossMarketQualityReason",
     "IsReplayExecutionPathEnabled", "IsRestoredPriorityPathAllowed", "ActualExecutionRiskSkipReasons",
-    "IsWeeklyLongLossGateActive", "DailyTradeLimit", "DailyTarget", "DailyLoss", "FullLossLimit", "ConsecutiveLossLimit" })
+    "DailyTradeLimit", "DailyTarget", "FullLossLimit", "ConsecutiveLossLimit" })
     if (!sharedGates.Contains(gate, StringComparison.Ordinal))
         throw new InvalidOperationException("Switch bypassed actual entry gate: " + gate);
+if (sharedGates.Contains("LiveDailyLoss", StringComparison.Ordinal) ||
+    sharedGates.Contains("IsWeeklyLongLossGateActive", StringComparison.Ordinal) ||
+    sharedGates.Contains("DailyLossLimit", StringComparison.Ordinal))
+    throw new InvalidOperationException("Cumulative daily or weekly loss must not block entries.");
 var icebergSource = File.ReadAllText(Path.Combine(projectDirectory.FullName, "Strategy", "OpeningPullbackFailureStrategy.NativeIceberg.cs"));
 var permissionCheck = icebergSource.IndexOf("if (!permitted)", StringComparison.Ordinal);
 var flattenQueue = icebergSource.IndexOf("EnqueueExecutionAction(\"IcebergSwitchFlatten\"", StringComparison.Ordinal);

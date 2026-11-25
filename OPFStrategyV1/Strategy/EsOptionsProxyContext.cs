@@ -70,6 +70,13 @@ public sealed partial class OpeningPullbackFailureStrategy
     private bool IsEsOptionsTradingChart => IsEsOptionsConsumer;
 #endif
 
+    private bool IsHistoricalOptionsContext(DateTime time)
+    {
+        DateTime lastTrade;
+        lock (_intradaySync) lastTrade = _lastEntryTradeTime;
+        return ExecutionClock.IsHistorical(time, DateTime.UtcNow, lastTrade == default ? null : lastTrade);
+    }
+
     private void InitializeEsOptionsProxy()
     {
 #if OPF_ATAS_X
@@ -164,11 +171,11 @@ public sealed partial class OpeningPullbackFailureStrategy
         try
         {
             var replayTime = _lastResearchCandle?.Time;
-            var context = replayTime.HasValue && IsHistoricalReplayTime(replayTime.Value)
+            var context = replayTime.HasValue && IsHistoricalOptionsContext(replayTime.Value)
                 ? ReadEsOptionsProxyArchiveAsOf(DateTime.SpecifyKind(replayTime.Value, DateTimeKind.Utc))
                 : OptionsProxySnapshotStore.ReadLatest(OptionsProxyLatestPath);
 #if OPF_ATAS_X
-            if (!(replayTime.HasValue && IsHistoricalReplayTime(replayTime.Value)) &&
+            if (!(replayTime.HasValue && IsHistoricalOptionsContext(replayTime.Value)) &&
                 context.Status == "ModelReady" && context.Source != EsOptionChainSource)
                 context = EsOptionsProxySnapshot.Unavailable("waitingForRithmicOptionChain");
 #endif
@@ -601,7 +608,7 @@ public sealed partial class OpeningPullbackFailureStrategy
 #endif
         EsOptionsProxySnapshot s;
         lock (_esOptionsProxySync) s = _esOptionsProxy;
-        var replay = _lastResearchCandle is { } candle && IsHistoricalReplayTime(candle.Time);
+        var replay = _lastResearchCandle is { } candle && IsHistoricalOptionsContext(candle.Time);
         var clock = replay ? DateTime.SpecifyKind(_lastResearchCandle!.Time, DateTimeKind.Utc) : DateTime.UtcNow;
         if (replay)
         {
@@ -710,7 +717,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         RefreshEsOptionsSharedContext();
         EsOptionsProxySnapshot context;
         lock (_esOptionsProxySync) context = _esOptionsProxy;
-        var historical = IsHistoricalReplayTime(candle.Time);
+        var historical = IsHistoricalOptionsContext(candle.Time);
         var decisionUtc = historical ? DateTime.SpecifyKind(candle.Time, DateTimeKind.Utc) : DateTime.UtcNow;
         if (historical)
         {
