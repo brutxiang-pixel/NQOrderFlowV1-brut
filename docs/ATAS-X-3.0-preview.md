@@ -1,5 +1,14 @@
 # ATAS X 3.0 预览版迁移
 
+## 3.0.0-preview.23
+修复 NQ 冰山剥头皮被 2-tick 价差门槛长期挡住的问题。preview.22 的同一轮 21 根五分钟K线样本中，NQ 的价差观察有 698 次，其中 1–2 tick 仅 41 次、3–5 tick 有 403 次；MNQ 的 9,424 次观察中，1–2 tick 有 1,783 次。preview.23 将 NQ 上限设为 5 tick，MNQ 与其他品种仍为 2 tick；手续费过滤改用实际价差与至少 2 tick 的成本垫。启动日志会写出 quoteSpreadLimitTicks 和价差分布。
+
+MNQ 的冰山结构止损上限由 8 tick 收紧到 6 tick（1.5 点）；NQ 保留 8 tick。NQ/MNQ 的恢复确认收紧为至少 3 笔同向主动成交、净主动量至少 30%，最后两笔仍须同向且在冰山价位外；ES/MES/GC/MGC 保留旧的 2 笔、20% 确认。固定 12-tick 目标、4-tick 保本触发和面板手数上限不变。
+
+这轮同时日志显示 NQ 与 MNQ 的推断补量段分别为 451 与 7,314，说明候选生成量本身也有行情/盘口差异；价差调整能解除一个主要执行门槛，但不能保证两个合约交易笔数相同。上述 MNQ 的 preview.22 成交只是优化前基线；preview.23 胜率仍待重启后新成交验证。订单簿失衡研究仅支持短周期信号可能含预测信息，并非 NQ/MNQ 本策略的胜率证据（Cont、Kukanov、Stoikov，arXiv:1011.6402；Gould、Bonart，arXiv:1512.03492）。
+
+构建 DLL：OPFStrategyV1/bin/ATASX/Release/net10.0-windows/OPFStrategyV1.dll；部署时间：2026-11-25 20:07（北京时间）；覆盖前 preview.22 备份于 OPFStrategyV1/bin/deployment-backups/before-preview.23-20261125-200710/，旧 DLL SHA-256：01E15F63CE7E4B1B0B02A42F27C69B3D30EF8CE355DB0D13A0B53CE1B220B1AC。新 DLL SHA-256：9266F483FC86AF78272FCEE89E708591223BA65791A1A66AEFAC51DD41FE8BDE。IntradayEntryTests 279 项、LiveProtectionFailClosedTests 与 ATAS X Release 构建通过（0 警告、0 错误）；已复制并校验，但需用户重启 ATAS X 后再确认运行实例为 preview.23。
+
 ## 3.0.0-preview.22
 
 修复 `IcebergAbsorptionScalp` 的手续费保护保本触发被 legacy 策略分支屏蔽的问题；显式配置的 0 触发仍可关闭保护。冰山漏斗新增价差 tick 分布，NQ 零信号诊断确认 2-tick 价差上限是主要拦截，保持门槛不变以免为增加信号承担更高点差成本。构建与部署 DLL SHA-256：`01E15F63CE7E4B1B0B02A42F27C69B3D30EF8CE355DB0D13A0B53CE1B220B1AC`；覆盖前 preview.21 DLL 备份于 `OPFStrategyV1/bin/deployment-backups/before-preview.22-20261125-150111/`。IntradayEntryTests 277 项、LiveProtectionFailClosedTests 和 ATAS X Release 构建均通过；运行交易验收仍需确认图表实例版本与重启后事件。

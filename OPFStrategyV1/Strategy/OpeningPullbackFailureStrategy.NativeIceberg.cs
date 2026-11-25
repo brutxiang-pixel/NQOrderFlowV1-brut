@@ -91,7 +91,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             _nextScalpFunnelLog = live.Time.AddMinutes(1);
             var blocks = string.Join(",", totals.EvaluationBlocks.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value}"));
             var quoteSpreads = string.Join(",", totals.QuoteSpreadTicks.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value}"));
-            LogLiveReadinessInfo($"ICEBERG_SCALP_FUNNEL day={GlobexTradingDayKey(live.Time):yyyy-MM-dd} at={live.Time:O} product={Security?.Code} status={status} " +
+            LogLiveReadinessInfo($"ICEBERG_SCALP_FUNNEL day={GlobexTradingDayKey(live.Time):yyyy-MM-dd} at={live.Time:O} product={Security?.Code} quoteSpreadLimitTicks={IntradayEntryPolicy.ScalpMaxQuoteSpreadTicksFor(_snapshot?.InstrumentProfile.Instrument)} status={status} " +
                 $"barsEvaluated={totals.EvaluatedBars.Count} barsWithIcebergOpportunity={totals.OpportunityBars.Count} " +
                 $"confirmedIds={Volatile.Read(ref totals.ConfirmedIds)} segments={Volatile.Read(ref totals.Segments)} inferredSegments={Volatile.Read(ref totals.InferredSegments)} signals={Volatile.Read(ref totals.Signals)} " +
                 $"iocSubmitted={Volatile.Read(ref totals.Submitted)} entryFilled={Volatile.Read(ref totals.Filled)} quoteSpreadTicks={quoteSpreads} evaluationBlocks={blocks}");
@@ -131,7 +131,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             var selectedAsk = IntradayEntryPolicy.ScalpQuote(bestAsk?.Price ?? 0m, bestAsk?.Time ?? default, _scalpAsk, now);
             bid = selectedBid.Price;
             ask = selectedAsk.Price;
-            return IntradayEntryPolicy.ScalpQuoteBlock(bid, ask, selectedBid.At, selectedAsk.At, now, tick);
+            return IntradayEntryPolicy.ScalpQuoteBlock(bid, ask, selectedBid.At, selectedAsk.At, now, tick, _snapshot?.InstrumentProfile.Instrument);
         }
     }
 
@@ -157,7 +157,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
         if (quoteBlock is not null)
             return ReportScalpFunnel(live, false, quoteBlock, opportunity: true);
-        if (IntradayEntryPolicy.ScalpTargetTicks * tick <= _actualCommissionPerContractRoundTrip / _snapshot.InstrumentProfile.PointValue + 2m * tick)
+        if (!IntradayEntryPolicy.ScalpTargetCoversCosts(IntradayEntryPolicy.ScalpTargetTicks, tick, ask - bid, _actualCommissionPerContractRoundTrip, _snapshot.InstrumentProfile.PointValue))
             return ReportScalpFunnel(live, false, "FeeGuard", opportunity: true);
         (DateTime Time, decimal Price, decimal Volume, decimal Signed)[] tape;
         lock (_intradaySync) tape = _entryTape.Where(x => x.Time > live.Time.AddSeconds(-10) && x.Time <= live.Time).ToArray();
@@ -177,10 +177,10 @@ public sealed partial class OpeningPullbackFailureStrategy
                 status = "DuplicateAbsorption";
                 continue;
             }
-            var stop = IntradayEntryPolicy.IcebergScalpStop(isLong, price, tick, time, received, live.Time, tape, attackAfter, replenishment?.RefilledAt);
+            var stop = IntradayEntryPolicy.IcebergScalpStop(isLong, price, tick, time, received, live.Time, tape, attackAfter, replenishment?.RefilledAt, _snapshot.InstrumentProfile.Instrument);
             var entry = isLong ? ask : bid;
             if (stop is not { } stopPrice) continue;
-            if ((isLong ? bid <= price : ask >= price) || !IntradayEntryPolicy.ScalpRiskReady(isLong, entry, stopPrice, tick))
+            if ((isLong ? bid <= price : ask >= price) || !IntradayEntryPolicy.ScalpRiskReady(isLong, entry, stopPrice, tick, _snapshot.InstrumentProfile.Instrument))
             {
                 status = "EntryPriceOrRisk";
                 continue;

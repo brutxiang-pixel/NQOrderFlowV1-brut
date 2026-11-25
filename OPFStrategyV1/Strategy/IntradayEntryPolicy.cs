@@ -9,6 +9,12 @@ public static class IntradayEntryPolicy
 {
     internal const string IcebergAbsorptionScalpPath = "IcebergAbsorptionScalp";
     internal const int ScalpMaxRiskTicks = 8;
+    internal const int ScalpMnqMaxRiskTicks = 6;
+    internal const int ScalpDefaultMaxQuoteSpreadTicks = 2;
+    internal const int ScalpMnqMaxQuoteSpreadTicks = 2;
+    internal const int ScalpNqMaxQuoteSpreadTicks = 5;
+    internal const int ScalpMinReclaimTrades = 3;
+    internal const decimal ScalpMinReclaimNetActiveRatio = .30m;
     internal const int ScalpBreakEvenTriggerTicks = 4;
     internal const int ScalpTargetTicks = 12;
 
@@ -23,7 +29,7 @@ public static class IntradayEntryPolicy
 
     internal static decimal? IcebergScalpStop(bool isLong, decimal level, decimal tick, DateTime eventTime,
         DateTime received, DateTime now, IReadOnlyList<(DateTime Time, decimal Price, decimal Volume, decimal Signed)> tape,
-        DateTime attackAfter = default, DateTime? refilledAt = null)
+        DateTime attackAfter = default, DateTime? refilledAt = null, string? instrument = null)
     {
         var age = now - received;
         if (tick <= 0m || eventTime > received || received - eventTime > TimeSpan.FromSeconds(3) ||
@@ -39,14 +45,13 @@ public static class IntradayEntryPolicy
         if (now - last.Time > TimeSpan.FromMilliseconds(750) || side * (last.Price - level) < tick || side * last.Signed <= 0m)
             return null;
         var latest = after.Where(x => x.Time >= last.Time.AddSeconds(-1)).ToArray();
-        if (latest.Count(x => side * x.Signed > 0m && side * (x.Price - level) >= tick) < 2 ||
-            side * latest.Sum(x => x.Signed) < latest.Sum(x => x.Volume) * .2m) return null;
+        if (!ScalpReclaimReady(isLong, level, tick, latest, instrument)) return null;
         var extreme = isLong ? attack.Concat(after).Min(x => x.Price) : attack.Concat(after).Max(x => x.Price);
         return (isLong ? Math.Min(level, extreme) : Math.Max(level, extreme)) - side * tick;
     }
 
-    internal static bool ScalpQuoteReady(decimal bid, decimal ask, DateTime bidAt, DateTime askAt, DateTime now, decimal tick) =>
-        ScalpQuoteBlock(bid, ask, bidAt, askAt, now, tick) is null;
+    internal static bool ScalpQuoteReady(decimal bid, decimal ask, DateTime bidAt, DateTime askAt, DateTime now, decimal tick, string? instrument) =>
+        ScalpQuoteBlock(bid, ask, bidAt, askAt, now, tick, instrument) is null;
 
     internal static DateTime ScalpQuoteTime(decimal price, DateTime snapshotAt, (decimal Price, DateTime At) callback, DateTime now)
     {
@@ -62,17 +67,46 @@ public static class IntradayEntryPolicy
         return (snapshotPrice, snapshotAt);
     }
 
-    internal static string? ScalpQuoteBlock(decimal bid, decimal ask, DateTime bidAt, DateTime askAt, DateTime now, decimal tick)
+    internal static string? ScalpQuoteBlock(decimal bid, decimal ask, DateTime bidAt, DateTime askAt, DateTime now, decimal tick, string? instrument)
     {
         if (tick <= 0m || bid <= 0m || ask <= bid) return "QuoteMissingOrCrossed";
-        if (ask - bid > 2m * tick) return "QuoteSpreadWide";
+        if (ask - bid > ScalpMaxQuoteSpreadTicksFor(instrument) * tick) return "QuoteSpreadWide";
         if (bidAt > now || askAt > now || now - bidAt > TimeSpan.FromSeconds(2) || now - askAt > TimeSpan.FromSeconds(2))
             return "QuoteTimestampInvalid";
         return null;
     }
 
-    internal static bool ScalpRiskReady(bool isLong, decimal entry, decimal stop, decimal tick) =>
-        (isLong ? entry - stop : stop - entry) >= tick && Math.Abs(entry - stop) <= ScalpMaxRiskTicks * tick;
+    internal static int ScalpMaxQuoteSpreadTicksFor(string? instrument) => ProfileCatalog.ContractRoot(instrument) switch
+    {
+        "MNQ" => ScalpMnqMaxQuoteSpreadTicks,
+        "NQ" => ScalpNqMaxQuoteSpreadTicks,
+        _ => ScalpDefaultMaxQuoteSpreadTicks
+    };
+
+    internal static int ScalpMaxRiskTicksFor(string? instrument) =>
+        ProfileCatalog.ContractRoot(instrument) == "MNQ" ? ScalpMnqMaxRiskTicks : ScalpMaxRiskTicks;
+
+    internal static bool ScalpTargetCoversCosts(int targetTicks, decimal tick, decimal spreadPoints, decimal commission, decimal pointValue) =>
+        targetTicks > 0 && tick > 0m && spreadPoints >= 0m && commission >= 0m && pointValue > 0m &&
+        targetTicks * tick > Math.Max(2m * tick, spreadPoints) + commission / pointValue;
+
+    internal static bool ScalpRiskReady(bool isLong, decimal entry, decimal stop, decimal tick, string? instrument) =>
+        (isLong ? entry - stop : stop - entry) >= tick && Math.Abs(entry - stop) <= ScalpMaxRiskTicksFor(instrument) * tick;
+
+    internal static bool ScalpReclaimReady(bool isLong, decimal level, decimal tick,
+        IReadOnlyList<(DateTime Time, decimal Price, decimal Volume, decimal Signed)> latest, string? instrument)
+    {
+        if (latest.Count == 0 || tick <= 0m) return false;
+        var side = isLong ? 1m : -1m;
+        var reclaimTrades = latest.Count(x => side * x.Signed > 0m && side * (x.Price - level) >= tick);
+        var totalVolume = latest.Sum(x => x.Volume);
+        if (ProfileCatalog.ContractRoot(instrument) is not ("MNQ" or "NQ"))
+            return reclaimTrades >= 2 && totalVolume > 0m && side * latest.Sum(x => x.Signed) >= totalVolume * .20m;
+        if (reclaimTrades < ScalpMinReclaimTrades) return false;
+        var lastTwo = latest.TakeLast(2).ToArray();
+        return totalVolume > 0m && side * latest.Sum(x => x.Signed) >= totalVolume * ScalpMinReclaimNetActiveRatio &&
+            lastTwo.Length == 2 && lastTwo.All(x => side * x.Signed > 0m && side * (x.Price - level) >= tick);
+    }
 
     internal static decimal ScalpBreakEvenTriggerR(decimal risk, decimal tick, decimal commission, decimal pointValue)
     {

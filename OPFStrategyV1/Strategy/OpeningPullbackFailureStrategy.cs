@@ -4023,7 +4023,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
                 _liveReadinessBlocked || positionQuantity != 0m || now - execution.CreatedTime > TimeSpan.FromMilliseconds(750) ||
                 ScalpQuoteBlock(now, tick, out var bid, out var ask) is not null ||
                 (isLong ? ask > execution.CreatedPrice || bid <= execution.Stop : bid < execution.CreatedPrice || ask >= execution.Stop) ||
-                !IntradayEntryPolicy.ScalpRiskReady(isLong, isLong ? ask : bid, execution.Stop, tick))
+                !IntradayEntryPolicy.ScalpRiskReady(isLong, isLong ? ask : bid, execution.Stop, tick, _snapshot.InstrumentProfile.Instrument))
             {
                 AbortEntrySubmissionV178(execution, execution.CreatedPrice, "IcebergAbsorptionScalpQuoteChanged");
                 return;
@@ -4765,7 +4765,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private decimal MaxAllowedActualRiskPoints(CandidateSignal signal, string researchPath, decimal risk)
     {
         if (researchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath)
-            return IntradayEntryPolicy.ScalpMaxRiskTicks * _snapshot!.InstrumentProfile.TickSize;
+            return IntradayEntryPolicy.ScalpMaxRiskTicksFor(_snapshot!.InstrumentProfile.Instrument) * _snapshot.InstrumentProfile.TickSize;
         if (StructureRiskPolicy.Applies(researchPath))
             return EsResponseAlignedBreakoutPolicy.MaximumInitialRiskPoints(XBreakoutProduct, researchPath, StructureRiskPolicy.MaxPoints);
         if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse")
@@ -5336,7 +5336,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return new[] { $"MnqESResponseAlignedBreakoutInitialRiskCap:risk={risk:0.##}|max={EsResponseAlignedBreakoutPolicy.MnqMaxInitialRiskPoints}" };
         if (researchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath)
             return IntradayEntryPolicy.IsIcebergScalpProduct(_snapshot.InstrumentProfile.Instrument) && risk >= _snapshot.InstrumentProfile.TickSize &&
-                risk <= IntradayEntryPolicy.ScalpMaxRiskTicks * _snapshot.InstrumentProfile.TickSize
+                risk <= IntradayEntryPolicy.ScalpMaxRiskTicksFor(_snapshot.InstrumentProfile.Instrument) * _snapshot.InstrumentProfile.TickSize
                 ? Array.Empty<string>() : new[] { "IcebergAbsorptionScalpRiskOutOfRange" };
 #if OPF_ATAS_X
         var chartInstrument = _snapshot.InstrumentProfile;
@@ -7069,7 +7069,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         AppendExecutionEvent(execution, "PROTECTION_QUOTE_PREFLIGHT_OK_V178", "-", reference, qty, $"bid={quote.Bid:0.########}|ask={quote.Ask:0.########}|barLag={barLag}");
 
         if (execution.ResearchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath &&
-            (!IntradayEntryPolicy.ScalpRiskReady(execution.Side == TradeSide.Long, entry, execution.Stop, _snapshot!.InstrumentProfile.TickSize) ||
+            (!IntradayEntryPolicy.ScalpRiskReady(execution.Side == TradeSide.Long, entry, execution.Stop, _snapshot!.InstrumentProfile.TickSize, _snapshot.InstrumentProfile.Instrument) ||
              (execution.Side == TradeSide.Long ? quote.Bid <= execution.Stop : quote.Ask >= execution.Stop)))
         {
             const string reason = "IcebergAbsorptionScalpStructureInvalidAfterFill";
