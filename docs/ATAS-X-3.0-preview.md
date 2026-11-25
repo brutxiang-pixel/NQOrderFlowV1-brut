@@ -1,5 +1,9 @@
 # ATAS X 3.0 预览版迁移
 
+## 3.0.0-preview.22
+
+修复 `IcebergAbsorptionScalp` 的手续费保护保本触发被 legacy 策略分支屏蔽的问题；显式配置的 0 触发仍可关闭保护。冰山漏斗新增价差 tick 分布，NQ 零信号诊断确认 2-tick 价差上限是主要拦截，保持门槛不变以免为增加信号承担更高点差成本。构建与部署 DLL SHA-256：`01E15F63CE7E4B1B0B02A42F27C69B3D30EF8CE355DB0D13A0B53CE1B220B1AC`；覆盖前 preview.21 DLL 备份于 `OPFStrategyV1/bin/deployment-backups/before-preview.22-20261125-150111/`。IntradayEntryTests 277 项、LiveProtectionFailClosedTests 和 ATAS X Release 构建均通过；运行交易验收仍需确认图表实例版本与重启后事件。
+
 ## 3.0.0-preview.21
 
 修复 `IcebergAbsorptionScalp` 未成交限价入场单在 ATAS X 连接器未按预期执行 IOC 时长期挂单的问题。订单回报为 Active 且仍有未成交数量时，先保留 250ms 的正常成交观察窗口，随后主动撤销未成交余量；部分成交仍沿用现有部分成交保护与紧急平仓流程，保留两根K线兜底清理。新增 `SCALP_IOC_REMAINDER_CANCEL_REQUESTED` 事件，便于从运行日志核对撤单请求。 已部署到 ATAS X Strategies 目录，部署 DLL SHA-256 为 `45FAEF6F6A6A07C56477D6BF9033C3BF44565F8294860FD6B764AE9872EAABBF`；覆盖前 preview.20 DLL 已备份于 `OPFStrategyV1/bin/deployment-backups/before-preview.21-20261125-121111/`。

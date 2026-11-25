@@ -41,6 +41,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         public readonly HashSet<int> EvaluatedBars = new();
         public readonly HashSet<int> OpportunityBars = new();
         public readonly Dictionary<string, int> EvaluationBlocks = new();
+        public readonly Dictionary<int, int> QuoteSpreadTicks = new();
     }
     private readonly Dictionary<string, NativeIcebergEvent> _scalpRefreshes = new();
     private readonly Dictionary<string, ScalpSegment> _scalpIcebergs = new();
@@ -89,10 +90,11 @@ public sealed partial class OpeningPullbackFailureStrategy
         {
             _nextScalpFunnelLog = live.Time.AddMinutes(1);
             var blocks = string.Join(",", totals.EvaluationBlocks.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value}"));
+            var quoteSpreads = string.Join(",", totals.QuoteSpreadTicks.OrderBy(x => x.Key).Select(x => $"{x.Key}:{x.Value}"));
             LogLiveReadinessInfo($"ICEBERG_SCALP_FUNNEL day={GlobexTradingDayKey(live.Time):yyyy-MM-dd} at={live.Time:O} product={Security?.Code} status={status} " +
                 $"barsEvaluated={totals.EvaluatedBars.Count} barsWithIcebergOpportunity={totals.OpportunityBars.Count} " +
                 $"confirmedIds={Volatile.Read(ref totals.ConfirmedIds)} segments={Volatile.Read(ref totals.Segments)} inferredSegments={Volatile.Read(ref totals.InferredSegments)} signals={Volatile.Read(ref totals.Signals)} " +
-                $"iocSubmitted={Volatile.Read(ref totals.Submitted)} entryFilled={Volatile.Read(ref totals.Filled)} evaluationBlocks={blocks}");
+                $"iocSubmitted={Volatile.Read(ref totals.Submitted)} entryFilled={Volatile.Read(ref totals.Filled)} quoteSpreadTicks={quoteSpreads} evaluationBlocks={blocks}");
         }
         return signal;
     }
@@ -146,7 +148,14 @@ public sealed partial class OpeningPullbackFailureStrategy
         if (_pendingIcebergSwitch is not null || ActiveReplayExecutions().Count != 0 || GetCurrentAccountPosition() != 0m)
             return ReportScalpFunnel(live, false, "PositionBusy", opportunity: true);
         var tick = _snapshot.InstrumentProfile.TickSize;
-        if (ScalpQuoteBlock(live.Time, tick, out var bid, out var ask) is { } quoteBlock)
+        var quoteBlock = ScalpQuoteBlock(live.Time, tick, out var bid, out var ask);
+        if (tick > 0m && bid > 0m && ask > bid)
+        {
+            var spreadTicks = (int)Math.Ceiling((ask - bid) / tick);
+            var spreads = ScalpFunnelFor(live.Time).QuoteSpreadTicks;
+            spreads[spreadTicks] = spreads.GetValueOrDefault(spreadTicks) + 1;
+        }
+        if (quoteBlock is not null)
             return ReportScalpFunnel(live, false, quoteBlock, opportunity: true);
         if (IntradayEntryPolicy.ScalpTargetTicks * tick <= _actualCommissionPerContractRoundTrip / _snapshot.InstrumentProfile.PointValue + 2m * tick)
             return ReportScalpFunnel(live, false, "FeeGuard", opportunity: true);

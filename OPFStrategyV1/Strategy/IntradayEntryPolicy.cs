@@ -81,6 +81,11 @@ public static class IntradayEntryPolicy
         return Math.Max(ScalpBreakEvenTriggerTicks * tick, feeOffset + tick) / risk;
     }
 
+    internal static bool ShouldUseProtectBreakEven(bool hasConfiguredPolicy, decimal configuredTriggerR,
+        bool scalpPath, bool useLegacyPolicy, bool executionEligible, bool zoneBirthRunner) =>
+        hasConfiguredPolicy ? configuredTriggerR > 0m :
+        scalpPath || (!useLegacyPolicy && executionEligible && !zoneBirthRunner);
+
     internal static bool ScalpNoProgress(TimeSpan elapsed, decimal mfe, decimal tick) =>
         elapsed >= TimeSpan.FromSeconds(20) && mfe < 3m * tick;
 

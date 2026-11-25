@@ -2,7 +2,7 @@
 
 ATAS X 3.0 迁移预览包含原生图表策略和 OPF X 指标。安装、配置隔离、MCP 权限及验收范围见 [ATAS X 迁移说明](docs/ATAS-X-3.0-preview.md)。
 
-更新：2026-11-25。此仓库同时保留经典 ATAS 与 ATAS X 两条目标。ATAS X 3.0 主线当前源码及磁盘部署为 `OPF_X_3.0.0-preview.21`，重启后需核对运行实例版本；详见 [ATAS X 主线恢复总览](项目恢复总览_继续开发指南.md) 和 [迁移版本记录](docs/ATAS-X-3.0-preview.md)。下方 2.x 表格与规则仅记录经典 ATAS 的历史运行状态，不代表 ATAS X 当前版本。
+更新：2026-11-25。此仓库同时保留经典 ATAS 与 ATAS X 两条目标。ATAS X 3.0 主线当前源码及磁盘部署为 `OPF_X_3.0.0-preview.22`；部署 DLL SHA-256 为 `01E15F63CE7E4B1B0B02A42F27C69B3D30EF8CE355DB0D13A0B53CE1B220B1AC`。ATAS X 已报告策略 DLL 加载 preview.22，但 NQ 面板截图显示的图表实例仍为 preview.21，需在重启/重新加载策略后核对实例版本与运行事件；详见 [ATAS X 主线恢复总览](项目恢复总览_继续开发指南.md) 和 [迁移版本记录](docs/ATAS-X-3.0-preview.md)。下方 2.x 表格与规则仅记录经典 ATAS 的历史运行状态，不代表 ATAS X 当前版本。
 
 | 状态 | 策略全称 | 研究结构 | 执行配置 | 入口/证据 |
 | --- | --- | --- | --- | --- |

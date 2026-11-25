@@ -5559,12 +5559,10 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private static bool UsesProtectBreakEvenV186(TradeSide side, string researchPath)
     {
-        if (TryGetActualExitPolicyV209(side, researchPath, out _, out var breakEvenTriggerR, out _))
-            return breakEvenTriggerR > 0m;
-
-        return !UseLegacyV174StrategyPolicyV204 &&
-            IsExecutionEligiblePath(researchPath) &&
-            !UsesZoneBirthSplitRunnerV172(side, researchPath);
+        var hasConfiguredPolicy = TryGetActualExitPolicyV209(side, researchPath, out _, out var breakEvenTriggerR, out _);
+        return IntradayEntryPolicy.ShouldUseProtectBreakEven(hasConfiguredPolicy, breakEvenTriggerR,
+            researchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath, UseLegacyV174StrategyPolicyV204,
+            IsExecutionEligiblePath(researchPath), UsesZoneBirthSplitRunnerV172(side, researchPath));
     }
 
     private static bool IsDisabledActualPathV209(TradeSide side, string researchPath)

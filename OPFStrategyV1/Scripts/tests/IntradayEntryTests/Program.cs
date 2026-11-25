@@ -125,6 +125,11 @@ Check(updatedBid == (100m, now) && updatedAsk == (100.25m, now) &&
 Check(IntradayEntryPolicy.ScalpBreakEvenTriggerR(2m, .25m, 1.18m, 2m) == .5m &&
     IntradayEntryPolicy.ScalpBreakEvenTriggerR(2m, .25m, 2.5m, 2m) == .75m &&
     IntradayEntryPolicy.ScalpBreakEvenTriggerR(0m, .25m, 1.18m, 2m) == 0m, "scalp fee-protected stop leaves one tick beyond fees");
+Check(IntradayEntryPolicy.ShouldUseProtectBreakEven(false, 0m, true, true, true, false),
+    "scalp break-even remains enabled under the legacy strategy policy");
+Check(!IntradayEntryPolicy.ShouldUseProtectBreakEven(false, 0m, false, true, true, false) &&
+    !IntradayEntryPolicy.ShouldUseProtectBreakEven(true, 0m, true, true, true, false),
+    "legacy policy and explicit zero-trigger exit policies still suppress break-even where configured");
 Check(IntradayEntryPolicy.ScalpNoProgress(TimeSpan.FromSeconds(20), .5m, .25m) &&
     !IntradayEntryPolicy.ScalpNoProgress(TimeSpan.FromSeconds(19), .5m, .25m) &&
     !IntradayEntryPolicy.ScalpNoProgress(TimeSpan.FromSeconds(20), .75m, .25m), "scalp exits only without sufficient post-fill progress");
