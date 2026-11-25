@@ -1,0 +1,81 @@
+PASS quote publication reserve boundary and future timestamp
+PASS structural risk accepts four logged candidates, 50pt boundary, rejects excess and reports correct dollars
+PASS UTC candle without Kind stays live on Beijing host
+PASS UTC live candle
+PASS old Replay candle stays historical
+PASS missing SDK metrics use observed chart reception
+PASS stale SDK reception cannot be hidden by chart fallback
+PASS disconnected feed cannot use chart fallback
+PASS no reception evidence stays unavailable
+PASS simultaneous strategy instances have unique log IDs
+PASS daily trade cap zero remains unlimited after config normalization
+PASS positive daily trade cap remains configured
+PASS default daily trade cap is unlimited
+PASS negative daily trade cap falls back to unlimited default
+PASS history warmup fills VWAP and ATR components
+PASS ES response aligned breakout allowed
+PASS ES response disagrees with long breakout
+PASS ES response disagrees with short breakout
+PASS unsigned gamma concentration maps to put wall for long rejection
+PASS unsigned gamma cannot open long without put-wall mapping
+PASS unsigned gamma concentration maps to call wall for short rejection
+PASS non-breakout path uses ES response as context only
+PASS missing data blocked
+PASS future data blocked
+PASS stale data blocked
+PASS incomplete quote coverage remains evidence, not a hard block
+PASS far strikes no longer block complete ATM and local quotes
+PASS missing ATM pair remains evidence, not a hard block
+PASS wall quote coverage is not the reason a distant wall is blocked
+PASS OC uses local quality without global wall coverage
+PASS observation confirmation preserved
+PASS ES response path allowed
+PASS breakout long close quality is score-only
+PASS breakout short retains the existing 0.65 directional close threshold
+PASS wall rejection requires wall proximity
+PASS expected move expansion allowed
+PASS expected move expansion rejects late extension beyond 110 percent
+PASS structural path uses live ES response without unrelated option quote requirement
+PASS ES price event remains executable without an option model
+PASS new snapshot cannot mask stale underlying observation
+PASS stale option evidence is score-only while ES price event is fresh
+PASS wall proximity does not manufacture touch event
+PASS frozen wall rejection admitted
+PASS gamma concentration alone cannot choose direction
+PASS unmapped gamma crosshold cannot choose direction
+PASS unmapped gamma rejection cannot choose direction
+PASS unsigned gamma cannot use an unrelated expired event
+PASS price-only structural path still needs ES history
+PASS future expected move anchor rejected
+PASS unsigned gamma requires a signed wall mapping
+PASS touched put wall reclaimed allows long
+PASS wall proximity without touch is rejected
+PASS new path cannot use missing response reference
+PASS old reference rejected
+PASS M5 history required
+PASS M5 aligned with flat last minute allowed
+PASS strong M1 reversal blocks M5 long
+PASS old M5 reference rejected
+PASS same-day anchor restored
+PASS prior-day anchor not reused
+PASS future anchor not reused
+PASS expansion against current response rejected
+PASS diffuse exposure does not trigger cluster path
+PASS reported 0DTE expires at Chicago close
+PASS reported live 0DTE remains eligible
+PASS expired 0DTE is rejected at cutoff
+PASS winter DST handled
+PASS Thanksgiving early close
+PASS unknown quarterly expiry not extended
+PASS explicit expiry preserved
+PASS series date uses exchange calendar
+PASS missing ES source is explicit
+PASS Replay preserves price-only context rather than falling back to older option model
+PASS consumer observes updated ES snapshot
+PASS anchor survives file round trip and restart
+PASS Replay excludes future ES context
+PASS Replay without prior history remains blocked
+PASS interrupted archive tail preserves valid evidence
+PASS live publication independent of archive cadence
+PASS 100 concurrent snapshot publications and reads
+PASS stopped ES source cannot keep consumer trading indefinitely

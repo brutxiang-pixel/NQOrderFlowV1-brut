@@ -1,0 +1,48 @@
+  正在确定要还原的项目…
+  所有项目均是最新的，无法还原。
+EXEC : warning : in the working copy of 'OPFStrategyV1/Configs/OPFStrategyV1_actual_execution.default.json', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Configs/OPFStrategyV1_eight_path_auto.json', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Docs/current_8_execution_path_rules.md', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Scripts/tests/FeishuNotificationTests/Program.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Scripts/tests/OptionsProxyGateTests/Program.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/FeishuTradeNotification.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/IntradayEntryPolicy.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/ProfitLockPolicy.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of '椤圭洰鎭㈠鎬昏_缁х画寮€鍙戞寚鍗?md', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+  Backup verified: C:\Users\Administrator\Documents\NQOrderFlowV1-Backups\2026-11-05T01-53-56-163Z-f9442da7 (402 files)
+  OPFStrategyV1 -> C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\bin\Release\net10.0-windows\OPFStrategyV1.dll
+EXEC : warning : in the working copy of 'OPFStrategyV1/Configs/OPFStrategyV1_actual_execution.default.json', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Configs/OPFStrategyV1_eight_path_auto.json', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Docs/current_8_execution_path_rules.md', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Scripts/tests/FeishuNotificationTests/Program.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Scripts/tests/OptionsProxyGateTests/Program.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/FeishuTradeNotification.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/IntradayEntryPolicy.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/ProfitLockPolicy.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of '椤圭洰鎭㈠鎬昏_缁х画寮€鍙戞寚鍗?md', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+  Backup verified: C:\Users\Administrator\Documents\NQOrderFlowV1-Backups\2026-11-05T01-54-00-416Z-0095b77a (402 files)
+
+已成功生成。
+
+EXEC : warning : in the working copy of 'OPFStrategyV1/Configs/OPFStrategyV1_actual_execution.default.json', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Configs/OPFStrategyV1_eight_path_auto.json', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Docs/current_8_execution_path_rules.md', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Scripts/tests/FeishuNotificationTests/Program.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Scripts/tests/OptionsProxyGateTests/Program.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/FeishuTradeNotification.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/IntradayEntryPolicy.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/ProfitLockPolicy.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of '椤圭洰鎭㈠鎬昏_缁х画寮€鍙戞寚鍗?md', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Configs/OPFStrategyV1_actual_execution.default.json', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Configs/OPFStrategyV1_eight_path_auto.json', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Docs/current_8_execution_path_rules.md', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Scripts/tests/FeishuNotificationTests/Program.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Scripts/tests/OptionsProxyGateTests/Program.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/FeishuTradeNotification.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/IntradayEntryPolicy.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of 'OPFStrategyV1/Strategy/ProfitLockPolicy.cs', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+EXEC : warning : in the working copy of '椤圭洰鎭㈠鎬昏_缁х画寮€鍙戞寚鍗?md', LF will be replaced by CRLF the next time Git touches it [C:\Users\Administrator\source\repos\NQOrderFlowV10629\NQOrderFlowV1\OPFStrategyV1\OPFStrategyV1.csproj]
+    18 个警告
+    0 个错误
+
+已用时间 00:00:06.47

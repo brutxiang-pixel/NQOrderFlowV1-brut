@@ -1,0 +1,136 @@
+PASS iceberg cannot time exit before 120 seconds
+PASS iceberg normal pullback above structure remains open
+PASS iceberg no exit without opposite tape
+PASS iceberg meaningful prior progress disables no progress exit
+PASS iceberg failed long structure with opposing flow exits
+PASS iceberg failed short symmetric
+PASS iceberg missing tape cannot force exit
+PASS no synthetic cross-market warmup
+PASS ES NQ five-minute comparison uses same observation window
+PASS cross-market displacement normalized by own range
+PASS temporary blocker remains eligible: OptionsGate:Stale
+PASS temporary blocker remains eligible: OptionsGate:OptionQuotesStale
+PASS temporary blocker remains eligible: ActiveTradeLimit:one,two
+PASS temporary blocker remains eligible: LiveLatencyRecovering:stableMs=1
+PASS temporary blocker remains eligible: SecondaryPrimaryNotActuallyProtectedAtBE
+PASS terminal outcome cannot auto resend: EntrySend
+PASS terminal outcome cannot auto resend: ManualInterventionDetected
+PASS terminal outcome cannot auto resend: ManualAlertOnly
+PASS terminal outcome cannot auto resend: PathDirectionDisabled
+PASS terminal outcome cannot auto resend: OrphanPosition:pos=1
+PASS model level movement cannot manufacture a touch
+PASS price crossing stable level creates event
+PASS stationary price at newly moved model level cannot manufacture touch next tick
+PASS single ES observation cannot confirm level response
+PASS cross hold requires observed persistence
+PASS frozen approach distinguishes rejection from crossing
+PASS level response boundary and expiry
+PASS policy observation cannot retrospectively stop on activation tick
+PASS fixed target continues after protected policy stops
+PASS shadow follows prices beyond alternative exit
+PASS overlap requires direction, event time and structure
+PASS zero time stop is disabled even after bars elapsed
+PASS positive time stop fires at its existing boundary
+PASS observation confirm profit lock policy
+PASS failure reverse profit lock policy
+PASS unknown path has no profit lock policy
+PASS iceberg long stop outside local low with buffer
+PASS iceberg short stop outside local high with buffer
+PASS iceberg volatility floor widens initial risk
+PASS iceberg volatility floor symmetric
+PASS iceberg break even lock and target separated
+PASS all eight paths have monotonic profit lock policy: ObservationConfirm
+PASS all eight paths have monotonic profit lock policy: BreakawayFvg_Qualified
+PASS all eight paths have monotonic profit lock policy: FailureReverse_ObservationInvalidated_WideStop1_5R
+PASS all eight paths have monotonic profit lock policy: FailureReverse_RetestFailed
+PASS all eight paths have monotonic profit lock policy: ESResponseAlignedBreakout
+PASS all eight paths have monotonic profit lock policy: ESWallRejectionReversal
+PASS all eight paths have monotonic profit lock policy: ESExpectedMoveExpansion
+PASS all eight paths have monotonic profit lock policy: ESGammaConcentrationResponse
+PASS live archive uses actual fill timestamp instead of bar opening
+PASS invalid stale live fill uses callback reception
+PASS Replay never imports wall clock fill timestamp
+PASS Replay reconciliation uses replay market clock
+PASS daily as-of excludes future/incomplete session
+PASS 120 complete daily sessions SMA
+PASS 119 sessions cannot pretend SMA120 exists
+PASS SMA10 uses trailing completed sessions
+PASS long real-time break hold and tape confirmation
+PASS short symmetric confirmation
+PASS single tick is not sustained reaction
+PASS late chase rejected
+PASS stop invalidation takes precedence
+PASS expiry invalidates candidate
+PASS opposite tape cannot confirm long
+PASS iceberg flat clean admission
+PASS independent same-side slot at risk boundary
+PASS combined risk above cap blocked
+PASS opposite iceberg waits for confirmed flatten
+PASS flat with old protection cannot re-enter
+PASS naked primary cannot add slot
+PASS only one iceberg slot
+PASS two-contract maximum
+PASS shadow stop cannot fill retroactively
+PASS shadow stop uses next observed price including gaps
+PASS short shadow profit lock follows observation order
+PASS cross-product OCO isolation
+PASS cross-instance OCO isolation
+PASS event persists across five minute boundary
+PASS event expires or invalidates
+PASS wide stop must wait for retest
+PASS short retest reduces structural risk without tightening stop
+PASS stopped breakout waits for a strictly newer ES five-minute reference
+PASS long profit lock covers fees plus one tick
+PASS short profit lock covers fees plus one tick
+PASS long retest symmetric
+PASS paired NQ late short rejected
+PASS long late chase symmetric
+PASS risk expansion without price chase rejected
+PASS near-anchor entry remains eligible
+PASS retest near original anchor remains eligible
+PASS one independent evidence axis uses base size
+PASS two orthogonal evidence axes increase size
+PASS three orthogonal evidence axes reach three-contract tier
+PASS configured per-product cap bounds evidence tier
+PASS NQ contract suffix cap is one
+PASS MNQ cap is two with case insensitive suffix
+PASS NQ strongest evidence cannot exceed one
+PASS MNQ strongest evidence cannot exceed two
+PASS final NQ submission clamps to one
+PASS final MNQ submission clamps to two
+PASS NQ second slot cannot exceed held cap
+PASS MNQ second slot uses remaining single contract
+PASS legacy over-cap position cannot add
+PASS first strategy claims physical event
+PASS same account and event cannot submit twice
+PASS aborted preflight releases event claim for later attempt
+PASS Replay and live events are isolated
+PASS other accounts are isolated
+PASS replay excludes event not captured yet
+PASS replay exposes native event as of capture
+PASS old native event cannot trigger stale entry
+PASS native event update and exhaustion preserved on round trip
+PASS same account contract and mode restores PnL
+PASS other account PnL excluded
+PASS NQ cannot import MNQ PnL
+PASS Replay cannot import live PnL
+PASS legacy unscoped rows not silently summed
+PASS unknown account not treated as shared scope
+PASS entry candle extremes are excluded from protection observation
+PASS post-fill tick updates protection observation
+PASS out-of-order tick cannot contaminate protection observation
+PASS fully post-fill bar updates protection observation
+PASS declining context marks long counter-trend
+PASS long waits for structure break
+PASS long break arms retest
+PASS long retest alone is insufficient
+PASS long reclaim must persist
+PASS long break retest reclaim confirms
+PASS short waits for structure break
+PASS short break arms retest
+PASS short retest alone is insufficient
+PASS short reclaim must persist
+PASS short break retest reclaim confirms
+PASS aligned trend response keeps prior entry flow
+PASS observed 28409 MFE cannot reach 0.75R trigger at 28411.75
+PASS short entry-bar pre-fill low cannot trigger protective movement

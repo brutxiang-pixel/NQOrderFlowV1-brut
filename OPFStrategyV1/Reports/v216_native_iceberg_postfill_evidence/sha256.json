@@ -1,0 +1,14 @@
+[
+  {
+    "file": "OPFStrategyV1.csproj",
+    "sha256": "2a34776337837275adf7587246922b5afca0c4017844564debee08de2535c353"
+  },
+  {
+    "file": "OPFStrategyV1.dll",
+    "sha256": "06a9e1b26c4e55c8c428d0fdd6c92a9dc6b102ccf411880a7dcc4e6c0c221876"
+  },
+  {
+    "file": "OPFStrategyV1.pre-change.dll",
+    "sha256": "d8114eef0bf65c12b811304418f2b3c8935d876e5e9ea686af272191b214d973"
+  }
+]

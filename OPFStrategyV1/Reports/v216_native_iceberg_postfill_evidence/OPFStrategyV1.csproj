@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ATASPlatformDir>$(MSBuildProgramFiles32)\ATAS Platform</ATASPlatformDir>
+    <NoWarn>$(NoWarn);MSB3277</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Models\opf_v197_knn_shadow_model.json.gz" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Scripts\tests\**\*.cs;outputs\**\*.cs;work\**\*.cs;tools\**\*.cs" />
+    <None Remove="Scripts\tests\**\bin\**;Scripts\tests\**\obj\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="OFT.Platform.Core">
+      <HintPath>$(ATASPlatformDir)\OFT.Platform.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ATAS.DataFeedsCore">
+      <HintPath>$(ATASPlatformDir)\ATAS.DataFeedsCore.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ATAS.Indicators">
+      <HintPath>$(ATASPlatformDir)\ATAS.Indicators.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="ATAS.Strategies">
+      <HintPath>$(ATASPlatformDir)\ATAS.Strategies.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="OFT.Rendering">
+      <HintPath>$(ATASPlatformDir)\OFT.Rendering.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Utils.Common">
+      <HintPath>$(ATASPlatformDir)\Utils.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+
+  <Target Name="BackupBeforeBuild" BeforeTargets="PrepareForBuild">
+    <Exec Command="node &quot;$(MSBuildProjectDirectory)\..\tools\Backup\snapshot.cjs&quot; before-build" />
+  </Target>
+  <Target Name="BackupBeforeDeploy" BeforeTargets="CopyToATAS" Condition="'$(DeployToATAS)' == 'true'">
+    <Exec Command="node &quot;$(MSBuildProjectDirectory)\..\tools\Backup\snapshot.cjs&quot; before-deploy" />
+  </Target>
+  <Target Name="CopyToATAS" AfterTargets="Build" Condition="'$(DeployToATAS)' == 'true'">
+    <Copy SourceFiles="$(TargetPath)"
+          DestinationFolder="$(APPDATA)\ATAS\Strategies"
+          OverwriteReadOnlyFiles="true" />
+  </Target>
+</Project>

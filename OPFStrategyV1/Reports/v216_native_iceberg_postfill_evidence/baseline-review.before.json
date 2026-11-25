@@ -1,0 +1,25 @@
+{
+  "baseline": "rose-goal-v1",
+  "candidate": "OPF_INTRADAY_2.16",
+  "stage": "before-research",
+  "tradingBehaviorChanged": true,
+  "checks": {
+    "failureContext": "原项目NativeIceberg路径，非Rose项目；用户批准成交后保护修复、逆势确认、同向失败重建。",
+    "entryAlternatives": "顺势保留2秒响应与10秒方向成交量比>=0.15；逆势新增突破-回踩-再离开。",
+    "pullbackAnchors": "冻结事件前30秒极值；至少5秒背景，净位移反向>=max(4tick,0.1ATR)定义逆势。突破1tick，后续回踩锚点±1tick，至少1秒后顺向离开1tick。失败后锚定失败时30秒极值与入场价的更远处；量化假设。",
+    "exitAttribution": "实际首笔成交后逐笔和完整后续K线；剔除入场K整根高低点。0.75R保护、1.5R目标及原SL不改。",
+    "causalityAndFlow": "冻结事件前背景，分时确认，延迟换向提交再校验。仅实际完成亏损触发失败记录，跨Globex日或实例重启清除。",
+    "singleContractRisk": "数量、风险上限、真实SL/TP不变；不保证跳价保本。",
+    "opportunityAndCosts": "结构等待可减少交易并错过V反；保留30秒有效期及原追价上限。",
+    "goalGap": "NQ工程修复无盈利验证；不能宣称MNQ单手日均200-300美元、净胜率60%目标达成。"
+  },
+  "deviations": [
+    {
+      "change": "NQ原生冰山逆势确认与同向失败后重建",
+      "reason": "连续逆势long亏损及保护观察污染",
+      "tradeoff": "确认更迟、可能错失反转，待Replay验证",
+      "decision": "approved",
+      "userEvidence": "2026-11-05用户：同意你的3点建议，请全部实施"
+    }
+  ]
+}

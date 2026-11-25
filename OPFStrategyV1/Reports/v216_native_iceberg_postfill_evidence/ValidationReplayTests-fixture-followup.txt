@@ -1,0 +1,31 @@
+PASS SDK AccountID stays stable when balance changes
+PASS dynamic description cannot become account identity
+PASS dynamic scope restores stable account
+PASS account prefixes cannot match
+PASS product isolation preserved
+PASS live ledger excluded from Replay
+PASS confirmed platform order restores legacy identity
+PASS other account excluded
+PASS platform evidence cannot invent Replay identity
+PASS unrelated wall time rejected
+PASS ambiguous identity stays unresolved
+PASS ObservationConfirm frozen input round trip
+PASS ObservationConfirm rejects future input
+PASS BreakawayFvg_Qualified frozen input round trip
+PASS BreakawayFvg_Qualified rejects future input
+PASS FailureReverse_ObservationInvalidated_WideStop1_5R frozen input round trip
+PASS FailureReverse_ObservationInvalidated_WideStop1_5R rejects future input
+PASS FailureReverse_RetestFailed frozen input round trip
+PASS FailureReverse_RetestFailed rejects future input
+PASS ESResponseAlignedBreakout frozen input round trip
+PASS ESResponseAlignedBreakout rejects future input
+PASS ESWallRejectionReversal frozen input round trip
+PASS ESWallRejectionReversal rejects future input
+PASS ESExpectedMoveExpansion frozen input round trip
+PASS ESExpectedMoveExpansion rejects future input
+PASS ESGammaConcentrationResponse frozen input round trip
+PASS ESGammaConcentrationResponse rejects unmapped frozen input round trip
+PASS ESGammaConcentrationResponse rejects future input
+PASS production reaction function accepts held flow
+PASS expired reaction rejected
+PASS flow rejection replay
