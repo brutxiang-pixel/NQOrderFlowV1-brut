@@ -4,10 +4,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <UseWindowsForms>true</UseWindowsForms>
-    <ATASXDir>C:\Program Files\ATAS X</ATASXDir>
+    <ATASXDir Condition="'$(BuildForATASClassic)' != 'true'">C:\Program Files\ATAS X</ATASXDir>
     <AssemblyName>OPFIndicatorX</AssemblyName>
     <Version>3.0.0-preview.1</Version>
     <RootNamespace>OPFIndicatorX</RootNamespace>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(BuildForATASClassic)' == 'true'">
+    <ATASXDir>$(ATASPlatformDir)</ATASXDir>
+    <UseWPF>true</UseWPF>
+    <DefineConstants>$(DefineConstants);OPF_ATAS_CLASSIC</DefineConstants>
+    <OutputPath>bin\Classic\$(Configuration)\</OutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="ATAS.DataFeedsCore" Version="8.0.15.645">
@@ -47,7 +53,7 @@
       <Private>false</Private>
     </Reference>
   </ItemGroup>
-  <Target Name="CopyToATASX" AfterTargets="Build" Condition="'$(DeployToATASX)' == 'true'">
+  <Target Name="CopyToATASX" AfterTargets="Build" Condition="'$(DeployToATASX)' == 'true' and '$(BuildForATASClassic)' != 'true'">
     <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(APPDATA)\ATAS X\Indicators" OverwriteReadOnlyFiles="true" Condition="Exists('$(APPDATA)\ATAS X\Indicators')" />
   </Target>
 </Project>

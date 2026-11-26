@@ -98,7 +98,8 @@ Console.WriteLine($"PASS emergency-flatten residual race cases={residualCases.Le
 
 System.Runtime.Loader.AssemblyLoadContext.Default.Resolving += (context, name) =>
 {
-    var path = System.IO.Path.Combine(@"D:\Program Files (x86)\ATAS Platform", name.Name + ".dll");
+    var sdk = Environment.GetEnvironmentVariable("OPF_TEST_ATAS_SDK") ?? @"D:\Program Files (x86)\ATAS Platform";
+    var path = System.IO.Path.Combine(sdk, name.Name + ".dll");
     return System.IO.File.Exists(path) ? context.LoadFromAssemblyPath(path) : null;
 };
 VerifyIcebergSplitLifecycle();

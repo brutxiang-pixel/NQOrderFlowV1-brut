@@ -10,11 +10,9 @@ namespace OPFStrategyV1.Strategy;
 public sealed partial class OpeningPullbackFailureStrategy
 {
     private sealed record IcebergEvent(string Instrument, long Id, DateTime Time, decimal Price, TradeSide Side, decimal Hidden, decimal Filled, bool Deleted);
-#if OPF_ATAS_X
     private sealed record MboSweepEvidence(DateTime Time, decimal Price, decimal Volume, decimal PriceRange, int PriceLevels, int TradeCount, ATAS.DataFeedsCore.TradeDirection Direction);
     private readonly ConcurrentQueue<MboSweepEvidence> _mboSweepUpdates = new();
     private readonly List<MboSweepEvidence> _recentMboSweeps = [];
-#endif
     private sealed record IcebergSwitch(CandidateSignal Signal, decimal Stop, decimal Price, DateTime Expires, string EventKey);
     private static readonly ConcurrentDictionary<string, IcebergEvent> NativeIcebergBus = new();
     private IMboAnalyticsDataProvider? _nativeMboProvider;
@@ -225,10 +223,8 @@ public sealed partial class OpeningPullbackFailureStrategy
         _nativeIcebergStructureDay = default;
         _nativeIcebergReplayDay = default;
         while (_nativeIcebergUpdates.TryDequeue(out _)) { }
-#if OPF_ATAS_X
         while (_mboSweepUpdates.TryDequeue(out _)) { }
         _recentMboSweeps.Clear();
-#endif
         try
         {
             if (DataProvider is null || !DataProvider.TryGetMboAnalyticsDataProvider(out _nativeMboProvider))
@@ -240,9 +236,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             foreach (var record in _nativeMboProvider!.GetMboIcebergs(DateTime.UtcNow.AddDays(-1), DateTime.UtcNow))
                 if (record.NativeRefreshConfirmed && record.Hidden > 0m) _nativeIcebergHistory.Add(record.OrderId);
             _nativeMboProvider!.MboIcebergsChanged += OnNativeIcebergsChanged;
-#if OPF_ATAS_X
             _nativeMboProvider.MboAnnotatedTradesEmitted += OnNativeMboAnnotatedTrades;
-#endif
             _ = SubscribeNativeIcebergAsync();
         }
         catch (Exception ex)
@@ -281,9 +275,7 @@ public sealed partial class OpeningPullbackFailureStrategy
         if (_nativeMboProvider is not null)
         {
             _nativeMboProvider.MboIcebergsChanged -= OnNativeIcebergsChanged;
-#if OPF_ATAS_X
             _nativeMboProvider.MboAnnotatedTradesEmitted -= OnNativeMboAnnotatedTrades;
-#endif
             _nativeMboProvider.UnsubscribeMboAnalyticsData();
             _nativeMboProvider = null;
         }
@@ -319,7 +311,6 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
     }
 
-#if OPF_ATAS_X
     private void OnNativeMboAnnotatedTrades(IReadOnlyList<MboAnnotatedTrade> trades)
     {
         foreach (var trade in trades)
@@ -333,7 +324,6 @@ public sealed partial class OpeningPullbackFailureStrategy
                 trade.AggressorTradeCount, trade.Direction));
         }
     }
-#endif
 
     private static string IcebergContract(string instrument) => instrument.StartsWith("MNQ", StringComparison.OrdinalIgnoreCase)
         ? instrument[1..] : instrument.StartsWith("MES", StringComparison.OrdinalIgnoreCase) ? instrument[1..] : instrument;
@@ -367,10 +357,8 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
         while (_nativeIcebergUpdates.TryDequeue(out var update)) _nativeIcebergs[update.Instrument + "|" + update.Id] = update;
         if (EvaluateIcebergAbsorptionScalp(live)) return;
-#if OPF_ATAS_X
         while (_mboSweepUpdates.TryDequeue(out var sweep)) _recentMboSweeps.Add(sweep);
         _recentMboSweeps.RemoveAll(x => live.Time < x.Time || live.Time - x.Time > TimeSpan.FromSeconds(10));
-#endif
         if (IsHistoricalReplayTime(live.Time))
         {
             if (_nativeIcebergReplayDay != live.Time.Date)
@@ -451,7 +439,6 @@ public sealed partial class OpeningPullbackFailureStrategy
                 continue;
             }
             var structure = _nativeIcebergStructures[pair.Key];
-#if OPF_ATAS_X
             var nearestSweep = _recentMboSweeps
                 .Where(x => x.Time <= live.Time && live.Time - x.Time <= TimeSpan.FromSeconds(10) &&
                     Math.Abs(x.Price - item.Price) <= Math.Max(tick * 8m, CalculateAtr14(live) * .2m))
@@ -461,7 +448,6 @@ public sealed partial class OpeningPullbackFailureStrategy
                 (item.Side == TradeSide.Long
                     ? nearestSweep.Direction == ATAS.DataFeedsCore.TradeDirection.Buy
                     : nearestSweep.Direction == ATAS.DataFeedsCore.TradeDirection.Sell);
-#endif
             var stop = IntradayEntryPolicy.IcebergStructuralStop(item.Side == TradeSide.Long, live.Close, item.Price,
                 structure.FrozenLow, structure.FrozenHigh, structure.FrozenAtr, tick);
             var risk = Math.Abs(live.Close - stop);
@@ -488,9 +474,7 @@ public sealed partial class OpeningPullbackFailureStrategy
                 {
                     new ScoreComponent("NqNativeIceberg", $"hidden={item.Hidden}|filled={item.Filled}|source={item.Instrument}", true, 100m, 100m, "NativeMboOnly"),
                     new ScoreComponent("NqLocalOrderFlow", $"signed={signedVolume:0.##}|volume={volume:0.##}|ratio={tapeRatio:0.000}", true, 100m, 100m, "10sTape"),
-#if OPF_ATAS_X
                     new ScoreComponent("NativeMboSweep", nearestSweep is null ? "none" : $"side={nearestSweep.Direction}|qty={nearestSweep.Volume:0.##}|levels={nearestSweep.PriceLevels}|range={nearestSweep.PriceRange:0.##}|trades={nearestSweep.TradeCount}|aligned={sweepAligned}", nearestSweep is not null, sweepAligned ? 100m : 0m, sweepAligned ? 100m : 0m, "MboAnnotatedTradesEmitted"),
-#endif
                     new ScoreComponent("EsOptionsContext", $"status={es.Status}|coverage={es.Coverage:0.000}|captured={es.CapturedAtUtc:O}", optionContext, optionContext ? 100m : 0m, optionContext ? 100m : 0m, "OptionalSizingEvidence"),
                     new ScoreComponent("EsPriceReaction", $"current={es.UnderlyingPrice}|m1={es.UnderlyingPrice60sAgo}", esReaction, esReaction ? 100m : 0m, esReaction ? 100m : 0m, "OptionalSizingEvidence")
                 });
@@ -501,10 +485,8 @@ public sealed partial class OpeningPullbackFailureStrategy
             signal = signal with { SkipReasons = signal.SkipReasons.Concat(new[] { $"ICE_EXIT_STRUCTURE:{exitStructure.ToString(System.Globalization.CultureInfo.InvariantCulture)}" }).ToArray() };
             _researchLogger?.AppendSignal(signal);
             var sweepDetail = string.Empty;
-#if OPF_ATAS_X
             if (nearestSweep is not null)
                 sweepDetail = $" mboSweepAligned={sweepAligned} mboSweepTime={nearestSweep.Time:O} mboSweepLevels={nearestSweep.PriceLevels}";
-#endif
             LogLiveReadinessInfo($"NATIVE_ICEBERG_REACTION event={pair.Key} side={item.Side} price={item.Price} sourceTime={item.Time:O} reactionTime={live.Time:O} hidden={item.Hidden} filled={item.Filled} tapeRatio={tapeRatio:0.000}{sweepDetail} score={evidenceScore}/3 qty={configuredQuantity} esStatus={es.Status}");
             var active = ActiveReplayExecutions();
             if (_manualAlertEnabled) { SubmitNativeIceberg(signal, live, stop, pair.Key); break; }

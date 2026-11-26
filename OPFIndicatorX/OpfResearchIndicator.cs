@@ -1,3 +1,11 @@
+#if OPF_ATAS_CLASSIC
+using System.IO;
+using ChartColor = System.Windows.Media.Color;
+using ChartColors = System.Windows.Media.Colors;
+#else
+using ChartColor = System.Drawing.Color;
+using ChartColors = System.Drawing.Color;
+#endif
 using System.Collections;
 using System.ComponentModel;
 using System.Reflection;
@@ -24,14 +32,19 @@ public sealed class OpfResearchIndicator : Indicator
     private const int MaxZonePairs = 4;
     private const int MaxOptionSubscriptions = 120;
     private static readonly TimeSpan ZoneLookback = TimeSpan.FromDays(14);
-    private readonly ValueDataSeries _probeSeries = CreateSeries("OPF_Close", System.Drawing.Color.DodgerBlue);
-    private readonly ValueDataSeries _callWallSeries = CreateSeries("GEX_CallWall_Resistance", System.Drawing.Color.IndianRed);
-    private readonly ValueDataSeries _putWallSeries = CreateSeries("GEX_PutWall_Support", System.Drawing.Color.LimeGreen);
-    private readonly ValueDataSeries _zeroGammaSeries = CreateSeries("GEX_ZeroGamma_Regime", System.Drawing.Color.MediumPurple);
-    private readonly ValueDataSeries _volatilityTriggerSeries = CreateSeries("GEX_VolatilityTrigger", System.Drawing.Color.DarkOrange);
+#if OPF_ATAS_CLASSIC
+    private const string PlatformDataDirectory = "ATAS";
+#else
+    private const string PlatformDataDirectory = "ATAS X";
+#endif
+    private readonly ValueDataSeries _probeSeries = CreateSeries("OPF_Close", ChartColors.DodgerBlue);
+    private readonly ValueDataSeries _callWallSeries = CreateSeries("GEX_CallWall_Resistance", ChartColors.IndianRed);
+    private readonly ValueDataSeries _putWallSeries = CreateSeries("GEX_PutWall_Support", ChartColors.LimeGreen);
+    private readonly ValueDataSeries _zeroGammaSeries = CreateSeries("GEX_ZeroGamma_Regime", ChartColors.MediumPurple);
+    private readonly ValueDataSeries _volatilityTriggerSeries = CreateSeries("GEX_VolatilityTrigger", ChartColors.DarkOrange);
     private readonly RangeDataSeries[] _zoneSeries = CreateZoneSeries();
-    private readonly ValueDataSeries _bidIcebergs = CreateSeries("Native_Buy_Iceberg", System.Drawing.Color.LimeGreen);
-    private readonly ValueDataSeries _askIcebergs = CreateSeries("Native_Sell_Iceberg", System.Drawing.Color.OrangeRed);
+    private readonly ValueDataSeries _bidIcebergs = CreateSeries("Native_Buy_Iceberg", ChartColors.LimeGreen);
+    private readonly ValueDataSeries _askIcebergs = CreateSeries("Native_Sell_Iceberg", ChartColors.OrangeRed);
     private readonly object _icebergSync = new();
     private (long Time, decimal Price) _bidIceberg, _askIceberg;
     private readonly Dictionary<string, decimal> _gexLevels = new(StringComparer.OrdinalIgnoreCase);
@@ -119,7 +132,7 @@ public sealed class OpfResearchIndicator : Indicator
             return;
         _lastGexStatusText = text;
         _lastGexStatusUtc = DateTime.UtcNow;
-        DataProvider.AddAlert("OPF_X_GEX_STATUS", text, "OPF X Research / GEX", System.Drawing.Color.White, System.Drawing.Color.DarkSlateBlue, null);
+        DataProvider.AddAlert("OPF_X_GEX_STATUS", text, "OPF X Research / GEX", ChartColors.White, ChartColors.DarkSlateBlue, null);
     }
 
     private void PublishIcebergStatus(string text)
@@ -127,7 +140,7 @@ public sealed class OpfResearchIndicator : Indicator
         if (_icebergStatusAlerted || DataProvider is null)
             return;
         _icebergStatusAlerted = true;
-        DataProvider.AddAlert("OPF_X_ICEBERG_STATUS", text, "OPF X Research / GEX", System.Drawing.Color.White, System.Drawing.Color.DarkSlateBlue, null);
+        DataProvider.AddAlert("OPF_X_ICEBERG_STATUS", text, "OPF X Research / GEX", ChartColors.White, ChartColors.DarkSlateBlue, null);
     }
 
     private void OnMboIcebergsChanged(IReadOnlyList<MboIcebergRecord> records)
@@ -153,7 +166,7 @@ public sealed class OpfResearchIndicator : Indicator
         if (iceberg is null || DataProvider is null)
             return;
         _lastIcebergAlertUtc = now;
-        DataProvider.AddAlert("OPF_X_ICEBERG", $"ICEBERG CONFIRMED\nSIDE: {iceberg.Side}\nPRICE: {iceberg.Price:0.##}\nFILLED: {iceberg.Filled:0.##}\nHIDDEN: {iceberg.Hidden:0.##}", "OPF X Research / GEX", System.Drawing.Color.White, System.Drawing.Color.DarkSlateBlue, null);
+        DataProvider.AddAlert("OPF_X_ICEBERG", $"ICEBERG CONFIRMED\nSIDE: {iceberg.Side}\nPRICE: {iceberg.Price:0.##}\nFILLED: {iceberg.Filled:0.##}\nHIDDEN: {iceberg.Hidden:0.##}", "OPF X Research / GEX", ChartColors.White, ChartColors.DarkSlateBlue, null);
     }
 
     protected override void OnCalculate(int bar, decimal value)
@@ -621,7 +634,7 @@ public sealed class OpfResearchIndicator : Indicator
     {
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ATAS X", "StrategyState", "OPFStrategyV1");
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), PlatformDataDirectory, "StrategyState", "OPFStrategyV1");
             Directory.CreateDirectory(dir);
             var types = profiles.GroupBy(x => x.Type ?? "null").Select(g => g.Key + "=" + g.Count());
             var nq = profiles.Where(x =>
@@ -801,7 +814,7 @@ public sealed class OpfResearchIndicator : Indicator
     {
         try
         {
-            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ATAS X", "StrategyState", "OPFStrategyV1");
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), PlatformDataDirectory, "StrategyState", "OPFStrategyV1");
             Directory.CreateDirectory(dir);
             var lines = options.Take(20).Select(x =>
                 $"root={root} type={x.Type} code={x.Code} id={x.SecurityId} inst={x.Instrument} strike={x.StrikePrice} opt={x.OptionType} exp={x.Expiration:yyyy-MM-dd}");
@@ -1098,25 +1111,25 @@ public sealed class OpfResearchIndicator : Indicator
         }
     }
 
-    private static ValueDataSeries CreateSeries(string name, System.Drawing.Color color) => new(name) { Color = color, Width = 2 };
+    private static ValueDataSeries CreateSeries(string name, ChartColor color) => new(name) { Color = color, Width = 2 };
 
     private static void ApplyZoneAppearance(RangeDataSeries series, decimal low, decimal high, decimal price)
     {
-        System.Drawing.Color fill;
+        ChartColor fill;
         System.Drawing.Color border;
         if (high < price)
         {
-            fill = System.Drawing.Color.FromArgb(55, 46, 160, 80);
+            fill = ChartColor.FromArgb(55, 46, 160, 80);
             border = System.Drawing.Color.FromArgb(200, 40, 150, 70);
         }
         else if (low > price)
         {
-            fill = System.Drawing.Color.FromArgb(55, 190, 70, 70);
+            fill = ChartColor.FromArgb(55, 190, 70, 70);
             border = System.Drawing.Color.FromArgb(200, 180, 55, 55);
         }
         else
         {
-            fill = System.Drawing.Color.FromArgb(50, 210, 170, 40);
+            fill = ChartColor.FromArgb(50, 210, 170, 40);
             border = System.Drawing.Color.FromArgb(200, 200, 150, 30);
         }
 
@@ -1127,7 +1140,7 @@ public sealed class OpfResearchIndicator : Indicator
     private static RangeDataSeries[] CreateZoneSeries() => Enumerable.Range(1, MaxZonePairs)
         .Select(i => new RangeDataSeries($"AZone_{i}")
         {
-            RangeColor = System.Drawing.Color.FromArgb(50, 70, 130, 180),
+            RangeColor = ChartColor.FromArgb(50, 70, 130, 180),
             RenderColor = System.Drawing.Color.FromArgb(180, 70, 130, 180),
             ScaleIt = false,
             DrawAbovePrice = false

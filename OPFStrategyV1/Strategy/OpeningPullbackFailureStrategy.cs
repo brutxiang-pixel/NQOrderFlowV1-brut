@@ -27,9 +27,7 @@ using static OPFStrategyV1.Strategy.EntryExitPolicyParameters;
 
 namespace OPFStrategyV1.Strategy;
 
-#if OPF_ATAS_X
 [DisplayName("OpeningPullbackFailureStrategy (" + StrategyVersions.StrategyVersion + ")")]
-#endif
 public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 {
     private static readonly HttpClient FeishuHttpClient = new();
@@ -253,12 +251,10 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         decimal RegimeScore,
         string ZoneType);
 
-#if OPF_ATAS_X
     [Category("OPF Profile")]
     [DisplayName("Strategy Version")]
     [ReadOnly(true)]
     public string BuildVersion => StrategyVersions.StrategyVersion;
-#endif
 
     [Category("OPF Profile")]
     [DisplayName("Instrument Profile")]
@@ -266,11 +262,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     [Category("OPF Profile")]
     [DisplayName("Execution Profile")]
-#if OPF_ATAS_X
     public string ExecutionProfileName { get; set; } = "Auto";
-#else
-    public string ExecutionProfileName { get; set; } = "MNQ_1Contract_Target150_200";
-#endif
 
     [Category("OPF Research")]
     [DisplayName("Enable Research Logging")]
@@ -304,25 +296,16 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     [Category("OPF HUD")]
     [DisplayName("Actual Line Lookback Bars")]
-#if OPF_ATAS_X
     [Browsable(false)]
-#endif
     public int ActualLineLookbackBars { get; set; } = 40;
 
     [Category("OPF HUD")]
     [DisplayName("Actual Max Visible Orders")]
-#if OPF_ATAS_X
     [Browsable(false)]
-#endif
     public int ActualMaxVisibleOrders { get; set; } = 3;
 
-#if OPF_ATAS_X
     private const int HistoricalOrderLookback = 0;
     private const int VisibleOrderLimit = int.MaxValue;
-#else
-    private int HistoricalOrderLookback => ActualLineLookbackBars;
-    private int VisibleOrderLimit => Math.Max(1, ActualMaxVisibleOrders);
-#endif
 
     [Category("OPF Execution")]
     [DisplayName("Enable Actual Orders")]
@@ -443,9 +426,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         _decisionTapeTurnSequence = 0;
         _decisionTapeTurnDirection = 0;
 
-#if OPF_ATAS_X
         var chartAuto = EnableReplayOrders;
-#endif
         EnableReplayOrders = false;
         _snapshot = null;
         ActualExecutionSettings actualExecutionSettings;
@@ -464,10 +445,11 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return;
         }
         ApplyActualExecutionSettings(actualExecutionSettings);
-#if OPF_ATAS_X
         EnableReplayOrders = chartAuto && actualExecutionSettings.ExecutionMode != "Disabled";
-        _manualAlertEnabled = !EnableReplayOrders && actualExecutionSettings.ManualAlertEnabled;
+#if !OPF_ATAS_X
+        EnableReplayOrders &= actualExecutionSettings.EnableActualOrders;
 #endif
+        _manualAlertEnabled = !EnableReplayOrders && actualExecutionSettings.ManualAlertEnabled;
         ApplyRunMode(actualExecutionSettings.RunMode);
         ApplyChartExecutionModeOverride();
         InitializeMicrostructureAudit();
@@ -476,15 +458,9 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         InitializeZoneBehaviorLedger();
         InitializeMarketExecutionTape();
 
-#if OPF_ATAS_X
         var chartRoot = ProfileCatalog.ContractRoot(Security?.Code);
-#else
-        var chartRoot = System.Text.RegularExpressions.Regex.Match(Security?.Code ?? string.Empty,
-            @"^(MNQ|MES|NQ|ES)(?=$|[^A-Z]|[FGHJKMNQUVXZ][0-9])", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Value.ToUpperInvariant();
-#endif
         if (chartRoot.Length > 0) InstrumentProfileName = chartRoot + "_0.1";
         _esOptionsChartRoot = chartRoot;
-#if OPF_ATAS_X
         if (chartRoot.Length == 0) EnableReplayOrders = false;
         var resolvedExecutionProfileName = ResolveExecutionProfileName(actualExecutionSettings);
         var useChartDefault = chartRoot.Length > 0 && (string.Equals(resolvedExecutionProfileName, "Auto", StringComparison.OrdinalIgnoreCase) ||
@@ -492,12 +468,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         var profileSelection = ProfileCatalog.Select(InstrumentProfileName, useChartDefault ? "MNQ_1Contract_Target150_200" : resolvedExecutionProfileName);
         if (useChartDefault)
             profileSelection = profileSelection with { ExecutionProfile = ProfileCatalog.ChartExecutionDefault(profileSelection.InstrumentProfile), RequestedExecutionProfileName = resolvedExecutionProfileName };
-#else
-        var resolvedExecutionProfileName = ResolveExecutionProfileName(actualExecutionSettings);
-        // Phase one: the ES chart supplies options context; only NQ/MNQ charts trade.
-        if (IsEsOptionsSource) EnableReplayOrders = false;
-        var profileSelection = ProfileCatalog.Select(InstrumentProfileName, resolvedExecutionProfileName);
-#endif
         _snapshot = ConfigSnapshot.Create(
             profileSelection,
             actualExecutionConfigPath,
@@ -4107,11 +4077,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     {
         _replayExecutionsByTradeId[execution.TradeId] = execution;
         _recentReplayExecutions.Add(execution);
-#if !OPF_ATAS_X
-        var maxStored = Math.Max(ActualMaxVisibleOrders * 3, 12);
-        if (_recentReplayExecutions.Count > maxStored)
-            _recentReplayExecutions.RemoveRange(0, _recentReplayExecutions.Count - maxStored);
-#endif
     }
 
     private void AppendExecutionDecision(CandidateSignal signal, OpfCandle entryCandle, string decision, string reason, string researchPath, decimal stop, decimal risk, string tradeId = "")
@@ -5332,14 +5297,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             return IntradayEntryPolicy.IsIcebergScalpProduct(_snapshot.InstrumentProfile.Instrument) && risk >= _snapshot.InstrumentProfile.TickSize &&
                 risk <= IntradayEntryPolicy.ScalpMaxRiskTicksFor(_snapshot.InstrumentProfile.Instrument) * _snapshot.InstrumentProfile.TickSize
                 ? Array.Empty<string>() : new[] { "IcebergAbsorptionScalpRiskOutOfRange" };
-#if OPF_ATAS_X
         var chartInstrument = _snapshot.InstrumentProfile;
         if (chartInstrument.Instrument is "ES" or "MES" or "GC" or "MGC")
         {
             if (risk < chartInstrument.MinStopPoints || risk > chartInstrument.MaxRiskPointsHard)
                 return new[] { $"ChartInstrumentRiskOutOfRange:instrument={chartInstrument.Instrument}|risk={risk:0.##}|min={chartInstrument.MinStopPoints:0.##}|max={chartInstrument.MaxRiskPointsHard:0.##}" };
         }
-#endif
         if (researchPath is "NativeIcebergReaction" or "CrossMarketIcebergOrderFlowReaction")
         {
             var quantity = ConfiguredExecutionQuantity;
@@ -8751,14 +8714,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
     private string ResolveFeishuProductCode()
     {
         var code = Security?.Code ?? InstrumentProfileName;
-#if OPF_ATAS_X
         var root = ProfileCatalog.ContractRoot(code);
         return root.Length > 0 ? root : code;
-#else
-        var match = System.Text.RegularExpressions.Regex.Match(
-            code, @"^(MNQ|MES|NQ|ES)", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        return match.Success ? match.Value.ToUpperInvariant() : InstrumentProfileName.Split('_')[0];
-#endif
     }
 
     private bool TryGetFeishuWebhook(out Uri webhook)
@@ -8966,10 +8923,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             LogExecutionInfo($"EXEC_STOP_FLATTEN_UNCONFIRMED trade={execution.TradeId} {reason}");
             AppendExecutionEvent(execution, "STOP_FLATTEN_UNCONFIRMED", "FLATTEN", 0m, Math.Abs(GetCurrentAccountPosition()), reason);
             NotifyLiveIssue($"StopFlattenUnconfirmed:{execution.TradeId}", $"Strategy stopped without a confirmed flatten fill for {execution.TradeId}. AccountPosition={GetCurrentAccountPosition():0.########}. Verify the account and working orders manually.");
-#if OPF_ATAS_X
             if (!execution.HistoricalReplayAtCreation && Connector is { } connector)
                 _ = WatchStoppedExecutionExitAsync(execution, connector);
-#endif
             if (GetCurrentAccountPosition() != 0m)
                 return;
         }
@@ -8987,7 +8942,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         }
     }
 
-#if OPF_ATAS_X
     private async Task WatchStoppedExecutionExitAsync(ReplayExecutionState execution, IDataFeedConnector connector)
     {
         if (_snapshot is not { } snapshot || _researchLogger is not { } logger ||
@@ -9087,7 +9041,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             connector.PositionsChanged -= ObservePosition;
         }
     }
-#endif
 
     private void TryWriteActualResearchOutcomeOnExit(ReplayExecutionState execution, string exitRole)
     {
