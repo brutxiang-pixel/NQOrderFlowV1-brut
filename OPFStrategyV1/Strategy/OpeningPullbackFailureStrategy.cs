@@ -27,7 +27,9 @@ using static OPFStrategyV1.Strategy.EntryExitPolicyParameters;
 
 namespace OPFStrategyV1.Strategy;
 
+#if OPF_ATAS_X
 [DisplayName("OpeningPullbackFailureStrategy (" + StrategyVersions.StrategyVersion + ")")]
+#endif
 public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 {
     private static readonly HttpClient FeishuHttpClient = new();
@@ -251,10 +253,12 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         decimal RegimeScore,
         string ZoneType);
 
+#if OPF_ATAS_X
     [Category("OPF Profile")]
     [DisplayName("Strategy Version")]
     [ReadOnly(true)]
     public string BuildVersion => StrategyVersions.StrategyVersion;
+#endif
 
     [Category("OPF Profile")]
     [DisplayName("Instrument Profile")]
