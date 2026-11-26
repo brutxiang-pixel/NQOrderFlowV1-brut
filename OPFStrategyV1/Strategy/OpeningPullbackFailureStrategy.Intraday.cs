@@ -125,7 +125,7 @@ public sealed partial class OpeningPullbackFailureStrategy
                 trade.Direction == ATAS.Indicators.TradeDirection.Sell ? -trade.Volume : 0m));
             if (EnableMnqIcebergAbsorptionScalp && trade.Time >= _intradayStartedUtc && IntradayEntryPolicy.IsIcebergScalpProduct(Security?.Code) &&
                 trade.Direction is ATAS.Indicators.TradeDirection.Buy or ATAS.Indicators.TradeDirection.Sell)
-                _scalpReplenishment.Trade(trade.Price, trade.Direction == ATAS.Indicators.TradeDirection.Buy, trade.Time, DateTime.UtcNow);
+                _scalpReplenishment.Trade(trade.Price, trade.Direction == ATAS.Indicators.TradeDirection.Buy, trade.Time, DateTime.UtcNow, Security?.Code);
             while (_entryTape.Count > 0 && _entryTape.Peek().Time < trade.Time.AddSeconds(-60)) _entryTape.Dequeue();
         }
     }

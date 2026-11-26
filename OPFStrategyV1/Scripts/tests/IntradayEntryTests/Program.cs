@@ -30,6 +30,20 @@ foreach (bool isLong in new[] { true, false })
     Check(detector.FreshSignals(now.AddSeconds(6)).Length == 0, "inferred refill expires after the reaction window");
     Check(refill is not null && detector.Consume(refill) && !detector.Consume(refill), "inferred candidate is consumed once");
 }
+IcebergReplenishment.Signal? DelayedRefill(string instrument, int matchMs, int latencyMs)
+{
+    var detector = new IcebergReplenishment();
+    DateTime At(int ms) => now.AddMilliseconds(ms);
+    detector.Depth(100m, true, 2m, now, At(latencyMs), instrument);
+    detector.Trade(100m, false, At(50), At(50 + latencyMs), instrument);
+    detector.Trade(100m, false, At(100), At(100 + latencyMs), instrument);
+    detector.Depth(100m, true, 1m, At(100 + matchMs), At(100 + matchMs + latencyMs), instrument);
+    return detector.Depth(100m, true, 2m, At(120 + matchMs), At(120 + matchMs + latencyMs), instrument);
+}
+Check(DelayedRefill("MNQZ6", 350, 1500) is not null && DelayedRefill("MNQZ6", 351, 1500) is null &&
+    DelayedRefill("NQZ6", 500, 1500) is not null && DelayedRefill("NQZ6", 501, 1500) is null &&
+    DelayedRefill("NQZ6", 250, 1501) is null && DelayedRefill("ESZ6", 251, 1000) is null,
+    "refill timing is instrument-specific and delayed market events still expire");
 var oneAttack = new IcebergReplenishment();
 oneAttack.Depth(3619.8m, true, 2m, now, now);
 oneAttack.Trade(3619.8m, false, now.AddMilliseconds(100), now.AddMilliseconds(100));
@@ -74,6 +88,11 @@ Check(IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, reclaimTape) &&
     !IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m,
         reclaimTape.Select((x, i) => i == 1 ? (x.Time, x.Price, 3m, -3m) : x).ToArray()),
     "scalp accepts two reclaim prints with intervening flow and at least 20 percent net active volume");
+var weakerReclaim = reclaimTape.Select((x, i) => i == 1 ? (x.Time, x.Price, 3m, -3m) : x).ToArray();
+Check(IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, weakerReclaim, "NQZ6") &&
+    !IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, weakerReclaim, "MNQZ6") &&
+    !IntradayEntryPolicy.ScalpReclaimReady(true, 100m, .25m, weakerReclaim.Take(1).ToArray(), "NQZ6"),
+    "NQ accepts lighter net reclaim, but still requires two signed reclaim prints");
 Check(IntradayEntryPolicy.IsSameScalpAbsorption(now.AddSeconds(4), now) &&
     !IntradayEntryPolicy.IsSameScalpAbsorption(now.AddSeconds(6), now), "scalp suppresses duplicate evidence within the shared reaction window");
 
@@ -127,7 +146,8 @@ foreach (var side in new[] { 1m, -1m })
         !IntradayEntryPolicy.ScalpRiskReady(isLong, 100m - .25m * side, 100m, .25m, "MNQZ6"), "scalp stop has a six-tick MNQ cap and preserves the NQ cap " + isLong);
 }
 Check(IntradayEntryPolicy.ScalpQuoteReady(100m, 100.5m, now, now, now, .25m, "MNQZ6") &&
-    !IntradayEntryPolicy.ScalpQuoteReady(100m, 100.75m, now, now, now, .25m, "MNQZ6") &&
+    IntradayEntryPolicy.ScalpQuoteReady(100m, 100.75m, now, now, now, .25m, "MNQZ6") &&
+    !IntradayEntryPolicy.ScalpQuoteReady(100m, 101m, now, now, now, .25m, "MNQZ6") &&
     IntradayEntryPolicy.ScalpQuoteReady(100m, 101.25m, now, now, now, .25m, "NQZ6") &&
     !IntradayEntryPolicy.ScalpQuoteReady(100m, 101.5m, now, now, now, .25m, "NQZ6") &&
     IntradayEntryPolicy.ScalpQuoteReady(100m, 100.5m, now, now, now, .25m, "ESZ6") &&

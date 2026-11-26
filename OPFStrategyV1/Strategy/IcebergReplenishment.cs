@@ -16,9 +16,9 @@ internal sealed class IcebergReplenishment
     private DateTime _nextCleanup;
     private long _id;
 
-    internal Signal? Depth(decimal price, bool isLong, decimal size, DateTime time, DateTime received)
+    internal Signal? Depth(decimal price, bool isLong, decimal size, DateTime time, DateTime received, string? instrument = null)
     {
-        if (price <= 0m || size < 0m || !Fresh(time, received)) return null;
+        if (price <= 0m || size < 0m || !Fresh(time, received, instrument)) return null;
         if (received >= _nextCleanup)
         {
             _nextCleanup = received.AddSeconds(5);
@@ -49,7 +49,7 @@ internal sealed class IcebergReplenishment
         else if (size > level.Size)
         {
             if (level.DropTime != default && level.LastTrade != default && level.AttackCount >= 2 &&
-                time - level.FirstTrade <= Window && (level.DropTime - level.LastTrade).Duration() <= TimeSpan.FromMilliseconds(250) &&
+                time - level.FirstTrade <= Window && (level.DropTime - level.LastTrade).Duration() <= RefillMatchWindow(instrument) &&
                 level.Candidate is null)
             {
                 level.RefilledAt = time;
@@ -62,9 +62,9 @@ internal sealed class IcebergReplenishment
         return created;
     }
 
-    internal void Trade(decimal price, bool aggressiveBuy, DateTime time, DateTime received)
+    internal void Trade(decimal price, bool aggressiveBuy, DateTime time, DateTime received, string? instrument = null)
     {
-        if (price <= 0m || !Fresh(time, received)) return;
+        if (price <= 0m || !Fresh(time, received, instrument)) return;
         foreach (var (key, level) in _levels)
         {
             if (level.FirstTrade == default || time < level.DepthTime || (key.IsLong ? price >= key.Price : price <= key.Price)) continue;
@@ -104,5 +104,15 @@ internal sealed class IcebergReplenishment
 
     internal void Reset() => _levels.Clear();
 
-    private static bool Fresh(DateTime time, DateTime received) => time <= received && received - time <= TimeSpan.FromSeconds(1);
+    private static TimeSpan RefillMatchWindow(string? instrument) => TimeSpan.FromMilliseconds(
+        OPFStrategyV1.Core.Profiles.ProfileCatalog.ContractRoot(instrument) switch
+        {
+            "MNQ" => 350,
+            "NQ" => 500,
+            _ => 250
+        });
+
+    private static bool Fresh(DateTime time, DateTime received, string? instrument) => time <= received &&
+        received - time <= TimeSpan.FromMilliseconds(
+            OPFStrategyV1.Core.Profiles.ProfileCatalog.ContractRoot(instrument) is "MNQ" or "NQ" ? 1500 : 1000);
 }

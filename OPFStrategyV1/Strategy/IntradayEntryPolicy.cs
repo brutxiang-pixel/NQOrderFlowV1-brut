@@ -11,7 +11,7 @@ public static class IntradayEntryPolicy
     internal const int ScalpMaxRiskTicks = 8;
     internal const int ScalpMnqMaxRiskTicks = 6;
     internal const int ScalpDefaultMaxQuoteSpreadTicks = 2;
-    internal const int ScalpMnqMaxQuoteSpreadTicks = 2;
+    internal const int ScalpMnqMaxQuoteSpreadTicks = 3;
     internal const int ScalpNqMaxQuoteSpreadTicks = 5;
     internal const int ScalpBreakEvenTriggerTicks = 4;
     internal const int ScalpTargetTicks = 12;
@@ -27,7 +27,7 @@ public static class IntradayEntryPolicy
 
     internal static decimal? IcebergScalpStop(bool isLong, decimal level, decimal tick, DateTime eventTime,
         DateTime received, DateTime now, IReadOnlyList<(DateTime Time, decimal Price, decimal Volume, decimal Signed)> tape,
-        DateTime attackAfter = default, DateTime? refilledAt = null)
+        DateTime attackAfter = default, DateTime? refilledAt = null, string? instrument = null)
     {
         var age = now - received;
         if (tick <= 0m || eventTime > received || received - eventTime > TimeSpan.FromSeconds(3) ||
@@ -43,7 +43,7 @@ public static class IntradayEntryPolicy
         if (now - last.Time > TimeSpan.FromMilliseconds(750) || side * (last.Price - level) < tick || side * last.Signed <= 0m)
             return null;
         var latest = after.Where(x => x.Time >= last.Time.AddSeconds(-1)).ToArray();
-        if (!ScalpReclaimReady(isLong, level, tick, latest)) return null;
+        if (!ScalpReclaimReady(isLong, level, tick, latest, instrument)) return null;
         var extreme = isLong ? attack.Concat(after).Min(x => x.Price) : attack.Concat(after).Max(x => x.Price);
         return (isLong ? Math.Min(level, extreme) : Math.Max(level, extreme)) - side * tick;
     }
@@ -92,13 +92,14 @@ public static class IntradayEntryPolicy
         (isLong ? entry - stop : stop - entry) >= tick && Math.Abs(entry - stop) <= ScalpMaxRiskTicksFor(instrument) * tick;
 
     internal static bool ScalpReclaimReady(bool isLong, decimal level, decimal tick,
-        IReadOnlyList<(DateTime Time, decimal Price, decimal Volume, decimal Signed)> latest)
+        IReadOnlyList<(DateTime Time, decimal Price, decimal Volume, decimal Signed)> latest, string? instrument = null)
     {
         if (latest.Count == 0 || tick <= 0m) return false;
         var side = isLong ? 1m : -1m;
         var reclaimTrades = latest.Count(x => side * x.Signed > 0m && side * (x.Price - level) >= tick);
         var totalVolume = latest.Sum(x => x.Volume);
-        return reclaimTrades >= 2 && totalVolume > 0m && side * latest.Sum(x => x.Signed) >= totalVolume * .20m;
+        var minimumNetRatio = ProfileCatalog.ContractRoot(instrument) == "NQ" ? .10m : .20m;
+        return reclaimTrades >= 2 && totalVolume > 0m && side * latest.Sum(x => x.Signed) >= totalVolume * minimumNetRatio;
     }
 
     internal static decimal ScalpBreakEvenTriggerR(decimal risk, decimal tick, decimal commission, decimal pointValue)

@@ -112,7 +112,7 @@ public sealed partial class OpeningPullbackFailureStrategy
             !IntradayEntryPolicy.IsIcebergScalpProduct(Security?.Code) || !(depth.IsBid || depth.IsAsk)) return;
         IcebergReplenishment.Signal? signal;
         lock (_intradaySync)
-            signal = _scalpReplenishment.Depth(depth.Price, depth.IsBid, depth.Volume, depth.Time, DateTime.UtcNow);
+            signal = _scalpReplenishment.Depth(depth.Price, depth.IsBid, depth.Volume, depth.Time, DateTime.UtcNow, Security?.Code);
         if (signal is null) return;
         Interlocked.Increment(ref ScalpFunnelFor(signal.ConfirmedAt).InferredSegments);
         LogLiveReadinessInfo($"ICEBERG_SCALP_REPLENISHMENT product={Security?.Code} id={signal.Id} price={signal.Price} side={(signal.IsLong ? "Bid" : "Ask")} attack={signal.AttackTime:O} at={signal.ConfirmedAt:O}");
@@ -174,7 +174,7 @@ public sealed partial class OpeningPullbackFailureStrategy
                 status = "DuplicateAbsorption";
                 continue;
             }
-            var stop = IntradayEntryPolicy.IcebergScalpStop(isLong, price, tick, time, received, live.Time, tape, attackAfter, replenishment?.RefilledAt);
+            var stop = IntradayEntryPolicy.IcebergScalpStop(isLong, price, tick, time, received, live.Time, tape, attackAfter, replenishment?.RefilledAt, _snapshot.InstrumentProfile.Instrument);
             var entry = isLong ? ask : bid;
             if (stop is not { } stopPrice) continue;
             if ((isLong ? bid <= price : ask >= price) || !IntradayEntryPolicy.ScalpRiskReady(isLong, entry, stopPrice, tick, _snapshot.InstrumentProfile.Instrument))
