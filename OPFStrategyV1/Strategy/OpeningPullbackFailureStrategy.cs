@@ -4013,7 +4013,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             .Where(other => !ReferenceEquals(other, execution))
             .Sum(ReservedExecutionQuantity);
         var positionQuantity = Math.Max(Math.Abs(GetCurrentAccountPosition()), otherReservedQuantity);
-#if OPF_ATAS_X
         if (execution.ResearchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath)
         {
             var now = DateTime.UtcNow;
@@ -4029,7 +4028,6 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
                 return;
             }
         }
-#endif
         if (IntradayEntryPolicy.AvailableConfiguredEntryQuantity(ConfiguredExecutionQuantity, execution.Quantity, positionQuantity) < execution.Quantity)
         {
             var reason = $"ConfiguredQuantityLimit:limit={ConfiguredExecutionQuantity}|requested={execution.Quantity}|position={positionQuantity}";
@@ -4083,10 +4081,8 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         }
         LogExecutionInfo($"EXEC_ENTRY_QUOTE_PREFLIGHT_OK trade={execution.TradeId} reference={reference:0.########} bid={quote.Bid:0.########} ask={quote.Ask:0.########} barLag={barLag}");
         AppendExecutionEvent(execution, "ENTRY_QUOTE_PREFLIGHT_OK_V178", "ENTRY", reference, execution.Quantity, $"bid={quote.Bid:0.########}|ask={quote.Ask:0.########}|barLag={barLag}|marketSequence={_decisionTapeMarketSequence}");
-#if OPF_ATAS_X
         if (execution.ResearchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath)
             Interlocked.Increment(ref ScalpFunnelFor(execution.CreatedTime).Submitted);
-#endif
         await OpenOrderAsync(execution.EntryOrder);
     }
 
@@ -4574,9 +4570,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private bool IsReplayExecutionPathEnabled(string researchPath)
     {
-#if OPF_ATAS_X
         if (researchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath) return EnableMnqIcebergAbsorptionScalp && IntradayEntryPolicy.IsIcebergScalpProduct(Security?.Code);
-#endif
         var configured = ReplayExecutionPath.Split(new[] { '|', ',', ';' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return configured.Any(x => x == "*" || string.Equals(x, researchPath, StringComparison.OrdinalIgnoreCase));
     }
@@ -5897,13 +5891,11 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         LogExecutionInfo($"EXEC_MYTRADE trade={tradeId} role={role} price={trade.Price:0.########} volume={trade.Volume:0.########} orderExt={tradeOrder.ExtId} orderState={tradeOrder.State} orderType={tradeOrder.Type} orderDir={tradeOrder.Direction} orderPrice={tradeOrder.Price:0.########} orderTrig={tradeOrder.TriggerPrice:0.########} orderUnfilled={tradeOrder.Unfilled:0.########}");
         AppendExecutionEvent(execution, "MYTRADE", role, trade.Price, trade.Volume, $"orderExt={tradeOrder.ExtId}|orderState={tradeOrder.State}|orderType={tradeOrder.Type}|orderDir={tradeOrder.Direction}|orderPrice={tradeOrder.Price:0.########}|orderTrig={tradeOrder.TriggerPrice:0.########}|orderUnfilled={tradeOrder.Unfilled:0.########}");
 
-#if OPF_ATAS_X
         if (role == "ENTRY" && trade.Volume > 0m && execution.ResearchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath && !execution.ScalpFillCounted)
         {
             execution.ScalpFillCounted = true;
             Interlocked.Increment(ref ScalpFunnelFor(execution.CreatedTime).Filled);
         }
-#endif
         if (execution.ExitCompleted && role == "ENTRY")
         {
             var fillQty = Math.Max(0m, trade.Volume);
@@ -11672,9 +11664,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private sealed class ReplayExecutionState
     {
-#if OPF_ATAS_X
         public bool ScalpFillCounted;
-#endif
         public ReplayExecutionState(
             string tradeId,
             string signalId,

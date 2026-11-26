@@ -73,10 +73,8 @@ public sealed partial class OpeningPullbackFailureStrategy
         lock (_intradaySync)
         {
             _entryTape.Clear();
-#if OPF_ATAS_X
             _scalpReplenishment.Reset();
             _scalpAttempts.Clear();
-#endif
         }
         _completedFrames.Clear();
         _dailyAverages.Clear();
@@ -125,11 +123,9 @@ public sealed partial class OpeningPullbackFailureStrategy
             _lastEntryTradeTime = trade.Time;
             _entryTape.Enqueue((trade.Time, trade.Price, trade.Volume, trade.Direction == ATAS.Indicators.TradeDirection.Buy ? trade.Volume :
                 trade.Direction == ATAS.Indicators.TradeDirection.Sell ? -trade.Volume : 0m));
-#if OPF_ATAS_X
             if (EnableMnqIcebergAbsorptionScalp && trade.Time >= _intradayStartedUtc && IntradayEntryPolicy.IsIcebergScalpProduct(Security?.Code) &&
                 trade.Direction is ATAS.Indicators.TradeDirection.Buy or ATAS.Indicators.TradeDirection.Sell)
                 _scalpReplenishment.Trade(trade.Price, trade.Direction == ATAS.Indicators.TradeDirection.Buy, trade.Time, DateTime.UtcNow);
-#endif
             while (_entryTape.Count > 0 && _entryTape.Peek().Time < trade.Time.AddSeconds(-60)) _entryTape.Dequeue();
         }
     }
@@ -209,10 +205,8 @@ public sealed partial class OpeningPullbackFailureStrategy
         _lastIntradayEvaluation = now;
         var price = value > 0 ? value : raw.Close;
         var live = ToOpfCandle(bar, raw) with { Time = now, Close = price };
-#if OPF_ATAS_X
         foreach (var execution in ActiveReplayExecutions().Where(x => x.ResearchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath))
             ScheduleStaleUnfilledEntryAbortIfNeeded(execution, live);
-#endif
         foreach (var pair in _intradayPairs.Where(x => live.Time >= x.Value.Time &&
             (x.Value.IsLong ? price <= x.Value.Stop : price >= x.Value.Stop)))
             _intradayFalseBreaks.Add(pair.Key);

@@ -6,7 +6,7 @@ public static class StrategyVersions
     public const string StrategyVersion = "OPF_X_3.0.0-preview.24";
     internal const string PlatformDataDirectory = "ATAS X";
 #else
-    public const string StrategyVersion = "OPF_INTRADAY_2.23";
+    public const string StrategyVersion = "OPF_INTRADAY_2.24";
     internal const string PlatformDataDirectory = "ATAS";
 #endif
     public const string ResearchSchemaVersion = "OPF_RESEARCH_2.34";

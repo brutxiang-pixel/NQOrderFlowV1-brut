@@ -30,7 +30,6 @@ public sealed partial class OpeningPullbackFailureStrategy
     private readonly ConcurrentQueue<NativeIcebergEvent> _nativeIcebergArchiveWrites = new();
     private NativeIcebergEvent[] _nativeIcebergReplay = Array.Empty<NativeIcebergEvent>();
     private DateTime _nativeIcebergReplayDay;
-#if OPF_ATAS_X
     [System.ComponentModel.Category("OPF Iceberg")]
     [System.ComponentModel.DisplayName("Enable Iceberg Absorption Scalp")]
     public bool EnableMnqIcebergAbsorptionScalp { get; set; }
@@ -209,17 +208,14 @@ public sealed partial class OpeningPullbackFailureStrategy
         }
         return ReportScalpFunnel(live, false, status, opportunity: true);
     }
-#endif
     private string NativeIcebergArchiveDirectory => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         OPFStrategyV1.Core.Versions.StrategyVersions.PlatformDataDirectory, "StrategyLogs", "OPFStrategyV1", "NativeIcebergArchive");
 
     private void InitializeNativeIceberg()
     {
-#if OPF_ATAS_X
         _scalpIcebergs.Clear();
         _scalpRefreshes.Clear();
         lock (_intradaySync) _scalpBid = _scalpAsk = default;
-#endif
         _nativeIcebergs.Clear();
         _nativeIcebergConsumed.Clear();
         _nativeIcebergHistory.Clear();
@@ -351,10 +347,8 @@ public sealed partial class OpeningPullbackFailureStrategy
         var day = GlobexTradingDayKey(live.Time);
         if (day != _nativeIcebergStructureDay)
         {
-#if OPF_ATAS_X
             _scalpIcebergs.Clear();
             _scalpRefreshes.Clear();
-#endif
             _nativeIcebergStructureDay = day;
             _nativeIcebergStructures.Clear();
             _nativeIcebergFailures.Clear();
@@ -364,18 +358,16 @@ public sealed partial class OpeningPullbackFailureStrategy
             _nativeIcebergStructures.Remove(key);
         while (_nativeIcebergArchiveWrites.TryDequeue(out var archive))
         {
-#if OPF_ATAS_X
             if (GlobexTradingDayKey(archive.CapturedAtUtc) == day &&
                 IntradayEntryPolicy.IsLocalIcebergScalp(Security?.Code ?? "", archive.Instrument))
                 ObserveScalpRefresh(archive);
-#endif
             try { NativeIcebergArchive.Append(NativeIcebergArchiveDirectory, archive); }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             { LogLiveReadinessInfo($"NATIVE_ICEBERG_ARCHIVE_FAILED {ex.GetType().Name}"); }
         }
         while (_nativeIcebergUpdates.TryDequeue(out var update)) _nativeIcebergs[update.Instrument + "|" + update.Id] = update;
-#if OPF_ATAS_X
         if (EvaluateIcebergAbsorptionScalp(live)) return;
+#if OPF_ATAS_X
         while (_mboSweepUpdates.TryDequeue(out var sweep)) _recentMboSweeps.Add(sweep);
         _recentMboSweeps.RemoveAll(x => live.Time < x.Time || live.Time - x.Time > TimeSpan.FromSeconds(10));
 #endif
@@ -432,10 +424,8 @@ public sealed partial class OpeningPullbackFailureStrategy
             var item = pair.Value;
             if (!IsHistoricalReplayTime(live.Time) && item.Time < _intradayStartedUtc) continue;
             if (live.Time < item.Time || live.Time - item.Time > TimeSpan.FromSeconds(90) || item.Deleted || _nativeIcebergConsumed.Contains(pair.Key)) continue;
-#if OPF_ATAS_X
             if (EnableMnqIcebergAbsorptionScalp && _scalpIcebergs.TryGetValue(pair.Key, out var scalpSegment) &&
                 scalpSegment.Event.CapturedAtUtc <= live.Time && live.Time - scalpSegment.Event.CapturedAtUtc <= TimeSpan.FromSeconds(5)) continue;
-#endif
             if (!NativeIcebergStructureReady(pair.Key, item, live)) continue;
             var tick = _snapshot!.InstrumentProfile.TickSize;
             var trigger = item.Price;
