@@ -3690,7 +3690,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         else if (UsesProtectBreakEvenV186(signal.Side, researchPath))
             executeReasons.Add($"ProtectBE1RThen3RV186:triggerR={ProtectBreakEvenTriggerRV186:0.##},targetR={ProtectBreakEvenTargetRV186:0.##}");
         if (!isDeferredContinuation && TryGetActualExitPolicyV209(signal.Side, researchPath, out var policyTargetR, out var policyBreakEvenTriggerR, out var policyTimeStopBars, risk))
-            executeReasons.Add($"ActualExitPolicyV209:targetR={policyTargetR:0.##}|beTriggerR={EsResponseAlignedBreakoutPolicy.BreakEvenTriggerR(XBreakoutProduct, researchPath, policyBreakEvenTriggerR):0.##}|timeStopBars={policyTimeStopBars}");
+            executeReasons.Add($"ActualExitPolicyV209:targetR={policyTargetR:0.##}|beTriggerR={EsResponseAlignedBreakoutPolicy.BreakEvenTriggerR(BreakoutProduct, researchPath, policyBreakEvenTriggerR):0.##}|timeStopBars={policyTimeStopBars}");
         var isObservationFiller = IsObservationConfirmFiller(signal, researchPath);
         if (isObservationFiller)
         {
@@ -4767,7 +4767,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (researchPath == IntradayEntryPolicy.IcebergAbsorptionScalpPath)
             return IntradayEntryPolicy.ScalpMaxRiskTicksFor(_snapshot!.InstrumentProfile.Instrument) * _snapshot.InstrumentProfile.TickSize;
         if (StructureRiskPolicy.Applies(researchPath))
-            return EsResponseAlignedBreakoutPolicy.MaximumInitialRiskPoints(XBreakoutProduct, researchPath, StructureRiskPolicy.MaxPoints);
+            return EsResponseAlignedBreakoutPolicy.MaximumInitialRiskPoints(BreakoutProduct, researchPath, StructureRiskPolicy.MaxPoints);
         if (researchPath is "ESResponseAlignedBreakout" or "ESWallRejectionReversal" or "ESExpectedMoveExpansion" or "ESGammaConcentrationResponse")
             return _snapshot?.InstrumentProfile.MaxRiskPointsHard ?? 25m;
         if (researchPath == "CrossMarketIcebergOrderFlowReaction") return StructureRiskPolicy.MaxPoints;
@@ -5328,7 +5328,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         if (_snapshot is null)
             return Array.Empty<string>();
         var instrument = _snapshot.InstrumentProfile;
-        var product = XBreakoutProduct;
+        var product = BreakoutProduct;
         if (EsResponseAlignedBreakoutPolicy.IsDisabledNqShort(product, researchPath, signal.Side == TradeSide.Long))
             return new[] { "NQESResponseAlignedBreakoutShortDisabledV300Preview12" };
         if (EsResponseAlignedBreakoutPolicy.HasMnqProtection(product, researchPath) &&
@@ -7494,7 +7494,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
 
     private bool IsEntryRiskDriftAccepted(ReplayExecutionState execution, decimal risk)
     {
-        if (IsBreakawayPath(execution.ResearchPath) || EsResponseAlignedBreakoutPolicy.HasMnqProtection(XBreakoutProduct, execution.ResearchPath))
+        if (IsBreakawayPath(execution.ResearchPath) || EsResponseAlignedBreakoutPolicy.HasMnqProtection(BreakoutProduct, execution.ResearchPath))
             return false;
         if (IsObservationConfirmPath(execution.ResearchPath) && execution.Side == TradeSide.Long)
             return false;
@@ -7860,12 +7860,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
         });
     }
 
-    private string XBreakoutProduct =>
-#if OPF_ATAS_X
-        ProfileCatalog.ContractRoot(Security?.Code);
-#else
-        string.Empty;
-#endif
+    private string BreakoutProduct => ProfileCatalog.ContractRoot(Security?.Code);
 
     private decimal ProtectBreakEvenTriggerRFor(ReplayExecutionState execution)
     {
@@ -7876,7 +7871,7 @@ public sealed partial class OpeningPullbackFailureStrategy : ChartStrategy
             ? triggerR
             : ProtectBreakEvenTriggerRV186;
         return EsResponseAlignedBreakoutPolicy.BreakEvenTriggerR(
-            XBreakoutProduct, execution.ResearchPath,
+            BreakoutProduct, execution.ResearchPath,
             configuredTriggerR);
     }
 
